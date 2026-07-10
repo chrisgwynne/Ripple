@@ -1,5 +1,8 @@
 package com.ripple.town.feature.people
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,11 +14,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -84,8 +93,8 @@ fun PeopleScreen(
                 singleLine = true
             )
             Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                PeopleFilter.entries.forEach { f ->
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(PeopleFilter.entries, key = { it.name }) { f ->
                     FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f.label) })
                 }
             }
@@ -93,7 +102,7 @@ fun PeopleScreen(
         if (searchResults.isNotEmpty()) {
             item { SectionTitle("Search results") }
             items(searchResults, key = { "s${it.id}" }) { r ->
-                PersonRow(r, sprites, w) { onOpenResident(r.id) }
+                PersonRow(r, sprites, w, familyOf(w, r)) { onOpenResident(r.id) }
             }
         }
         if (followed != null && filter in listOf(PeopleFilter.ALL, PeopleFilter.FOLLOWED)) {
@@ -103,17 +112,27 @@ fun PeopleScreen(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
                     modifier = Modifier.fillMaxWidth().clickable { onOpenResident(followed.id) }
                 ) {
-                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        PixelAvatar(followed.sprite, sprites, size = 52.dp, pose = poseFor(followed.activity), lifeStage = followed.lifeStage, occupation = followed.occupation)
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text(followed.name, style = MaterialTheme.typography.titleMedium)
+                    Column(Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            PixelAvatar(followed.sprite, sprites, size = 56.dp, pose = poseFor(followed.activity), lifeStage = followed.lifeStage, occupation = followed.occupation)
+                            Spacer(Modifier.width(12.dp))
+                            Column {
+                                Text(followed.name, style = MaterialTheme.typography.titleLarge)
+                                Text(
+                                    "${followed.age} · ${followed.occupation} · ${followed.activity.label}",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                Text(
+                                    "Mood: ${followed.mood.label}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        if (family.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
                             Text(
-                                "${followed.age} · ${followed.occupation} · ${followed.activity.label}",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Text(
-                                "Mood: ${followed.mood.label}",
+                                "Family: " + family.joinToString(", ") { (r, role) -> "${r.firstName} ($role)" },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -124,26 +143,32 @@ fun PeopleScreen(
         }
         if (favourites.isNotEmpty() && filter in listOf(PeopleFilter.ALL, PeopleFilter.FAVOURITES)) {
             item { SectionTitle("Favourites") }
-            items(favourites, key = { "f${it.id}" }) { r -> PersonRow(r, sprites, w) { onOpenResident(r.id) } }
+            items(favourites, key = { "f${it.id}" }) { r ->
+                PersonRow(r, sprites, w, familyOf(w, r)) { onOpenResident(r.id) }
+            }
         }
         if (family.isNotEmpty() && filter in listOf(PeopleFilter.ALL, PeopleFilter.FAMILY)) {
             item { SectionTitle("${followed?.firstName}'s family") }
             items(family, key = { "fam${it.first.id}" }) { (r, role) ->
-                PersonRow(r, sprites, w, subtitle = role) { onOpenResident(r.id) }
+                PersonRow(r, sprites, w, familyOf(w, r), subtitle = role) { onOpenResident(r.id) }
             }
         }
         if (friends.isNotEmpty() && filter in listOf(PeopleFilter.ALL, PeopleFilter.FRIENDS)) {
             item { SectionTitle("${followed?.firstName}'s friends") }
-            items(friends, key = { "fr${it.id}" }) { r -> PersonRow(r, sprites, w) { onOpenResident(r.id) } }
+            items(friends, key = { "fr${it.id}" }) { r ->
+                PersonRow(r, sprites, w, familyOf(w, r)) { onOpenResident(r.id) }
+            }
         }
         if (rivals.isNotEmpty() && filter in listOf(PeopleFilter.ALL, PeopleFilter.FRIENDS)) {
             item { SectionTitle("Frictions") }
-            items(rivals, key = { "rv${it.id}" }) { r -> PersonRow(r, sprites, w) { onOpenResident(r.id) } }
+            items(rivals, key = { "rv${it.id}" }) { r ->
+                PersonRow(r, sprites, w, familyOf(w, r)) { onOpenResident(r.id) }
+            }
         }
         if (discovered.isNotEmpty() && filter in listOf(PeopleFilter.ALL, PeopleFilter.DISCOVERED)) {
             item { SectionTitle("Recently discovered") }
             items(discovered.takeLast(10).reversed(), key = { "d${it.id}" }) { r ->
-                PersonRow(r, sprites, w) { onOpenResident(r.id) }
+                PersonRow(r, sprites, w, familyOf(w, r)) { onOpenResident(r.id) }
             }
         }
         item { Spacer(Modifier.height(24.dp)) }
@@ -160,27 +185,52 @@ private fun PersonRow(
     r: ResidentUi,
     sprites: SpriteProvider,
     world: WorldUi,
+    family: List<Pair<ResidentUi, String>> = emptyList(),
     subtitle: String? = null,
     onClick: () -> Unit
 ) {
-    Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        PixelAvatar(r.sprite, sprites, size = 40.dp, lifeStage = r.lifeStage, occupation = r.occupation)
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text(r.name, style = MaterialTheme.typography.titleSmall)
-            Text(
-                subtitle ?: (if (!r.alive) "Died aged ${r.age}" else if (!r.inTown) "Away" else "${r.age} · ${r.occupation}"),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+    var expanded by remember(r.id) { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            PixelAvatar(r.sprite, sprites, size = 40.dp, lifeStage = r.lifeStage, occupation = r.occupation)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Text(r.name, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    subtitle ?: (if (!r.alive) "Died aged ${r.age}" else if (!r.inTown) "Away" else "${r.age} · ${r.occupation}"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (family.isNotEmpty()) {
+                IconButton(onClick = { expanded = !expanded }) {
+                    Icon(
+                        if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                        contentDescription = if (expanded) "Hide family" else "Show family"
+                    )
+                }
+            }
+            if (r.id == world.followedResidentId) {
+                Text("●", color = MaterialTheme.colorScheme.primary)
+            } else if (r.id in world.favouriteIds) {
+                Text("★", color = MaterialTheme.colorScheme.secondary)
+            }
         }
-        if (r.id == world.followedResidentId) {
-            Text("●", color = MaterialTheme.colorScheme.primary)
-        } else if (r.id in world.favouriteIds) {
-            Text("★", color = MaterialTheme.colorScheme.secondary)
+        if (family.isNotEmpty()) {
+            AnimatedVisibility(visible = expanded, enter = expandVertically(), exit = shrinkVertically()) {
+                Column(Modifier.fillMaxWidth().padding(start = 50.dp, bottom = 8.dp)) {
+                    family.forEach { (member, role) ->
+                        Text(
+                            "$role: ${member.name}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
         }
     }
 }

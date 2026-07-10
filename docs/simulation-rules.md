@@ -334,6 +334,43 @@ death-of-owner heir handoff are separate, still-open backlog items — see
   earned: only pairs that stay closely, persistently matched for a sustained
   stretch cross the threshold — most same-type pairs never do.
 
+## Price drift
+
+Economy v2 slice: "prices that move" — slow, town-wide price inflation/
+deflation, independent of the same-type demand competition owned by
+`BusinessRivalrySystem` above. That system shifts `demand` between competing
+pairs; `PriceDriftSystem.updateDaily` (run daily, straight after
+`BusinessRivalrySystem`) nudges `priceLevel` itself instead, town-wide, one
+business at a time — the two never touch the same field and never
+double-count. No macro "inflation index" exists elsewhere in `WorldState` to
+drive this off aggregate conditions yet, so it's a small bounded random walk
+through `ctx.rng` (never `Math.random()`), matching the shape of every other
+system's dice-roll daily nudge. Bounded to `MAX_BUSINESSES_PER_DAY` (60) open,
+non-public-service businesses per day:
+
+- **Whether a business drifts at all.** Each eligible business independently
+  rolls `DRIFT_CHANCE` (12%) per day — most days, most businesses don't move.
+- **Direction.** A struggling business (`daysInTrouble > 0` or a negative
+  balance) is biased `STRUGGLING_DOWN_BIAS` (75%) to drift its `priceLevel`
+  *down* — discounting to chase trade, the way a real business under pressure
+  would. A prosperous business (balance over `EconomySystem.EXPANSION_BALANCE`,
+  9 000 — the same threshold that already gates business expansion) is biased
+  `PROSPEROUS_UP_BIAS` (65%) to drift *up*. Anything in between is an even
+  50/50 coin flip.
+- **Size and bounds.** Each drift is one `DRIFT_STEP` (0.02, a ~2% nudge),
+  clamped to `PRICE_LEVEL_MIN`/`PRICE_LEVEL_MAX` (0.7–1.4) — the same
+  `priceLevel` field `EconomySystem.hourlyFootfall` already multiplies into
+  spend and `BusinessRivalrySystem.standing` already factors into
+  competition, so this composes with both instead of adding a parallel price
+  concept.
+- **Newsworthiness.** A single day's drift step is too small to matter on its
+  own. A `PRICES_SHIFTED` event (`PUBLIC`) only fires the day a business's
+  cumulative `priceLevel` crosses `NEWSWORTHY_SWING` (0.10 away from the 1.0
+  baseline) for the first time in that direction — a `else -> 8.0`-scored
+  event type in `ImportanceScorer` and folded into `NewspaperGenerator`'s
+  default `StoryCategory.TOWN_NEWS` bucket, so no scoring/newspaper wiring
+  changes were needed for the new type.
+
 ## Crime & suspicion
 
 Motive: poverty. `JOB_LOST` seeds a `CRIME_TEMPTATION` delayed effect

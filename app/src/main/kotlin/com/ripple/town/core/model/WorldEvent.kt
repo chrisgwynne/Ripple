@@ -57,7 +57,8 @@ enum class EventType(val label: String) {
     RUMOUR_SPREAD("Rumour"),
     TOWN_MILESTONE("Town milestone"),
     PETITION_STARTED("Petition started"),
-    PETITION_RESOLVED("Petition resolved")
+    PETITION_RESOLVED("Petition resolved"),
+    PRICES_SHIFTED("Prices shifting")
 }
 
 enum class EventVisibility {

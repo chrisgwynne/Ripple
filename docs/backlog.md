@@ -4,6 +4,69 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-10 — Phase 3: Economy v2 — prices that move (town-wide price drift)
+
+Fourth Phase 3 backlog item, continuing directly off the price-competition-
+and-rivalries slice below: "prices that move" — general, town-wide price
+inflation/deflation, independent of `BusinessRivalrySystem`'s per-pair demand
+competition. Property market and further business succession remain
+deliberately untouched. Another agent was working UI/Compose files
+(`feature/people/*`) in the same checkout, so this was code-only — no
+`./gradlew` or `git` calls made.
+
+- New `PriceDriftSystem.updateDaily`, wired into `SimulationCoordinator`'s
+  `if (newDay)` block right after `BusinessRivalrySystem`, same `object`
+  pattern as every other daily system. Deliberately kept as its own file
+  rather than folded into `EconomySystem` or `BusinessRivalrySystem` — it's a
+  genuinely separate mechanic (town-wide drift vs. per-pair competition) and
+  keeping it separate makes the "these two never double-count" invariant easy
+  to verify by reading either file in isolation.
+  - **Axis separation from rivalries.** `BusinessRivalrySystem` already owns
+    `demand` shifts between competing pairs; this system only ever touches
+    `priceLevel` and never reads or writes `demand`, so the two mechanics
+    compose without conflicting or double-counting the same signal.
+  - **No existing macro driver found.** Checked `WorldState` for any
+    aggregate wealth/employment/seasonal-pressure field that could drive
+    price drift deterministically from macro conditions — none exists yet
+    (no inflation index, no town-wide economic indicator). Rather than invent
+    new `WorldState` fields for a narrow slice, went with the same "small
+    bounded random walk through `ctx.rng`" shape every other system in this
+    codebase already uses for its daily dice rolls (`EconomySystem`'s
+    footfall roll, `SeasonalEventSystem`'s flood chance), so this stays
+    consistent with precedent rather than adding a new kind of mechanic.
+  - **Mechanic**: each open, non-public-service business independently rolls
+    `DRIFT_CHANCE` (12%) per day; when it drifts, the direction is biased —
+    `STRUGGLING_DOWN_BIAS` (75% down) for a business with `daysInTrouble > 0`
+    or a negative balance (discounting to chase trade), `PROSPEROUS_UP_BIAS`
+    (65% up) for one above `EconomySystem.EXPANSION_BALANCE` (9 000, reusing
+    the existing "healthy business" threshold rather than inventing a new
+    one), otherwise a 50/50 coin flip. Step size `DRIFT_STEP` (0.02, ~2%),
+    clamped to `PRICE_LEVEL_MIN`/`PRICE_LEVEL_MAX` (0.7–1.4) on the same
+    `Business.priceLevel` field `EconomySystem.hourlyFootfall` already
+    multiplies into customer spend and `BusinessRivalrySystem.standing`
+    already factors into competition — composes with both existing readers,
+    duplicates neither.
+  - **Newsworthiness**: a single day's 2% step isn't a headline. New
+    `EventType.PRICES_SHIFTED` (`PUBLIC`) fires only the day a business's
+    `priceLevel` first crosses `NEWSWORTHY_SWING` (0.10 from the 1.0
+    baseline) in a given direction — checked `ImportanceScorer.baseImportance`
+    and `NewspaperGenerator.categoryFor`/`headlineFor` first: both have safe
+    `else ->` fallbacks (8.0 base importance; `StoryCategory.TOWN_NEWS`), so
+    adding the new type needed no further wiring in either place.
+  - Bounded to `MAX_BUSINESSES_PER_DAY` (60) businesses/day, matching the
+    "cap processed entities per day" pattern every other daily system uses.
+    All randomness (whether a business drifts, direction, when biased-but-
+    not-certain) goes through `ctx.rng`, never `Math.random()`.
+- Docs: new "Price drift" section in `docs/simulation-rules.md` right after
+  "Business rivalries" (with the actual constants); `docs/backlog.md`'s
+  Economy v2 bullet updated — "prices that move" now marked implemented,
+  property market and business succession still explicitly called out as
+  open.
+
+Not run this session (per the parallel-work constraint): `./gradlew`
+build/test and any `git` commands. Code-only, ready for the orchestrating
+session to build/test/commit.
+
 ### 2026-07-10 — Phase 3: Economy v2 — business price competition & rivalries
 
 Third Phase 3 backlog item, scoped down per the task brief: same-type
@@ -586,6 +649,60 @@ Development order from the brief (status noted inline):
    need real visual iteration against a device to get right. Not visually
    verified on a device/emulator.*
 
+   **People — done 2026-07-10 (blind, no emulator — same risk note as
+   History/News above).** `PeopleScreen.kt` picked up the four things the
+   brief called out by name:
+   - **Search** already existed (an `OutlinedTextField` filtering
+     `w.residents` by name into a "Search results" section) — confirmed
+     present, left as-is, no changes needed here.
+   - **Non-wrapping filter chips.** The brief's own note under History
+     flagged that `PeopleScreen.kt`'s filter row was a plain `Row` and
+     didn't actually satisfy "never wraps" at high chip counts, unlike
+     `HistoryScreen.kt`/`NewsScreen.kt`. Converted it to the same
+     `LazyRow` + `items(PeopleFilter.entries, key = { it.name })` +
+     `FilterChip` pattern those two screens use — copied directly, no new
+     mechanic invented.
+   - **Followed-resident card.** The "Following" card already existed and
+     already read `w.followedResidentId`/`w.resident(...)` (the same
+     `WorldState.followedResidentId` plumbing the town-camera-follow work
+     earlier this session also reads) — reused as-is, no new state. Made it
+     more prominent per the brief: bigger avatar (52dp → 56dp), `titleLarge`
+     name instead of `titleMedium`, and a new one-line family summary
+     ("Family: Alex (Partner), Sam (Child)…") appended under the mood line
+     when the followed resident has any `familyOf(...)` results — composes
+     with the family-tree work below rather than adding a second query.
+   - **Expandable family tree (scoped down deliberately, matching how every
+     other item in this Mobile UI rebuild section has been scoped down):
+     this is a simple expandable text listing, not a graphical tree.** The
+     brief separately lists "Family tree visualisation (proper generational
+     graph)" as its own, larger Phase 2 Product backlog item below — that
+     one was explicitly not attempted here. What was built: `PersonRow`
+     (used by every list section — search results, favourites, family,
+     friends, frictions, discovered) now takes an optional `family` list
+     and, when non-empty, shows a small `ExpandMore`/`ExpandLess`
+     `IconButton` that reveals an indented `Column` of "Role: Name" lines
+     (`AnimatedVisibility` + `expandVertically`/`shrinkVertically`, mirroring
+     the `AnimatedVisibility` pattern already used for the town screen's
+     speed pill and event banners) via a local `remember(r.id) {
+     mutableStateOf(false) }` per row — no new ViewModel state, no new
+     repository calls. The data itself is not new either: `familyOf(world,
+     resident)` already existed in this same file (partner, mother, father,
+     children, siblings-by-shared-parent, deduplicated) and was already
+     used to build the followed resident's own "…'s family" section: it's
+     now also called per-row so every listed resident, not just the
+     followed one, can expand to show their immediate family. Reads
+     `ResidentUi.partnerId/motherId/fatherId/childIds` (`data/
+     WorldSnapshot.kt`), which were already threaded from `Resident` — no
+     `core/simulation` or model changes were needed or made.
+   *Still open: no dedicated relationship-network overlay (also a separate,
+   larger Phase 2 Product item, not attempted); the expandable family
+   section is text-only with no visual tree/graph lines connecting
+   generations — intentionally, per the scoping above; family lookups
+   (`familyOf`) walk one generation each way plus partner/siblings only, the
+   same depth the pre-existing followed-family section already used —
+   grandparents/grandchildren/in-laws are not included; not visually
+   verified on a device/emulator.*
+
 Full acceptance criteria (20 items), palette/typography guidance, and the
 complete asset/animation checklists are in the original brief (session
 transcript, 2026-07-10) — not reproduced in full here to keep this file
@@ -678,13 +795,13 @@ rather than duplicating it wholesale into this doc.
   attempted here.*
 - [~] Economy v2: prices that move, property market (residents actually
   buy/sell homes), business succession and rivalries.
-  *Implemented (price competition + rivalries slice only): `BusinessRivalrySystem`,
-  run daily. Open, same-`BusinessType` business pairs are compared on standing
-  (reputation minus a price-level penalty); the better-standing one gains
-  `demand` and the other loses it, a small daily nudge (`±2.0`,
-  `coerceIn(5.0, 95.0)`) so competing businesses visibly drift apart over
-  weeks rather than swinging dramatically. When a pair's standing stays
-  closely matched (gap ≤ 20), their owners' existing relationship
+  *Implemented (price competition + rivalries + price-drift slices):
+  `BusinessRivalrySystem`, run daily. Open, same-`BusinessType` business pairs
+  are compared on standing (reputation minus a price-level penalty); the
+  better-standing one gains `demand` and the other loses it, a small daily
+  nudge (`±2.0`, `coerceIn(5.0, 95.0)`) so competing businesses visibly drift
+  apart over weeks rather than swinging dramatically. When a pair's standing
+  stays closely matched (gap ≤ 20), their owners' existing relationship
   (`state.relationshipOrCreate`) also drifts daily — resentment `+0.6`,
   affection `−0.3` — and once it crosses the *same* thresholds
   `InteractionSystem.updateKind` uses for personal rivalries (resentment >
@@ -693,12 +810,20 @@ rather than duplicating it wholesale into this doc.
   two business owners may never be co-located to trigger the ordinary
   interaction path). Family/partner/spouse/former-partner/affair relationships
   are never overwritten. See `docs/simulation-rules.md#business-rivalries`.
-  Still open: **prices that move** (general town-wide price inflation/
-  deflation, independent of competition), the **property market** (residents
-  actually buying/selling homes) and further **business succession** work
-  beyond the existing death-of-owner heir handoff (`LifecycleSystem.die`
-  passes a business to an adult heir or partner) — none of these three were
-  attempted here.*
+  **"Prices that move" now also implemented**: new `PriceDriftSystem`, run
+  daily straight after `BusinessRivalrySystem` — slow, town-wide
+  `priceLevel` drift, deliberately kept on a separate axis from rivalry's
+  `demand` shifts so the two mechanics never double-count. Each open,
+  non-public-service business independently rolls a 12% daily chance to
+  drift `priceLevel` by ±0.02, biased down for struggling businesses and up
+  for prosperous ones (balance > `EconomySystem.EXPANSION_BALANCE`),
+  clamped to 0.7–1.4; a new `PRICES_SHIFTED` event fires the day a
+  business's price first crosses 10% away from baseline. See
+  `docs/simulation-rules.md#price-drift`. Still open: the **property
+  market** (residents actually buying/selling homes) and further
+  **business succession** work beyond the existing death-of-owner heir
+  handoff (`LifecycleSystem.die` passes a business to an adult heir or
+  partner) — neither of these two were attempted here.*
 - Multiple towns: `World` already separates from `Town`; add a second map and
   slow migration between towns.
 - Counterfactual viewer ("what nearly happened"): replay a checkpoint with
