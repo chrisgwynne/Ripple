@@ -202,8 +202,118 @@ object LifecycleSystem {
             ctx.beginActivity(m, Activity.MOURNING, 12 * 60, "Grieving for ${r.firstName}")
             ctx.addMemory(m, MemoryType.LOSS, "We lost ${r.firstName}.", 80.0, death.id, listOf(r.id))
         }
+
+        // Generational play: surviving children inherit the deceased's most significant
+        // beliefs (as secondhand family stories) and, sometimes, a small heirloom.
+        passDownBeliefs(ctx, r, death.id)
+        passDownHeirloom(ctx, r, death.id)
+
         ConsequenceEngine.onEvent(ctx, death)
     }
+
+    /** How important a memory's formed belief must be to survive as a family story. */
+    private const val BELIEF_IMPORTANCE_THRESHOLD = 65.0
+
+    /** At most this many of the deceased's beliefs get handed down. */
+    private const val MAX_INHERITED_BELIEFS = 2
+
+    /** Inherited "family story" memories land at roughly this fraction of the original's intensity. */
+    private const val INHERITED_BELIEF_INTENSITY_FACTOR = 0.45
+
+    /** How important a positive memory must be for its owner to leave a physical heirloom behind. */
+    private const val HEIRLOOM_IMPORTANCE_THRESHOLD = 75.0
+
+    private val HEIRLOOM_MEMORY_TYPES = setOf(MemoryType.ACHIEVEMENT, MemoryType.INSPIRATION, MemoryType.ROMANCE)
+
+    /**
+     * The deceased's most significant formed beliefs live on as secondhand family stories:
+     * every surviving child gets a diminished [MemoryType.CHILDHOOD] memory referencing the
+     * deceased, rather than the raw original memory.
+     */
+    private fun passDownBeliefs(ctx: TickContext, deceased: Resident, deathEventId: Long) {
+        val state = ctx.state
+        val survivingChildren = deceased.childIds.mapNotNull { state.resident(it) }
+            .filter { it.alive && it.detailLevel == DetailLevel.DETAILED }
+        if (survivingChildren.isEmpty()) return
+
+        val topBeliefs = deceased.memories
+            .filter { it.beliefFormed != null && it.importance >= BELIEF_IMPORTANCE_THRESHOLD }
+            .sortedWith(compareByDescending<com.ripple.town.core.model.Memory> { it.importance }
+                .thenByDescending { it.emotionalIntensity })
+            .take(MAX_INHERITED_BELIEFS)
+        if (topBeliefs.isEmpty()) return
+
+        for (child in survivingChildren) {
+            for (memory in topBeliefs) {
+                val belief = memory.beliefFormed ?: continue
+                val story = "${deceased.firstName} used to say: \"$belief\"."
+                ctx.addMemory(
+                    child,
+                    MemoryType.CHILDHOOD,
+                    story,
+                    memory.emotionalIntensity * INHERITED_BELIEF_INTENSITY_FACTOR,
+                    deathEventId,
+                    listOf(deceased.id),
+                    belief
+                )
+            }
+        }
+    }
+
+    /**
+     * A resident who died holding onto a high-importance positive memory leaves a small,
+     * lightweight heirloom behind for one heir — an idea seed the goal system can later pick
+     * up on, plus a memory of receiving it.
+     */
+    private fun passDownHeirloom(ctx: TickContext, deceased: Resident, deathEventId: Long) {
+        val state = ctx.state
+        val proudMemory = deceased.memories
+            .filter { it.type in HEIRLOOM_MEMORY_TYPES && it.importance >= HEIRLOOM_IMPORTANCE_THRESHOLD }
+            .maxWithOrNull(compareBy<com.ripple.town.core.model.Memory> { it.importance }
+                .thenBy { it.emotionalIntensity })
+            ?: return
+
+        val heir = deceased.childIds.mapNotNull { state.resident(it) }
+            .filter { it.alive && it.inTown && it.detailLevel == DetailLevel.DETAILED }
+            .let { candidates ->
+                val adults = candidates.filter { it.lifeStageAt(ctx.now) == LifeStage.ADULT }
+                if (adults.isNotEmpty()) ctx.rng.pick(adults) else ctx.rng.pickOrNull(candidates)
+            }
+            ?: deceased.partnerId?.let { state.resident(it) }?.takeIf { it.alive && it.inTown }
+            ?: return
+
+        val item = heirloomItemFor(deceased)
+        heir.ideaSeeds += "heirloom:${deceased.firstName}'s $item"
+        ctx.addMemory(
+            heir,
+            MemoryType.INSPIRATION,
+            "${deceased.firstName} left me ${article(item)} $item.",
+            proudMemory.emotionalIntensity * INHERITED_BELIEF_INTENSITY_FACTOR + 15.0,
+            deathEventId,
+            listOf(deceased.id)
+        )
+    }
+
+    /** Flavour text for a lightweight heirloom, loosely themed to the deceased's trade. */
+    private fun heirloomItemFor(deceased: Resident): String {
+        val bestSkill = deceased.skills.entries.maxByOrNull { it.value }?.key
+        return when (bestSkill) {
+            SkillType.COOKING -> "worn recipe book"
+            SkillType.CARPENTRY -> "well-used toolbox"
+            SkillType.REPAIR -> "old pocket watch"
+            SkillType.TEACHING -> "annotated notebook"
+            SkillType.MEDICINE -> "medical bag"
+            SkillType.BUSINESS -> "ledger and fountain pen"
+            SkillType.POLITICS -> "campaign badge"
+            SkillType.SOCIAL -> "address book"
+            SkillType.FITNESS -> "trophy"
+            SkillType.CREATIVITY -> "sketchbook"
+            null -> "pocket watch"
+        }
+    }
+
+    private fun article(noun: String): String =
+        if (noun.firstOrNull()?.lowercaseChar()?.let { it in "aeiou" } == true) "an" else "a"
 
     // ---------------------------------------------------- promotion/arrival
 

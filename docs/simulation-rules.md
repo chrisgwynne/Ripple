@@ -254,6 +254,25 @@ businesses pass to an adult heir or the partner. Death widows partners,
 shrinks households, and leaves strong memories in everyone warm to the
 deceased.
 
+**Inherited beliefs.** On death, the deceased's memories with `importance ≥
+65` and a formed `beliefFormed` are ranked by importance then intensity; the
+top 2 are handed down to every surviving detailed child as a new
+`CHILDHOOD` memory ("*Name* used to say: \"...\"") at ~45% of the original
+memory's `emotionalIntensity` — a secondhand family story, not the lived
+experience. No belief, no threshold met, or no surviving children means
+nothing is passed down.
+
+**Heirlooms.** If the deceased holds a positive memory (`ACHIEVEMENT`,
+`INSPIRATION` or `ROMANCE`) with `importance ≥ 75`, one heir — an adult
+child if one is in town and detailed (picked via `ctx.rng` if several tie),
+else any surviving detailed child, else the partner — receives a small,
+loosely trade-themed heirloom (e.g. a carpenter's "well-used toolbox", a
+cook's "worn recipe book"). This is deliberately lightweight: no new
+inventory model, just a formatted `"heirloom:<name>'s <item>"` entry on the
+heir's `ideaSeeds` (the same list `GoalSystem` already reads to help trigger
+`START_BUSINESS`) plus an `INSPIRATION` memory recording the gift. Family
+reputation and an "era summary" on death are still open — see the backlog.
+
 ## Health
 
 Conditions: cold, flu, injury, exhaustion, back trouble (chronic), weak heart

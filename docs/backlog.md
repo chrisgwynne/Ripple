@@ -4,6 +4,44 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-10 — Phase 3: generational play — inherited beliefs, heirlooms
+
+Second Phase 3 backlog item, scoped down per the task brief: inherited
+beliefs/trauma and heirlooms only; family reputation and the "era summary"
+growth of the death-of-followed flow deliberately left for a separate pass.
+Another agent was working UI/rendering files (`feature/history/`,
+`feature/news/`) in the same checkout, so this was code-only — no
+`./gradlew` or `git` calls made.
+
+- Extended `LifecycleSystem.die` (no new system file — this is a natural
+  extension of the existing wealth/business inheritance logic right there)
+  with two bounded, deterministic additions, both run once per death:
+  - **`passDownBeliefs`**: ranks the deceased's memories by `importance`
+    then `emotionalIntensity`, keeps those with a non-null `beliefFormed`
+    and `importance ≥ 65`, takes the top 2, and adds each as a new
+    `CHILDHOOD` memory ("*Name* used to say: \"...\"") to every surviving
+    detailed child, at 45% of the original memory's intensity — a
+    secondhand family story, deliberately duller than the lived memory.
+  - **`passDownHeirloom`**: if the deceased holds a positive memory
+    (`ACHIEVEMENT`/`INSPIRATION`/`ROMANCE`) with `importance ≥ 75`, one
+    heir (adult in-town detailed child preferred, tie broken via
+    `ctx.rng.pick`, falling back to any surviving detailed child, then the
+    partner — reusing the same "who inherits" shape as the existing
+    business-inheritance code just above it) gets a small trade-themed
+    heirloom string (e.g. carpenter → "well-used toolbox") appended to
+    their `ideaSeeds` — the same list `GoalSystem` already reads to help
+    trigger `START_BUSINESS` — plus an `INSPIRATION` memory recording the
+    gift. No new inventory data model or UI; this composes with the
+    existing idea-seed → goal-formation pipeline instead of adding a new
+    mechanic.
+- All randomness (heir tie-breaking) goes through `ctx.rng`, never
+  `Math.random()`. No new `Resident`/`WorldState` fields were needed —
+  `ideaSeeds` and `Memory.beliefFormed` already existed for exactly this.
+- Docs: `docs/simulation-rules.md`'s "Family & generations" section gets a
+  new "Inherited beliefs" / "Heirlooms" subsection with the actual
+  thresholds; `docs/backlog.md`'s Phase 3 bullet marked `[~]` with family
+  reputation and "era summary" explicitly called out as still open.
+
 ### 2026-07-10 — Phase 3: local politics — petitions (noise, rents)
 
 First Phase 3 backlog item, scoped down per the task brief: petitions only,
@@ -407,9 +445,49 @@ Development order from the brief (status noted inline):
    newspaper (paper texture, masthead, registers, archive), History as a
    real vertical timeline with cause chains and filters, dedicated family
    tree + relationship-network overlays. *Existing `PeopleScreen`,
-   `NewsScreen`, `HistoryScreen` are functional but per the brief "feel like
-   unfinished placeholders" relative to the reference's density — not yet
-   assessed in detail against the specific acceptance criteria.*
+   `NewsScreen` are functional but per the brief "feel like unfinished
+   placeholders" relative to the reference's density — not yet assessed in
+   detail against the specific acceptance criteria.*
+
+   **History — done 2026-07-10 (blind, no emulator — see risk note in
+   Phase 2 above; straightforward Compose patterns only, needs a sighted
+   pass before being trusted).** `HistoryScreen.kt` rebuilt around a real
+   vertical timeline: events now group by day (`SimTime.dayIndex`) nested
+   under year headers, not a flat per-year list, using the same dot +
+   connector-line timeline motif the old screen already had, just applied
+   per-day instead of per-year. Minor vs major presentation: events stay
+   filtered at `ImportanceScorer.HISTORY_THRESHOLD` (30) as before — that
+   part was already correct and untouched — but events at or above 2×
+   that threshold (60) now render as a larger `MajorEventCard` (bigger dot,
+   tinted card, type label + description + "why?" link) instead of the
+   compact one-line `MinorEventRow` every other event still gets. Added a
+   non-wrapping category filter row (`LazyRow` + `FilterChip`, the same
+   pattern `NewsScreen.kt`'s archive row already uses — `PeopleScreen.kt`'s
+   filter row is a plain `Row` and does *not* actually satisfy "never
+   wraps" at high chip counts, so that one was not copied) with All /
+   People / Business / Crime / Health / Town & politics buckets, reusing
+   `StoryCategory` from `core/model/Goal.kt` (the same enum
+   `NewspaperGenerator` categorises stories into) rather than inventing a
+   new taxonomy. Since `NewspaperGenerator.categoryFor()` is private, added
+   an equivalent `historyCategoryFor(EventType): StoryCategory` local to
+   `HistoryScreen.kt` that covers the fuller set of `EventType`s the
+   history feed can show (relationships/family/goals/meetings fold into
+   `HUMAN_INTEREST`, surfaced under the "People" chip). Tapping any event
+   (minor or major) calls the existing `onOpenEvent` callback exactly as
+   before, which `RippleApp.kt` wires to `TownViewModel.openEvent(id)` —
+   the existing cause-chain sheet is unchanged and untouched. Small
+   supporting change: `EventUi` (`data/WorldRepository.kt`) gained a
+   `type: EventType?` field (parsed the same way `typeLabel` already was)
+   since the UI model previously only exposed the human-readable label,
+   not the enum needed for category bucketing — the one construction site
+   (`WorldEventEntity.toUi()`) was updated to match.
+   *Still open: the brief's day/month/year/**era** zoom levels (only
+   day+year grouping was built — era-level was explicitly out of scope
+   for this pass); no richer cause-chain visualization (the existing sheet
+   is unchanged, still whatever it was before); no dedicated "player
+   interventions" filter chip (interventions still only surface via the
+   existing nudge count on the town-today card, not as a timeline filter);
+   not visually verified on a device/emulator.*
 
 Full acceptance criteria (20 items), palette/typography guidance, and the
 complete asset/animation checklists are in the original brief (session
@@ -478,8 +556,15 @@ rather than duplicating it wholesale into this doc.
 
 ## Phase 3 — A town with a memory (systems that compound)
 
-- Generational play: family reputation, inherited trauma/beliefs from
+- [~] Generational play: family reputation, inherited trauma/beliefs from
   memories, heirlooms; the death-of-followed flow grows into an "era summary".
+  *Implemented: inherited beliefs (top 2 significant `beliefFormed` memories,
+  `importance ≥ 65`, passed to surviving children as diminished-intensity
+  `CHILDHOOD` "family story" memories) and heirlooms (one heir receives a
+  trade-themed heirloom via `ideaSeeds` + an `INSPIRATION` memory, gated on
+  a positive memory with `importance ≥ 75`), both in `LifecycleSystem.die`.
+  Still open: family reputation (a lineage-level reputation stat/effect) and
+  the death-of-followed flow growing into an "era summary" — not attempted.*
 - [~] Local politics: council seats, petitions (noise, rents), policy effects
   on the economy; elections become campaigns influenced by reputation events.
   *Implemented (petitions only): `PetitionSystem`, run daily. Politically-
