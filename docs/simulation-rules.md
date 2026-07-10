@@ -40,7 +40,8 @@ implemented in `core/simulation`.
    (births, separations, elections, memory decay), `GoalSystem.updateDaily`,
    `BuildingLifecycleSystem.updateDaily`, `SeasonalEventSystem.updateDaily`
    (harvest fair / winter market / river floods), `PetitionSystem.updateDaily`
-   (local politics: noise / rent petitions).
+   (local politics: noise / rent petitions), `BusinessRivalrySystem.updateDaily`
+   (same-type price/demand competition, owner rivalries).
 9. Nudge regeneration.
 10. Newspaper when due (weekly, 08:00).
 11. Daily statistics; checkpoint flag every 36 ticks (6 in-game hours).
@@ -297,6 +298,41 @@ the closure, demand shifts to same-type rivals over the following week.
 Healthy businesses (> 9 000) may expand (+capacity, building extension);
 demand > 62 with spare capacity hires — preferring detailed residents with
 active `FIND_JOB` goals, promoting background residents otherwise.
+
+## Business rivalries
+
+Economy v2 slice, scoped down to price/demand competition and rivalries
+between same-type businesses (general price inflation/deflation, the
+property market and further business-succession work beyond the existing
+death-of-owner heir handoff are separate, still-open backlog items — see
+`docs/backlog.md`). Run daily from `BusinessRivalrySystem.updateDaily`, after
+`PetitionSystem`, bounded to `MAX_PAIRS_PER_DAY` (40) business pairs per day:
+
+- **Standing.** Every open, non-public-service business pair sharing a
+  `BusinessType` is compared on *standing* = `reputation − (priceLevel − 1) ×
+  40` — cheaper and better-reputed both help.
+- **Price/demand competition.** Whichever of the pair has the better standing
+  gains `DEMAND_SHIFT_PER_DAY` (2.0) `demand`, the other loses the same,
+  every day both are open — the same `coerceIn(5.0, 95.0)` clamp `EconomySystem`
+  already uses. Deliberately gentle: pairs drift apart over weeks, not days.
+- **Owner rivalry.** Only kicks in when the pair's standing gap is within
+  `CLOSE_COMPETITION_THRESHOLD` (20.0) — a runaway leader and an already-
+  settled laggard aren't "competing" any more, so their owners' relationship
+  is left alone. While two owners' businesses stay closely matched, their
+  existing relationship (`state.relationshipOrCreate`) drifts daily:
+  resentment `+0.6`, affection `−0.3`. Once resentment exceeds 55 and
+  affection falls below 30 — the *exact* thresholds `InteractionSystem.
+  updateKind` uses for personal rivalries — the relationship kind flips to
+  `RelationshipKind.RIVAL` and `RIVALRY_FORMED` fires (`PRIVATE`), applied
+  directly here (checked explicitly, same as `updateKind`, rather than
+  routed through it) since two business owners competing for trade may never
+  actually be co-located to trigger the ordinary interaction path. Skipped
+  entirely for `FIXED_KINDS`-equivalent relationships (family, partner,
+  spouse, former partner, affair) so business competition never overwrites a
+  relationship that means something else, and for an owner competing with
+  themselves (one person owning both businesses). Rivalry is meant to feel
+  earned: only pairs that stay closely, persistently matched for a sustained
+  stretch cross the threshold — most same-type pairs never do.
 
 ## Crime & suspicion
 

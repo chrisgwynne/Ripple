@@ -4,6 +4,53 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-10 — Phase 3: Economy v2 — business price competition & rivalries
+
+Third Phase 3 backlog item, scoped down per the task brief: same-type
+business price/demand competition and owner rivalries only; general price
+inflation/deflation ("prices that move"), the property market and further
+business succession work deliberately left for separate passes. Another
+agent was working UI files (`feature/news/`) in the same checkout, so this
+was code-only — no `./gradlew` or `git` calls made.
+
+- New `BusinessRivalrySystem.updateDaily`, wired into `SimulationCoordinator`'s
+  existing `if (newDay)` block after `PetitionSystem`, following the
+  established `object` pattern (`CrimeSystem`/`PetitionSystem`/
+  `SeasonalEventSystem`) rather than folding into `EconomySystem` — kept as a
+  clearly separable, well-commented addition:
+  - **Price/demand competition**: every open, same-`BusinessType` business
+    pair is compared on *standing* (`reputation − (priceLevel − 1) × 40`);
+    the better-standing business gains `demand`, the worse one loses it —
+    `DEMAND_SHIFT_PER_DAY` (2.0), `coerceIn(5.0, 95.0)` matching
+    `EconomySystem`'s existing clamp convention. Deliberately gentle so
+    competing businesses drift apart over weeks, not days.
+  - **Owner rivalry**: gated on the pair's standing gap staying within
+    `CLOSE_COMPETITION_THRESHOLD` (20.0) — a business simply outclassing its
+    rival doesn't count as ongoing competition. While close, the owners'
+    existing relationship (`state.relationshipOrCreate`) drifts daily
+    (resentment `+0.6`, affection `−0.3`) and, once it crosses the *same*
+    thresholds `InteractionSystem.updateKind` already uses for personal
+    rivalries (resentment > 55, affection < 30), the relationship kind is set
+    to `RelationshipKind.RIVAL` and `RIVALRY_FORMED` emitted directly in this
+    system rather than routed through `updateKind` — investigated first and
+    confirmed `updateKind` is only reachable from co-located
+    `InteractionSystem.interact()` calls, so two business owners competing
+    for trade would otherwise never trigger it. `RIVAL` isn't in
+    `InteractionSystem.FIXED_KINDS`, so this is safe; family/partner/spouse/
+    former-partner/affair relationships are explicitly skipped so business
+    competition never overwrites a relationship that means something else,
+    and an owner can't rival themselves if they own both businesses.
+  - Bounded to `MAX_PAIRS_PER_DAY` (40) pairs/day; all randomness would go
+    through `ctx.rng` (none needed here — the mechanic is fully deterministic
+    once standing is computed, matching the "bounded, deterministic daily
+    roll" pattern without literally needing a dice roll).
+- Docs: new "Business rivalries" section in `docs/simulation-rules.md` right
+  after "Economy" (with the actual constants), tick-pipeline line updated;
+  `docs/backlog.md`'s Economy v2 bullet marked `[~]` with prices-that-move,
+  property market and further succession explicitly called out as still
+  open (business-to-heir handoff on death already existed beforehand, in
+  `LifecycleSystem.die`, and is unchanged by this work).
+
 ### 2026-07-10 — Phase 3: generational play — inherited beliefs, heirlooms
 
 Second Phase 3 backlog item, scoped down per the task brief: inherited
@@ -489,6 +536,56 @@ Development order from the brief (status noted inline):
    existing nudge count on the town-today card, not as a timeline filter);
    not visually verified on a device/emulator.*
 
+   **News — done 2026-07-10 (blind, no emulator — same risk note as
+   History above).** `NewsScreen.kt` rebuilt to read like an actual issue
+   rather than a flat card feed, reusing what was already mostly correct
+   (masthead, per-`StoryCategory` grouping, headline vs. secondary type
+   treatment) and filling the real gaps:
+   - **Front page vs. registers, more clearly differentiated.** The
+     `HEADLINE` story now sits in its own full-width `RippleColors.Cream`
+     block directly under the masthead with `headlineLarge` bold type —
+     previously it was just a bigger `Text` in the same flat list as
+     everything else. Every non-headline `StoryCategory` section (Town
+     news, Business, Births, Deaths, Weddings, Crime & order, Health,
+     Weather, Public notices — labels from the enum in `core/model/
+     Goal.kt`, unchanged) now gets a rule line above its bold, uppercase
+     section header instead of a plain label, so registers read as
+     distinct blocks of a real paper rather than one continuous scroll.
+     Ordering follows `StoryCategory.entries` as before — untouched, since
+     `NewspaperGenerator`'s own emission order already matches it.
+   - **Archive navigation, two ways.** The existing bottom `LazyRow` of
+     issue chips (already a non-wrapping `FilterChip` row, same pattern
+     `HistoryScreen.kt` copied from it) is kept but its labels now include
+     the issue date, not just the number, and it's explicitly sorted by
+     `issueNumber` (`sortedIssues`) rather than relying on query order.
+     New: a compact prev/next control (`Icons.Filled.ChevronLeft/
+     ChevronRight`, disabled/dimmed at the ends) straddling the issue-date
+     line right under the masthead, so paging through the archive one
+     issue at a time doesn't require scrolling to the bottom of a long
+     issue first. Both controls call the same existing `viewModel.select
+     (issueId)` — no new repository methods needed. Confirmed old issues
+     are never deleted: `NewspaperGenerator.generate()` only ever inserts
+     (via `state.nextIssueId++`), nothing in `WorldRepository` or the DAOs
+     issues a delete against `newspaper_issues`/`newspaper_stories`, matching
+     `docs/simulation-rules.md`'s "old issues stay in the archive forever."
+   - **Richer day-one empty state.** `NewsViewModel` now also exposes
+     `worldTime` (mapped from the existing `WorldRepository.worldUi`
+     StateFlow, same source `TownViewModel` reads elsewhere — no new
+     plumbing). When available, the empty state computes the next 8am
+     boundary using the same day-start logic `NewspaperGenerator.isDue`
+     encodes (first issue fires the morning after world start) and says
+     "Expect the first edition `<date>`, 8 o'clock sharp" instead of the
+     generic "Come back tomorrow morning" — which remains the fallback if
+     `worldTime` hasn't loaded yet.
+   *Still open, honestly: no paper-texture styling (needs real asset/
+   shader work, out of scope per the brief's own exclusion list), no
+   serif/typography system overhaul (separate design-system item), and the
+   "registers as distinct sections" treatment is still built from
+   `MaterialTheme` type scale + colour blocks, not the denser
+   newspaper-column layout the original desktop mockup shows — that would
+   need real visual iteration against a device to get right. Not visually
+   verified on a device/emulator.*
+
 Full acceptance criteria (20 items), palette/typography guidance, and the
 complete asset/animation checklists are in the original brief (session
 transcript, 2026-07-10) — not reproduced in full here to keep this file
@@ -579,8 +676,29 @@ rather than duplicating it wholesale into this doc.
   campaign mechanics and reputation-driven elections (the rest of this
   bullet) are still open — a substantially larger item, deliberately not
   attempted here.*
-- Economy v2: prices that move, property market (residents actually buy/sell
-  homes), business succession and rivalries.
+- [~] Economy v2: prices that move, property market (residents actually
+  buy/sell homes), business succession and rivalries.
+  *Implemented (price competition + rivalries slice only): `BusinessRivalrySystem`,
+  run daily. Open, same-`BusinessType` business pairs are compared on standing
+  (reputation minus a price-level penalty); the better-standing one gains
+  `demand` and the other loses it, a small daily nudge (`±2.0`,
+  `coerceIn(5.0, 95.0)`) so competing businesses visibly drift apart over
+  weeks rather than swinging dramatically. When a pair's standing stays
+  closely matched (gap ≤ 20), their owners' existing relationship
+  (`state.relationshipOrCreate`) also drifts daily — resentment `+0.6`,
+  affection `−0.3` — and once it crosses the *same* thresholds
+  `InteractionSystem.updateKind` uses for personal rivalries (resentment >
+  55, affection < 30), the relationship kind is set to `RelationshipKind.RIVAL`
+  and `RIVALRY_FORMED` fires directly (not routed through `updateKind`, since
+  two business owners may never be co-located to trigger the ordinary
+  interaction path). Family/partner/spouse/former-partner/affair relationships
+  are never overwritten. See `docs/simulation-rules.md#business-rivalries`.
+  Still open: **prices that move** (general town-wide price inflation/
+  deflation, independent of competition), the **property market** (residents
+  actually buying/selling homes) and further **business succession** work
+  beyond the existing death-of-owner heir handoff (`LifecycleSystem.die`
+  passes a business to an adult heir or partner) — none of these three were
+  attempted here.*
 - Multiple towns: `World` already separates from `Town`; add a second map and
   slow migration between towns.
 - Counterfactual viewer ("what nearly happened"): replay a checkpoint with

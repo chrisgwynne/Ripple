@@ -78,7 +78,8 @@ class SimulationCoordinator(
         RumourSystem.update(ctx)
         // 10-12. Daily passes: health, lifecycle (births/deaths/election), goals, building
         // repairs, seasonal events (harvest fair / winter market / river floods), local
-        // politics (petitions over noise / rent).
+        // politics (petitions over noise / rent), business rivalries (same-type price/
+        // reputation competition, owner resentment).
         if (newDay) {
             HealthSystem.updateDaily(ctx)
             LifecycleSystem.updateDaily(ctx)
@@ -86,6 +87,7 @@ class SimulationCoordinator(
             BuildingLifecycleSystem.updateDaily(ctx)
             SeasonalEventSystem.updateDaily(ctx)
             PetitionSystem.updateDaily(ctx)
+            BusinessRivalrySystem.updateDaily(ctx)
         }
         // 13. Intervention influence regenerates through observation.
         InterventionEngine.regenerate(state, SimTime.MINUTES_PER_TICK)
