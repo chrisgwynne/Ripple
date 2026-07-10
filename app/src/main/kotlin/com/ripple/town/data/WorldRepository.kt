@@ -26,6 +26,8 @@ import com.ripple.town.core.simulation.ImportanceScorer
 import com.ripple.town.core.simulation.InterventionResult
 import com.ripple.town.core.simulation.SimulationCoordinator
 import com.ripple.town.core.simulation.WorldGenerator
+import com.ripple.town.core.simulation.providers.DialogueProvider
+import com.ripple.town.core.simulation.providers.NarrativeTextProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -99,7 +101,9 @@ data class EraSummary(
 class WorldRepository @Inject constructor(
     private val db: RippleDatabase,
     private val settingsRepository: SettingsRepository,
-    private val appScope: CoroutineScope
+    private val appScope: CoroutineScope,
+    private val narrativeTextProvider: NarrativeTextProvider,
+    private val dialogueProvider: DialogueProvider
 ) {
     /** All engine access is confined to this dispatcher. */
     private val engineDispatcher = Dispatchers.Default.limitedParallelism(1)
@@ -504,6 +508,45 @@ class WorldRepository @Inject constructor(
         }
 
         return ChronicleBuilder.build(world, subjectId, witnessedById)
+    }
+
+    /**
+     * Phase 4 backlog item: `NarrativeTextProvider`/`DialogueProvider`. Elaborates a single
+     * event's terse [WorldEvent.description] into a richer templated sentence via the injected
+     * [narrativeTextProvider] (bound to `TemplateNarrativeTextProvider` by default — see
+     * `di/AppModule.kt`; a future LLM-backed implementation slots in with zero changes here).
+     * Needs the full [WorldEvent] (severity, causeIds, involved resident ids) and the live
+     * [WorldState] (weather, town name) — reads `coordinator.state` directly, on the confined
+     * [engineDispatcher], the same access pattern every other `WorldState`-touching function in
+     * this class already uses (see `causeChain`'s neighbours below).
+     */
+    suspend fun elaborateEvent(eventId: Long): String? {
+        val entity = db.eventDao().event(eventId) ?: return null
+        val causeIds = db.eventDao().causeIdsOf(eventId)
+        val event = entity.toDomain(causeIds)
+        return withContext(engineDispatcher) {
+            val state = coordinator?.state ?: return@withContext null
+            narrativeTextProvider.elaborate(event, state)
+        }
+    }
+
+    /**
+     * Phase 4 backlog item: `NarrativeTextProvider`/`DialogueProvider`. A short, personality-
+     * flavoured line for [residentId] in the given [situation] (see `TemplateDialogueProvider`'s
+     * doc comment for the closed set of supported situation strings). Reads the resident's own
+     * `Personality` from live `WorldState` and calls the personality-aware overload when the
+     * bound provider is the template implementation; falls back to the plain interface call
+     * otherwise (so a future non-template `DialogueProvider` implementation isn't forced to
+     * support the personality overload to compile).
+     */
+    suspend fun dialogueLineFor(residentId: Long, situation: String): String? = withContext(engineDispatcher) {
+        val resident = coordinator?.state?.resident(residentId) ?: return@withContext null
+        val provider = dialogueProvider
+        if (provider is com.ripple.town.core.simulation.providers.TemplateDialogueProvider) {
+            provider.lineFor(residentId, situation, resident.personality)
+        } else {
+            provider.lineFor(residentId, situation)
+        }
     }
 
     // ------------------------------------------------------------ internals

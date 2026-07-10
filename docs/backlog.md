@@ -4,6 +4,155 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-10 — NarrativeTextProvider/DialogueProvider (last open Phase 4 item)
+
+The last remaining open Phase 4 backlog item: "an LLM narrative layer that
+writes flavour prose and dialogue *from* facts, never creating facts —
+enforced by the existing engine-only-mutates rule and validated against the
+event log." Had the checkout to itself this round — no concurrent agent, no
+file-contention risk. No `./gradlew` or `git` commands run, per this
+session's constraints — code-only, ready for the orchestrating session to
+build/test/commit.
+
+- **Scoping decision, stated upfront.** A real LLM-backed implementation
+  needs an API key/budget/model choice that is the user's call, not
+  something to build blind — that decision was explicitly out of scope this
+  pass. But the codebase already anticipates exactly this seam:
+  `NarrativeTextProvider`/`DialogueProvider` interfaces already existed in
+  `core/simulation/providers/FutureProviders.kt`, DI-wired in `di/
+  AppModule.kt`, bound to `NoOpNarrativeTextProvider`/`NoOpDialogueProvider`
+  (return `null`/nothing). Confirmed via grep, as instructed, that neither
+  was ever actually called anywhere in the UI — wired in DI but genuinely
+  unused. The task: build a real, deterministic, template-based **default**
+  implementation of both (no LLM call, no network, no API key) and wire it
+  in for real, not leave it unused a second time.
+- **Read the instructed files first, in full**, per the task brief:
+  `data/ChronicleBuilder.kt` (this session's closest and most relevant
+  precedent — its own header doc comment explicitly calls itself "a
+  scoped-down sibling of the still-open `NarrativeTextProvider`/
+  `DialogueProvider` backlog item"), `core/simulation/NewspaperGenerator.kt`
+  (headline/body generation from `WorldEvent`s, with deterministic
+  `rng.pick` template variation), `core/model/WorldEvent.kt`'s `EventType`
+  enum, and `core/model/Resident.kt`'s `Personality`/`skills`/`memories`.
+  Also checked `ImportanceScorer.baseImportance`'s and
+  `NewspaperGenerator.headlineFor`'s `when` blocks for which `EventType`
+  values already get special treatment — used as the prioritisation signal
+  the brief pointed at for which types deserve their own templates versus
+  the generic fallback.
+- **`TemplateNarrativeTextProvider`/`TemplateDialogueProvider`** — one new
+  file, `core/simulation/providers/TemplateProviders.kt`. Both are pure
+  reads: `elaborate(event, state)` fills one of several fixed sentence
+  templates per `EventType` (26 of the ~55 event types get dedicated
+  templates — the ones already special-cased in `ImportanceScorer`/
+  `NewspaperGenerator` — everything else falls back to three generic
+  templates) from real fields: involved residents' names/occupations
+  (`state.resident(id)`), `event.severity` (bucketed into an adverb:
+  barely/quietly/deeply/profoundly), time of day (`SimTime.timeOfDay`) and
+  weather (`state.weather`) from live `WorldState`, and a name-checked nod
+  to the event's first `causeIds` entry if one exists (never inventing a
+  cause — only ever reading one the engine already recorded).
+  `lineFor(residentId, situation)` returns a short line from a closed,
+  documented set of seven situation strings (grieving/celebrating/working/
+  arguing/socialising/worried/idle — there was no existing call site to
+  infer a vocabulary from, so this pass defined and documented one rather
+  than guessing); a personality-aware overload picks from a smaller
+  trait-flavoured override table (courage/empathy/impulsiveness for
+  grieving; courage/patience/kindness for arguing; sociability/ambition for
+  celebrating) keyed off the resident's dominant `Personality` trait
+  (highest of the ten 0..1 continuous fields), falling back to the plain
+  pool for traits/situations without a dedicated override.
+- **Determinism discipline, kept even though it isn't strictly required
+  here.** Template/line selection is picked by `event.id`/`residentId`
+  modulo the candidate list size, never `Math.random()`/
+  `kotlin.random.Random` — this is presentation-layer text, not simulation
+  state, so nothing downstream depends on it for replay correctness, but
+  the task brief was explicit about keeping the same "no unseeded
+  randomness" discipline the rest of this codebase applies everywhere else,
+  and it was cheap to honour, so it was.
+- **Wired for real — two concrete integration points, not left unused.**
+  - `EventSheetContent` (`feature/town/TownSheets.kt`): a new "More detail
+    ▼" `TextButton` under the event's existing terse description, expanding
+    to show the elaboration in a `Surface` block — lazily fetched (only on
+    first expand, cached per `eventId` via `remember`) so the sheet's
+    default at-a-glance read is unchanged. New `WorldRepository
+    .elaborateEvent(eventId)` loads the full `WorldEvent` (via
+    `EventDao.event`/`causeIdsOf` + `toDomain`) and reads live
+    `coordinator.state` on the confined `engineDispatcher` — the same
+    access pattern every other `WorldState`-touching `WorldRepository`
+    function already uses — then calls the injected `NarrativeTextProvider`.
+    `TownViewModel.requestElaboration(eventId, onReady)` wraps it in
+    `viewModelScope.launch`, the exact one-shot
+    suspend-call-from-Composable pattern `requestChronicle` (built earlier
+    this session) already established — reused rather than inventing a
+    second shape.
+  - Resident sheet (`ResidentSheetContent`, same file): a new italic quoted
+    line under the existing activity/mood text, shown only when the
+    resident's current `Activity` maps onto one of the seven supported
+    situation strings (a new local `situationFor()` mapper — `MOURNING` →
+    "grieving", `CELEBRATING` → "celebrating", `WORKING` → "working",
+    `ARGUING` → "arguing", `SOCIALISING`/`VISITING` → "socialising", high
+    stress/low financial security → "worried"; everything else shows
+    nothing rather than forcing a generic line onto every sheet). New
+    `WorldRepository.dialogueLineFor(residentId, situation)` reads the
+    resident's live `Personality` off `coordinator.state` and calls the
+    personality-aware overload when the bound provider is
+    `TemplateDialogueProvider` specifically (an `is` check), falling back
+    to the plain interface call otherwise — so a future non-template
+    `DialogueProvider` implementation isn't forced to support the
+    personality overload just to compile. `TownViewModel
+    .requestDialogueLine` mirrors `requestElaboration`'s shape exactly.
+- **`di/AppModule.kt`** — `provideNarrativeTextProvider`/
+  `provideDialogueProvider` now return `TemplateNarrativeTextProvider()`/
+  `TemplateDialogueProvider()` instead of the `NoOp` classes. The `NoOp`
+  classes themselves are untouched and still exist in `FutureProviders.kt`
+  — kept for tests (both existing Room/Robolectric integration test files
+  that construct `WorldRepository` directly, `WorldRepositoryTest.kt` and
+  `TownViewModelTest.kt`, were updated to pass `NoOpNarrativeTextProvider()`/
+  `NoOpDialogueProvider()` explicitly now that the constructor takes two new
+  parameters) and as the documented fallback shape for a future swap.
+- **The swap-in seam actually holds.** `WorldRepository`'s new
+  `elaborateEvent`/`dialogueLineFor` depend only on the
+  `NarrativeTextProvider`/`DialogueProvider` interfaces (constructor-injected,
+  Hilt-resolved) — never on `TemplateNarrativeTextProvider`/
+  `TemplateDialogueProvider` concretely, except for the one `is` check
+  gating the personality-aware dialogue overload, which is written to
+  degrade gracefully (falls back to the plain interface call) rather than
+  assume the template implementation is always bound. A future real
+  LLM-backed provider needs only new `@Provides` bindings in `AppModule.kt`
+  — no changes to `WorldRepository`, `TownViewModel`, or either Composable
+  call site.
+
+Deliberately scoped out, stated explicitly: **the real LLM-backed
+implementation itself** — needs an API key/budget/model choice from the
+user, a decision this pass was explicitly told not to make blind; only the
+template-based default and the swap-in seam were built. No `situation`
+vocabulary beyond the seven strings defined here (a real LLM provider might
+support much richer free-text situations, but the template provider needs a
+closed set to have any lines to pick from at all). No elaboration/dialogue
+surfaced anywhere beyond the two chosen integration points (no newspaper
+story elaboration, no ambient/background dialogue ticker) — two genuine,
+valuable call sites were judged enough to prove the seam is real without
+sprawling across every screen in one pass. No caching/persistence of
+generated lines beyond the per-`eventId`/`residentId` in-Composable
+`remember` — regenerated fresh each time a sheet opens, cheap enough not to
+need it, matching this session's `EraSummary`/chronicle precedent of
+"recomputed, not persisted."
+
+**Not run this session:** `./gradlew` build/test and any `git` commands.
+Code-only, ready for the orchestrating session to build/test/commit. **Not
+verified to compile** — no build was run; the new code was written by
+careful reading of `FutureProviders.kt`, `ChronicleBuilder.kt`,
+`NewspaperGenerator.kt`, `WorldRepository.kt`, `TownViewModel.kt`, and
+`TownSheets.kt` for exact signatures and conventions, but this is not a
+substitute for an actual `./gradlew` build. **Not verified on a real device
+or emulator** — none was available in this environment; the two new UI call
+sites (the expandable "More detail" toggle and the quoted dialogue line)
+compile-reason correctly against existing Compose patterns in the same file
+but have not been eyeballed on a real render — text wrapping, the expand/
+collapse toggle's tap target, and the italic quoted-line styling next to
+the existing activity/mood text all warrant a real-device look before being
+fully trusted.
+
 ### 2026-07-10 — Shareable town chronicles (last Phase 4 backlog item)
 
 Last remaining Phase 4 backlog item: "Shareable town chronicles: export a
@@ -2070,13 +2219,34 @@ rather than duplicating it wholesale into this doc.
   `WorldPressureMechanicMapper` instead, to avoid a same-name-different-
   package collision; the placeholder interfaces are untouched. See
   `docs/simulation-rules.md#phase-4-external-world-pressure`.
-- `NarrativeTextProvider` / `DialogueProvider`: an LLM narrative layer that
+- [x] `NarrativeTextProvider` / `DialogueProvider`: an LLM narrative layer that
   writes flavour prose and dialogue *from* facts, never creating facts —
   enforced by the existing engine-only-mutates rule and validated against the
-  event log. **Still open** — explicitly not attempted this session; the new
-  `CuratedWorldPressureFeed` above uses small, fixed, hand-written strings
-  per pressure kind, not generated text, and is not a substitute for this
-  item.
+  event log. **Implemented 2026-07-10 as a template-based (non-LLM) default**
+  — `TemplateNarrativeTextProvider`/`TemplateDialogueProvider`
+  (`core/simulation/providers/TemplateProviders.kt`), now bound as the real
+  default in `di/AppModule.kt` (`NoOpNarrativeTextProvider`/
+  `NoOpDialogueProvider` remain in `FutureProviders.kt` for tests/fallback
+  only). Both are pure reads over `WorldEvent`/`WorldState`/`Resident` —
+  fixed templates filled from real structured data, deterministic template
+  selection by `event.id`/`residentId` (never `Math.random()`/
+  `kotlin.random.Random`), same discipline as `ChronicleBuilder`/
+  `NewspaperGenerator`. **A real LLM-backed implementation remains a
+  separate, still-open decision** — needs an API key/budget/model choice
+  from the user, deliberately not attempted here; the whole point of this
+  seam already existing is that swapping one in later means changing only
+  the two `@Provides` functions in `AppModule.kt`, zero call-site changes,
+  since every caller depends on the interface only. Wired to two real UI
+  call sites, not left unused: `EventSheetContent`
+  (`feature/town/TownSheets.kt`) shows the elaboration as expandable "More
+  detail" text under an event's existing terse description; the resident
+  sheet shows a short personality-flavoured quoted line for a resident
+  currently grieving/celebrating/working/arguing/socialising/worried (see
+  `TemplateDialogueProvider`'s doc comment for the closed set of supported
+  situation strings). Both go through new `WorldRepository.elaborateEvent`/
+  `dialogueLineFor` and `TownViewModel.requestElaboration`/
+  `requestDialogueLine`, the same one-shot suspend-call-from-Composable
+  pattern `requestChronicle` already established.
 - [x] National layer: lightweight country context (taxes, trends) as
   pressures. **Implemented 2026-07-10 as a small, additive extension of
   `CuratedWorldPressureFeed`/`WorldPressureMechanicMapper`** — not a new

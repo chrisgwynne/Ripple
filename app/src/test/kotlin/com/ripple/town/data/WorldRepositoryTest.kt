@@ -8,6 +8,8 @@ import com.ripple.town.core.database.RippleDatabase
 import com.ripple.town.core.model.InterventionVerb
 import com.ripple.town.core.model.SimSpeed
 import com.ripple.town.core.simulation.InterventionResult
+import com.ripple.town.core.simulation.providers.NoOpDialogueProvider
+import com.ripple.town.core.simulation.providers.NoOpNarrativeTextProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -39,7 +41,7 @@ class WorldRepositoryTest {
             .build()
         scope = CoroutineScope(SupervisorJob())
         settings = SettingsRepository(context)
-        repository = WorldRepository(db, settings, scope)
+        repository = WorldRepository(db, settings, scope, NoOpNarrativeTextProvider(), NoOpDialogueProvider())
     }
 
     @After
@@ -70,7 +72,7 @@ class WorldRepositoryTest {
         val timeBefore = repository.worldUi.value!!.time
 
         // Simulate process death: a brand-new repository over the same storage.
-        val second = WorldRepository(db, settings, scope)
+        val second = WorldRepository(db, settings, scope, NoOpNarrativeTextProvider(), NoOpDialogueProvider())
         val restored = second.restoreIfPresent()
         assertThat(restored).isTrue()
         val ui = second.worldUi.value!!

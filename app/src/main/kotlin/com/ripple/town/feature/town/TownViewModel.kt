@@ -129,6 +129,24 @@ class TownViewModel @Inject constructor(
         viewModelScope.launch { onReady(repository.buildChronicle(residentId)) }
     }
 
+    /**
+     * Phase 4 backlog item: `NarrativeTextProvider`. Same one-shot suspend-call-from-Composable
+     * pattern as [requestChronicle] above — the ViewModel wraps the suspend provider call in
+     * `viewModelScope.launch` and hands the result back via [onReady] on the main dispatcher, so
+     * the Composable never needs its own `rememberCoroutineScope()`.
+     */
+    fun requestElaboration(eventId: Long, onReady: (String?) -> Unit) {
+        viewModelScope.launch { onReady(repository.elaborateEvent(eventId)) }
+    }
+
+    /**
+     * Phase 4 backlog item: `DialogueProvider`. See `TemplateDialogueProvider`'s doc comment for
+     * the closed set of supported [situation] strings.
+     */
+    fun requestDialogueLine(residentId: Long, situation: String, onReady: (String?) -> Unit) {
+        viewModelScope.launch { onReady(repository.dialogueLineFor(residentId, situation)) }
+    }
+
     fun jumpToResident(residentId: Long) {
         val r = world.value?.resident(residentId) ?: return
         if (r.visibleOnMap) _jumpTo.value = r.x to r.y

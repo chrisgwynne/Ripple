@@ -8,10 +8,10 @@ import com.ripple.town.core.simulation.providers.DialogueProvider
 import com.ripple.town.core.simulation.providers.ExternalWorldEventProvider
 import com.ripple.town.core.simulation.providers.NarrativeTextProvider
 import com.ripple.town.core.simulation.providers.NoOpCloudSaveRepository
-import com.ripple.town.core.simulation.providers.NoOpDialogueProvider
 import com.ripple.town.core.simulation.providers.NoOpExternalWorldEventProvider
-import com.ripple.town.core.simulation.providers.NoOpNarrativeTextProvider
 import com.ripple.town.core.simulation.providers.NoOpWorldPressureMapper
+import com.ripple.town.core.simulation.providers.TemplateDialogueProvider
+import com.ripple.town.core.simulation.providers.TemplateNarrativeTextProvider
 import com.ripple.town.core.simulation.providers.WorldPressureMapper
 import dagger.Module
 import dagger.Provides
@@ -44,13 +44,21 @@ object AppModule {
     @Singleton
     fun provideExternalWorldEventProvider(): ExternalWorldEventProvider = NoOpExternalWorldEventProvider()
 
-    @Provides
-    @Singleton
-    fun provideNarrativeTextProvider(): NarrativeTextProvider = NoOpNarrativeTextProvider()
+    // Phase 4 backlog item: NarrativeTextProvider/DialogueProvider. The template-based
+    // implementations are now the real default (see providers/TemplateProviders.kt) — no LLM
+    // call, no network, deterministic. NoOpNarrativeTextProvider/NoOpDialogueProvider remain in
+    // FutureProviders.kt for tests/fallback but are no longer bound here. Swapping in a real
+    // LLM-backed provider later (needs an API key/budget/model choice — a separate, still-open
+    // decision) only means changing what these two functions return; every call site depends on
+    // the interface only.
 
     @Provides
     @Singleton
-    fun provideDialogueProvider(): DialogueProvider = NoOpDialogueProvider()
+    fun provideNarrativeTextProvider(): NarrativeTextProvider = TemplateNarrativeTextProvider()
+
+    @Provides
+    @Singleton
+    fun provideDialogueProvider(): DialogueProvider = TemplateDialogueProvider()
 
     @Provides
     @Singleton

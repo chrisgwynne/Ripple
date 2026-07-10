@@ -6,6 +6,8 @@ import androidx.test.core.app.ApplicationProvider
 import com.google.common.truth.Truth.assertThat
 import com.ripple.town.core.database.RippleDatabase
 import com.ripple.town.core.model.SimSpeed
+import com.ripple.town.core.simulation.providers.NoOpDialogueProvider
+import com.ripple.town.core.simulation.providers.NoOpNarrativeTextProvider
 import com.ripple.town.data.SettingsRepository
 import com.ripple.town.data.WorldRepository
 import com.ripple.town.feature.town.TownSheet
@@ -43,7 +45,10 @@ class TownViewModelTest {
             .allowMainThreadQueries()
             .build()
         scope = CoroutineScope(SupervisorJob())
-        repository = WorldRepository(db, SettingsRepository(context), scope)
+        repository = WorldRepository(
+            db, SettingsRepository(context), scope,
+            NoOpNarrativeTextProvider(), NoOpDialogueProvider()
+        )
         runBlocking { repository.createWorld("Testholme", SimSpeed.NORMAL, seed = 21L) }
         viewModel = TownViewModel(repository)
     }

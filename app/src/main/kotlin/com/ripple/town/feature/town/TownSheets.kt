@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -62,6 +63,20 @@ fun ResidentSheetContent(
     val isFavourite = r.id in world.favouriteIds
     val context = LocalContext.current
 
+    // Phase 4 backlog item: DialogueProvider. A short, personality-flavoured line for the
+    // resident's *current* activity/mood — only fetched (and only shown) when that activity maps
+    // onto one of TemplateDialogueProvider's supported situation strings; everything else (idle
+    // browsing, travelling, etc.) shows nothing rather than forcing a generic line onto every
+    // resident sheet. Re-fetched whenever the resident or their situation changes.
+    val situation = situationFor(r)
+    var dialogueLine by remember(residentId, situation) { mutableStateOf<String?>(null) }
+    androidx.compose.runtime.LaunchedEffect(residentId, situation) {
+        dialogueLine = null
+        if (situation != null) {
+            viewModel.requestDialogueLine(residentId, situation) { dialogueLine = it }
+        }
+    }
+
     Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             PixelAvatar(r.sprite, sprites, size = 54.dp, pose = poseFor(r), lifeStage = r.lifeStage, occupation = r.occupation)
@@ -80,6 +95,14 @@ fun ResidentSheetContent(
                         "${r.activity.label} · feeling ${r.mood.label.lowercase()}",
                         style = MaterialTheme.typography.bodySmall,
                         color = RippleColors.SoftInk
+                    )
+                }
+                if (!dialogueLine.isNullOrBlank()) {
+                    Text(
+                        "“$dialogueLine”",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -151,6 +174,27 @@ fun ResidentSheetContent(
                 4 -> HistoryTab(residentEvents, viewModel)
             }
         }
+    }
+}
+
+/**
+ * Phase 4 backlog item: DialogueProvider. Maps a resident's current
+ * [com.ripple.town.core.model.Activity]/mood onto one of `TemplateDialogueProvider`'s closed set
+ * of supported situation strings ("grieving", "celebrating", "working", "arguing",
+ * "socialising", "worried", "idle"), or `null` for activities not worth a quoted line at all
+ * (travelling, sleeping, at school, etc. — showing a line for absolutely everything would make
+ * it feel like empty filler rather than a genuine moment).
+ */
+private fun situationFor(r: com.ripple.town.data.ResidentUi): String? {
+    if (!r.alive || !r.inTown) return null
+    return when (r.activity) {
+        com.ripple.town.core.model.Activity.MOURNING -> "grieving"
+        com.ripple.town.core.model.Activity.CELEBRATING -> "celebrating"
+        com.ripple.town.core.model.Activity.WORKING -> "working"
+        com.ripple.town.core.model.Activity.ARGUING -> "arguing"
+        com.ripple.town.core.model.Activity.SOCIALISING,
+        com.ripple.town.core.model.Activity.VISITING -> "socialising"
+        else -> if (r.stress > 70 || r.financialSecurity < 25) "worried" else null
     }
 }
 
@@ -318,6 +362,19 @@ fun EventSheetContent(world: WorldUi, eventId: Long, viewModel: TownViewModel) {
     val chain by viewModel.causeChain.collectAsState()
     val event = chain.firstOrNull()?.firstOrNull { it.id == eventId }
         ?: chain.firstOrNull()?.firstOrNull()
+    // Phase 4 backlog item: NarrativeTextProvider. A richer, templated elaboration of the
+    // event's own terse description, fetched lazily behind an expand toggle — not shown by
+    // default, so the sheet still reads at a glance the way it always has. Re-fetched whenever
+    // the underlying event changes (LaunchedEffect keyed on eventId, cleared on navigation to a
+    // different event) via TownViewModel.requestElaboration, the same one-shot
+    // suspend-call-from-Composable pattern requestChronicle already established.
+    var expanded by remember(eventId) { mutableStateOf(false) }
+    var elaboration by remember(eventId) { mutableStateOf<String?>(null) }
+    androidx.compose.runtime.LaunchedEffect(eventId, expanded) {
+        if (expanded && elaboration == null) {
+            viewModel.requestElaboration(eventId) { elaboration = it ?: "" }
+        }
+    }
     Column(
         Modifier
             .padding(horizontal = 20.dp)
@@ -329,6 +386,18 @@ fun EventSheetContent(world: WorldUi, eventId: Long, viewModel: TownViewModel) {
         Text(event.typeLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(event.description, style = MaterialTheme.typography.titleLarge)
         Text(event.timeLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        TextButton(onClick = { expanded = !expanded }) {
+            Text(if (expanded) "Hide detail ▲" else "More detail ▼")
+        }
+        if (expanded && !elaboration.isNullOrBlank()) {
+            Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceVariant) {
+                Text(
+                    elaboration!!,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(10.dp)
+                )
+            }
+        }
         val involved = event.involvedResidentIds.mapNotNull { world.resident(it) }
         if (involved.isNotEmpty()) {
             SectionTitle("People involved")
