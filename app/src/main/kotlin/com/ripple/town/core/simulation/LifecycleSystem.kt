@@ -189,7 +189,19 @@ object LifecycleSystem {
             // "bornAt" lets a UI-side era summary (see WorldRepository.detectFollowedDeath)
             // query the full span of events/memories the deceased's life covered, without the
             // engine itself needing to read back through history it doesn't keep in WorldState.
-            payload = mapOf("cause" to cause, "age" to age.toString(), "bornAt" to r.bornAt.toString()),
+            // "immediate_cause"/"underlying_cause" (added 2026-07-10, see docs/simulation-rules.md
+            // "Events, causes, importance"): immediate is just `cause` itself (already the
+            // condition label or "old age"/"a sudden decline" — descriptive as-is); underlying is
+            // only added by callers that pass real `causeIds` (currently `HealthSystem`, tracing
+            // back to the actual `ILLNESS_DIAGNOSED` event) — never invented when a death has no
+            // such traceable history (e.g. genuine old age).
+            payload = buildMap {
+                put("cause", cause)
+                put("age", age.toString())
+                put("bornAt", r.bornAt.toString())
+                put("immediate_cause", cause)
+                if (causeIds.isNotEmpty()) put("underlying_cause", "a condition diagnosed earlier that never fully let go")
+            },
             causeIds = causeIds
         )
         state.deathsToday += 1

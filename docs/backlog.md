@@ -4,6 +4,98 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-10 — Building sheet redesign: "opening the front door", not a database record
+
+Rewrote `BuildingSheetContent` (and added private helpers) in `feature/town/TownSheets.kt`
+— scoped strictly to that function; `EventSheetContent` and everything else in the file
+untouched. Also extended `BuildingUi`/`SnapshotBuilder.buildingUi()` in
+`data/WorldSnapshot.kt` to carry several `Building`/`Business` fields that already existed
+on the engine models but had never been threaded onto the UI snapshot: `ownerId`,
+`businessDaysInTrouble`, `businessDemand`, `businessPriceLevel`, `businessCustomersToday`,
+`businessRevenueToday`, `businessExpensesToday`, `businessEmployeeCapacity`,
+`businessEmployeeIds`, `businessClosedAt`. No new simulation fields were invented — this
+is a UI/information-architecture pass over data the sim already tracks. **No Android
+emulator/device exists in this environment — everything below is written and
+compile-reviewed blind (a fresh Explore-agent pass re-read every touched symbol/import/
+signature against source), never seen running on device.**
+
+**Built:**
+1. **Richer header status** — `buildingStatusPhrase()` derives one of: "Busy — N customers
+   inside" (occupants ≥ 4), "Struggling — losses for N consecutive days" (`daysInTrouble > 0`),
+   "Open, but run-down" (`condition < 30`), "permanently closed — empty since N days"
+   (`abandoned && businessClosedAt != null`, using `SimTime.dayIndex` for the relative-time
+   math), or a plain "standing empty"/"closed down" fallback. Templated from real thresholds,
+   no free-form text.
+2. **Owner card** — tappable `OwnerCard` composable (name, age, mood) wired to
+   `viewModel.openResident(owner.id)`, reusing the same tap pattern the "Inside right now"
+   list already used. `ownerBusinessImpactPhrase()` adds one templated sentence
+   ("Under real financial strain…" / "Takes pride in the business's good name…") gated on
+   real `daysInTrouble`/`reputation`/`demand` thresholds — not generated prose.
+3. **Business health section** — `BusinessHealthSection` shows today's revenue/expenses/profit
+   (colour-coded via existing `RippleColors.DeepBrick`/`DeepGreen`), customers today, days in
+   trouble, staff count vs `employeeCapacity`, demand and reputation as `StatBar`s, price level
+   as a relative "+N% above standard" read, and the owner's outstanding debt if any
+   (`ResidentUi.debt`) in brick red.
+4. **Real timeline** — `buildTimeline()` merges `visibleChanges` (untimed cosmetic history —
+   honestly labelled "Earlier" since the model carries no timestamp for them) with real
+   building-relevant events (construction/damage/repair/expansion/abandonment,
+   business opened/closed/expanded/succession, home purchased) into one list, rendered by
+   `TimelineRow` reusing the exact dot+connector-line visual from `HistoryScreen.kt`'s
+   `MinorEventRow`/`MajorEventCard` (small dot, vertical line, gold dot for
+   importance ≥ 45).
+5. **Grouped daily activity** — `groupRoutineEvents()` buckets today's events (by
+   `SimTime.dayIndex`) into visit/conversation/incident counts when the business is open and
+   has ≥ 3 events today, producing lines like "3 residents visited today" /
+   "2 incidents reported today", falling back to individual event rows otherwise (and always
+   for older history). Categorisation mirrors the existing `EventType` → bucket groupings
+   already used by `NewspaperGenerator`/`HistoryScreen`'s `historyCategoryFor` — no new event
+   types invented.
+6. **Building vs business** — new "Building" subsection: condition, noise, value (unchanged),
+   plus a real "currently used as: a business / a home / {typeLabel}" line and an explicit,
+   honest note that previous-tenant history isn't tracked data.
+7. **Future outcomes, honestly scoped** — checked `GoalSystem.kt` (`START_BUSINESS` goal
+   seeding, ~line 76) and `PropertyMarketSystem.kt` before writing anything. Confirmed the
+   *only* real mechanism is: an ambitious, skilled, idea-seeded resident can eventually start
+   a business in a vacant `BuildingType.VACANT` building (in practice just "The Old Granary"
+   per `WorldGenerator.kt` — there's exactly one). `PropertyMarketSystem` only governs *homes*
+   being bought, not vacant business buildings being reopened. So the note only appears for
+   `abandoned && type == BuildingType.VACANT` ("could one day be bought and reopened"); any
+   other abandoned building instead gets a generic "no buyer or new use has been decided yet"
+   — no café/flat/pub conversion fiction anywhere.
+8. **Connected-things cards** — employees upgraded from a name string to tappable
+   `EmployeeRow`s (name, occupation, mood), wired to `openResident`. Nearby businesses found
+   via cheap client-side Manhattan tile distance between `BuildingUi.x/y` origins (≤ 12 tiles,
+   capped to 4, sorted nearest-first), tappable via `viewModel.openBuilding`. Crimes at the
+   building filtered from the already-fetched `buildingEvents` by `CRIME_COMMITTED`/
+   `CRIME_REPORTED`, shown in brick red.
+
+**Honestly NOT built / approximated, because the underlying simulation data doesn't exist:**
+- **No "days profitable" counter.** `Business` only tracks `daysInTrouble` (consecutive
+  losing days); there is no inverse "days profitable" field. Omitted rather than
+  approximated — inventing a derived counter from data the sim doesn't persist would be
+  exactly the kind of fabrication the brief warned against.
+- **No building age/construction date shown.** `Building.constructedAt` exists on the engine
+  model but is not threaded onto `BuildingUi`, and more importantly `WorldGenerator` seeds
+  most buildings at world creation with `constructedAt` not meaningfully distinct from town
+  founding — decided this wasn't worth wiring through for a number that would mostly just
+  read "since the town began" for every building. Omitted.
+- **No "previous tenants" / building ownership history.** Nothing tracks a building having
+  had more than one business/owner over its life. Section says so explicitly instead of
+  inventing a fake history.
+- **No specific reopening scenarios** (café / flats / library / pub conversions). Confirmed
+  via `GoalSystem`/`PropertyMarketSystem`/`WorldGenerator` that building-type conversion is
+  not a modelled mechanic at all — a vacant building can only become the same
+  `BusinessType` variety the granary's `START_BUSINESS` goal produces, and even that isn't
+  building-type-specific in the data. The UI note is deliberately generic ("could be bought
+  and reopened"), never naming a specific future business type.
+- **No "estate agent visited" / "former employees collected belongings" closure-aftermath
+  events.** No such `EventType` or pattern exists in the simulation. Did not fabricate these
+  — closed businesses that aren't `BuildingType.VACANT` get a plain, honest one-line status
+  instead of invented flavour text.
+- **"Nearby businesses" is a cheap tile-distance proxy**, not a real "same street"/neighbourhood
+  concept the simulation models — flagged as an approximation in case a future pass wants a
+  more semantically real notion of adjacency (e.g. shared road tile).
+
 ### 2026-07-10 — Town screen: ambient life pass, sheet default height, "Today's story", Chronicle categories
 
 Four related refinements to `feature/town/TownRenderer.kt`, `TownScreen.kt`, and
@@ -261,6 +353,65 @@ correctness, and checked against the actual field names/types in
 `NeedsSystem` numeric balance have not been exercised at runtime. Per
 standing instruction, no `./gradlew` build/test was run and no `git` command
 was executed this session.
+
+### 2026-07-10 — Ripple Asset Studio: category tree, duplicate detection, fuller bulk-edit, more shortcuts, export preview
+
+Next slice of the original asset-management UX brief on top of the
+gallery-first review UX (previous entry below). Four deliverables, all
+verified with real numbers against the same two Downloads reference
+sheets (348/140 detections), not just claimed:
+
+- **Searchable category tree** (`category_tree.py`, pure Python, no Qt) —
+  the brief's full "Buildings > Residential > Detached", "People > Adult/
+  .../Firefighter", Vehicles/Terrain/Nature/Furniture/Effects/Icons/
+  Interiors/Food/Animals hierarchy, with every leaf validated at build
+  time to resolve to an existing `categories.py` preset. `Detection
+  .category` is unchanged (still the flat string the rest of the pipeline
+  reads) — the tree is only a friendlier way to set it.
+  `gui.CategoryTreePicker` (QLineEdit filter + QTreeWidget) replaces the
+  flat category QComboBox in both the Inspector and bulk-edit panel.
+  Verified: typing "bak" in the live widget leaves only Bakery + its
+  ancestor chain (Commercial, Buildings) visible; everything else hidden.
+- **Duplicate detection via perceptual hashing** (`duplicates.py`, PIL/
+  numpy average-hash, no new dependency) — groups detections within a
+  small Hamming-distance threshold via union-find, exposed as a new
+  "duplicate" filter chip and a `DuplicatesDialog` panel (Keep First /
+  Delete Duplicates / Merge Metadata). Run for real, not assumed:
+  **14 duplicate groups (34 detections) on the buildings sheet, 4 groups
+  (8 detections) on the UI icon sheet.**
+- **Fuller bulk-edit matrix** (`gallery_model.py`) — `apply_bulk_tags`
+  (unions, never clobbers), `apply_bulk_padding`, `apply_bulk_variant`,
+  `apply_bulk_animation_group`. `Detection` gained `padding: int = 0` and
+  `animation_group: str = ""` fields (kept as the pipeline's single
+  source of truth rather than GUI-only state), wired into the bulk-edit
+  group box alongside the new category tree. Verified on a real 5-card
+  multi-selection against both sheets: all four fields changed as
+  expected.
+- **More keyboard shortcuts** — Ctrl+D/Ctrl+E/Ctrl+F/Tab wired via
+  `QShortcut`, each fired for real via `.activated.emit()` in a headless
+  run and confirmed to do the right thing. Arrow-key grid navigation was
+  checked (not assumed) via `QTest.keyClick` — `QListWidget` IconMode
+  already handles it natively, so no custom code was added.
+- **Export preview** (`gui.ExportPreviewDialog`) — "Export to Android" now
+  runs the packing step first (writes nothing), shows a dialog listing
+  every sprite's real asset id + atlas filename plus page/metadata-file
+  counts, and only writes files on Confirm. Verified: 140-sprite sheet →
+  dialog listed exactly 140 items; Cancel path exercised, confirmed no
+  write occurs.
+
+`pytest -q` → **136 passed** (93 prior + 43 new: 17 in
+`test_category_tree.py`, 12 in `test_duplicates.py`, 14 more in
+`test_gallery_model.py`). No regressions in the prior pass's fixed
+Approved-checkbox signal-blocking bug — re-verified headlessly after
+swapping the category combo for the tree widget (selecting a card still
+does not silently mutate review state).
+
+Explicitly still deferred, see `tools/ripple-asset-studio/README.md`'s
+Deferred/TODO section: drag-rectangle marquee select, the Space shortcut,
+a confidence-range filter, `.rippleasset` save/reopen, batch import queue,
+OCR text detection, resize handles, Kotlin codegen, true animation-frame-
+sequence grouping (the new `animation_group` field is a flat label, not
+frame ordering), and merge-gap/tolerance auto-tuning.
 
 ### 2026-07-10 — Ripple Asset Studio: gallery-first review UX
 

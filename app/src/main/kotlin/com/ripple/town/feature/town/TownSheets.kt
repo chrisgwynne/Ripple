@@ -1,7 +1,9 @@
 package com.ripple.town.feature.town
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -9,10 +11,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
@@ -30,7 +34,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
+import com.ripple.town.core.model.BuildingType
+import com.ripple.town.core.model.isHome
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.SimTime
 import com.ripple.town.core.model.StoryCategory
@@ -56,6 +63,7 @@ import com.ripple.town.data.WorldUi
 fun BuildingSheetContent(world: WorldUi, buildingId: Long, viewModel: TownViewModel) {
     val b = world.building(buildingId) ?: return
     val buildingEvents by viewModel.buildingEvents.collectAsState()
+    val owner = world.resident(b.ownerId)
     Column(
         Modifier
             .padding(horizontal = 20.dp)
@@ -65,33 +73,53 @@ fun BuildingSheetContent(world: WorldUi, buildingId: Long, viewModel: TownViewMo
     ) {
         Text(b.name, style = MaterialTheme.typography.headlineSmall)
         Text(
-            b.typeLabel + (if (b.abandoned) " · standing empty" else "") +
-                (b.businessOpen?.let { if (!it) " · closed down" else "" } ?: ""),
+            buildingStatusPhrase(world, b),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        b.ownerName?.let { Text("Owned by $it", style = MaterialTheme.typography.bodyMedium) }
-        SectionTitle("Condition")
+
+        if (owner != null) {
+            SectionTitle("Owner")
+            OwnerCard(owner = owner, b = b, onClick = { viewModel.openResident(owner.id) })
+        } else {
+            b.ownerName?.let { Text("Owned by $it", style = MaterialTheme.typography.bodyMedium) }
+        }
+
+        if (b.businessName != null) {
+            SectionTitle("Business")
+            BusinessHealthSection(b, owner)
+        }
+
+        SectionTitle("Building")
         StatBar("Condition", b.condition)
         StatBar("Noise", b.noise, good = false)
         Text("Value: ${b.value.toInt()} coins", style = MaterialTheme.typography.bodyMedium)
-        if (b.businessName != null) {
-            SectionTitle("Business")
-            Text(
-                "${b.businessName} — " + (if (b.businessOpen == true) "trading" else "no longer trading"),
-                style = MaterialTheme.typography.bodyMedium
-            )
-            b.businessBalance?.let {
+        Text(
+            "Currently used as: " + (if (b.businessName != null) "a business" else if (b.type.isHome) "a home" else b.typeLabel),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            "No record of previous tenants is kept yet — this building's history before its current use isn't tracked.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        if (b.abandoned) {
+            SectionTitle("What could happen here")
+            if (b.type == BuildingType.VACANT) {
                 Text(
-                    "Books: ${if (it >= 0) "healthy" else "in the red"} (${it.toInt()} coins)",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (it < 0) RippleColors.DeepBrick else RippleColors.DeepGreen
+                    "An ambitious resident with the right skills could one day buy this building and open a new business here.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            } else {
+                Text(
+                    "Standing empty for now — no buyer or new use has been decided yet.",
+                    style = MaterialTheme.typography.bodyMedium
                 )
             }
-            if (b.employeeNames.isNotEmpty()) {
-                Text("Staff: ${b.employeeNames.joinToString()}", style = MaterialTheme.typography.bodyMedium)
-            }
         }
+
         val occupants = b.occupantIds.mapNotNull { world.resident(it) }
         if (occupants.isNotEmpty()) {
             SectionTitle("Inside right now")
@@ -103,25 +131,325 @@ fun BuildingSheetContent(world: WorldUi, buildingId: Long, viewModel: TownViewMo
                 )
             }
         }
-        if (b.visibleChanges.isNotEmpty()) {
-            SectionTitle("Changes over time")
-            b.visibleChanges.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium) }
+
+        val employees = b.businessEmployeeIds.mapNotNull { world.resident(it) }
+        if (employees.isNotEmpty()) {
+            SectionTitle("Employees")
+            employees.forEach { r ->
+                EmployeeRow(r, onClick = { viewModel.openResident(r.id) })
+            }
         }
+
+        val nearby = nearbyBusinesses(world, b)
+        if (nearby.isNotEmpty()) {
+            SectionTitle("Nearby businesses")
+            nearby.forEach { nb ->
+                Text(
+                    "• ${nb.businessName ?: nb.name} (${nb.typeLabel})" +
+                        if (nb.businessOpen == false) " — closed" else "",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.clickable { viewModel.openBuilding(nb.id) }.padding(vertical = 2.dp)
+                )
+            }
+        }
+
+        val crimeEvents = buildingEvents.filter {
+            it.type == EventType.CRIME_COMMITTED || it.type == EventType.CRIME_REPORTED
+        }
+        if (crimeEvents.isNotEmpty()) {
+            SectionTitle("Crime here")
+            crimeEvents.take(5).forEach { e ->
+                Text(
+                    "• ${e.description} (${e.timeLabel})",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = RippleColors.DeepBrick,
+                    modifier = Modifier.clickable { viewModel.openEvent(e.id) }.padding(vertical = 2.dp)
+                )
+            }
+        }
+
+        val timeline = buildTimeline(b, buildingEvents)
+        if (timeline.isNotEmpty()) {
+            SectionTitle("Changes over time")
+            timeline.forEach { entry -> TimelineRow(entry, onClick = { entry.eventId?.let { viewModel.openEvent(it) } }) }
+        }
+
         SectionTitle("Recent events here")
-        if (buildingEvents.isEmpty()) EmptyNote("Nothing of note lately.")
-        buildingEvents.take(8).forEach { e ->
-            Column(Modifier.clickable { viewModel.openEvent(e.id) }.padding(vertical = 4.dp)) {
-                Text(e.description, style = MaterialTheme.typography.bodyMedium)
-                Text(e.timeLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (buildingEvents.isEmpty()) {
+            EmptyNote("Nothing of note lately.")
+        } else {
+            val grouped = groupRoutineEvents(buildingEvents, world.time, b.businessOpen == true)
+            grouped.summaryLines.forEach { line ->
+                Text("• $line", style = MaterialTheme.typography.bodyMedium)
+            }
+            grouped.notable.forEach { e ->
+                Column(Modifier.clickable { viewModel.openEvent(e.id) }.padding(vertical = 4.dp)) {
+                    Text(e.description, style = MaterialTheme.typography.bodyMedium)
+                    Text(e.timeLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
     }
 }
 
+/** Real-thresholds status phrase for the header — no free-form text, just templated reads of real fields. */
+private fun buildingStatusPhrase(world: WorldUi, b: com.ripple.town.data.BuildingUi): String {
+    val open = b.businessOpen
+    return when {
+        b.abandoned && b.businessClosedAt != null -> {
+            val days = SimTime.dayIndex(world.time) - SimTime.dayIndex(b.businessClosedAt)
+            val since = when {
+                days <= 0 -> "today"
+                days == 1L -> "1 day"
+                else -> "$days days"
+            }
+            "${b.typeLabel} · permanently closed — empty since $since"
+        }
+        b.abandoned -> "${b.typeLabel} · standing empty"
+        open == false -> "${b.typeLabel} · closed down"
+        open == true -> {
+            val customers = b.occupantIds.size
+            val trouble = b.businessDaysInTrouble ?: 0
+            when {
+                customers >= 4 -> "${b.typeLabel} · Busy — $customers customers inside"
+                trouble > 0 -> "${b.typeLabel} · Struggling — losses for $trouble consecutive day${if (trouble == 1) "" else "s"}"
+                b.condition < 30 -> "${b.typeLabel} · Open, but run-down"
+                customers > 0 -> "${b.typeLabel} · Open — $customers inside"
+                else -> "${b.typeLabel} · Open, quiet right now"
+            }
+        }
+        else -> b.typeLabel
+    }
+}
+
+@Composable
+private fun OwnerCard(owner: com.ripple.town.data.ResidentUi, b: com.ripple.town.data.BuildingUi, onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 4.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant
+    ) {
+        Row(Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.padding(start = 4.dp)) {
+                Text(owner.name, style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "${owner.age} years old · ${owner.mood.label}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                ownerBusinessImpactPhrase(b)?.let {
+                    Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
+/** Short templated "how this business affects them" phrase, derived from real Business fields only. */
+private fun ownerBusinessImpactPhrase(b: com.ripple.town.data.BuildingUi): String? {
+    val trouble = b.businessDaysInTrouble ?: return null
+    val reputation = b.businessReputation
+    val demand = b.businessDemand
+    return when {
+        trouble > 3 -> "Under real financial strain from the business's losses."
+        trouble > 0 -> "Feeling the pinch as the business struggles."
+        reputation != null && reputation > 70 && demand != null && demand > 65 -> "Clearly proud — the business is thriving."
+        reputation != null && reputation > 70 -> "Takes pride in the business's good name."
+        else -> null
+    }
+}
+
+@Composable
+private fun BusinessHealthSection(b: com.ripple.town.data.BuildingUi, owner: com.ripple.town.data.ResidentUi?) {
+    Text(
+        "${b.businessName} — " + (if (b.businessOpen == true) "trading" else "no longer trading"),
+        style = MaterialTheme.typography.bodyMedium
+    )
+    b.businessBalance?.let {
+        Text(
+            "Books: ${if (it >= 0) "healthy" else "in the red"} (${it.toInt()} coins)",
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (it < 0) RippleColors.DeepBrick else RippleColors.DeepGreen
+        )
+    }
+    val revenue = b.businessRevenueToday
+    val expenses = b.businessExpensesToday
+    if (revenue != null && expenses != null) {
+        val profit = revenue - expenses
+        Text(
+            "Today: ${revenue.toInt()} coins in, ${expenses.toInt()} coins out (${if (profit >= 0) "+" else ""}${profit.toInt()})",
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (profit < 0) RippleColors.DeepBrick else RippleColors.DeepGreen
+        )
+    }
+    b.businessCustomersToday?.let {
+        Text("Customers today: $it", style = MaterialTheme.typography.bodyMedium)
+    }
+    val trouble = b.businessDaysInTrouble
+    if (trouble != null) {
+        Text(
+            if (trouble > 0) "$trouble consecutive day${if (trouble == 1) "" else "s"} in the red" else "Not currently in financial trouble",
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (trouble > 0) RippleColors.DeepBrick else RippleColors.DeepGreen
+        )
+    }
+    val employeeCount = b.employeeNames.size
+    val capacity = b.businessEmployeeCapacity
+    Text(
+        "Staff: ${if (b.employeeNames.isEmpty()) "none" else b.employeeNames.joinToString()}" +
+            (capacity?.let { " ($employeeCount/$it positions filled)" } ?: ""),
+        style = MaterialTheme.typography.bodyMedium
+    )
+    b.businessDemand?.let { StatBar("Demand (footfall)", it) }
+    b.businessReputation?.let { StatBar("Reputation", it) }
+    b.businessPriceLevel?.let {
+        val pct = ((it - 1.0) * 100).toInt()
+        Text(
+            "Prices: " + when {
+                pct > 5 -> "$pct% above standard"
+                pct < -5 -> "${-pct}% below standard"
+                else -> "standard"
+            },
+            style = MaterialTheme.typography.bodyMedium
+        )
+    }
+    val debt = owner?.debt
+    if (debt != null && debt > 0) {
+        Text(
+            "Owner's outstanding debt: ${debt.toInt()} coins",
+            style = MaterialTheme.typography.bodyMedium,
+            color = RippleColors.DeepBrick
+        )
+    }
+}
+
+@Composable
+private fun EmployeeRow(r: com.ripple.town.data.ResidentUi, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            "• ${r.name} — ${r.occupation.ifBlank { "staff" }} · ${r.mood.label.lowercase()}",
+            style = MaterialTheme.typography.bodyMedium
+        )
+    }
+}
+
+/** Cheap nearby-business lookup: Manhattan tile distance between building origins, capped small. */
+private fun nearbyBusinesses(world: WorldUi, b: com.ripple.town.data.BuildingUi): List<com.ripple.town.data.BuildingUi> {
+    val maxDistance = 12
+    return world.buildings
+        .asSequence()
+        .filter { it.id != b.id && it.businessName != null }
+        .map { it to (kotlin.math.abs(it.x - b.x) + kotlin.math.abs(it.y - b.y)) }
+        .filter { (_, dist) -> dist <= maxDistance }
+        .sortedBy { (_, dist) -> dist }
+        .take(4)
+        .map { (bldg, _) -> bldg }
+        .toList()
+}
+
+/** One entry in the combined visible-changes + building-relevant-events timeline. */
+private data class TimelineEntry(val timeLabel: String, val description: String, val eventId: Long?, val major: Boolean)
+
+/**
+ * Combines building-level cosmetic history (`visibleChanges`, which carry no timestamp) with
+ * real timestamped building events into one chronological list. `visibleChanges` have no time
+ * data on the model, so they're honestly rendered as "earlier" entries without a fabricated
+ * date, ordered before the (correctly dated) event entries.
+ */
+private fun buildTimeline(b: com.ripple.town.data.BuildingUi, events: List<EventUi>): List<TimelineEntry> {
+    val relevantTypes = setOf(
+        EventType.BUILDING_CONSTRUCTED, EventType.BUILDING_DAMAGED, EventType.BUILDING_REPAIRED,
+        EventType.BUILDING_EXPANDED, EventType.BUILDING_ABANDONED, EventType.BUSINESS_OPENED,
+        EventType.BUSINESS_CLOSED, EventType.BUSINESS_EXPANDED, EventType.BUSINESS_SUCCESSION,
+        EventType.HOME_PURCHASED
+    )
+    val eventEntries = events
+        .filter { it.type in relevantTypes }
+        .sortedByDescending { it.time }
+        .take(10)
+        .map { TimelineEntry(it.timeLabel, it.description, it.id, it.importance >= 45.0) }
+    val changeEntries = b.visibleChanges.map { TimelineEntry("Earlier", it, null, false) }
+    return changeEntries + eventEntries
+}
+
+@Composable
+private fun TimelineRow(entry: TimelineEntry, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .let { if (entry.eventId != null) it.clickable(onClick = onClick) else it }
+            .padding(vertical = 4.dp)
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                Modifier
+                    .size(if (entry.major) 12.dp else 8.dp)
+                    .clip(CircleShape)
+                    .background(if (entry.major) RippleColors.Gold else RippleColors.SoftInk)
+            )
+            Box(
+                Modifier
+                    .width(2.dp)
+                    .height(28.dp)
+                    .background(MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Column {
+            Text(entry.description, style = MaterialTheme.typography.bodyMedium)
+            Text(entry.timeLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** Grouped-vs-individual split of recent building events. */
+private data class GroupedEvents(val summaryLines: List<String>, val notable: List<EventUi>)
+
+/**
+ * Groups routine/frequent events from the current in-game day into count summaries
+ * (e.g. "3 residents visited today") when the business is open and busy, falling back to
+ * individual rows for older/rarer events. Categorisation mirrors the EventType buckets
+ * `NewspaperGenerator`/`HistoryScreen` already use — no new event types invented.
+ */
+private fun groupRoutineEvents(events: List<EventUi>, now: Long, isOpenAndBusy: Boolean): GroupedEvents {
+    val todayIndex = SimTime.dayIndex(now)
+    val today = events.filter { SimTime.dayIndex(it.time) == todayIndex }
+    val older = events.filterNot { SimTime.dayIndex(it.time) == todayIndex }
+
+    if (!isOpenAndBusy || today.size < 3) {
+        return GroupedEvents(emptyList(), events.take(8))
+    }
+
+    val visitTypes = setOf(EventType.MEETING, EventType.COMMUNITY_EVENT)
+    val conversationTypes = setOf(EventType.ARGUMENT, EventType.APOLOGY, EventType.RECONCILIATION)
+    val crimeTypes = setOf(EventType.CRIME_COMMITTED, EventType.CRIME_REPORTED, EventType.SHOPLIFTING, EventType.VANDALISM)
+
+    val visits = today.count { it.type in visitTypes }
+    val conversations = today.count { it.type in conversationTypes }
+    val crimes = today.count { it.type in crimeTypes }
+    val bucketed = visitTypes + conversationTypes + crimeTypes
+    val routineCount = visits + conversations + crimes
+    val leftoverToday = today.filter { it.type !in bucketed }
+
+    val summary = buildList {
+        if (visits > 0) add("$visits resident${if (visits == 1) "" else "s"} visited today")
+        if (conversations > 0) add("$conversations conversation${if (conversations == 1) "" else "s"} happened today")
+        if (crimes > 0) add("$crimes incident${if (crimes == 1) "" else "s"} reported today")
+    }
+
+    // If nothing was actually bucketed, there's no real grouping to show — fall back honestly.
+    if (routineCount == 0) return GroupedEvents(emptyList(), events.take(8))
+
+    val notable = (leftoverToday + older).sortedByDescending { it.importance }.take(6)
+    return GroupedEvents(summary, notable)
+}
+
 // --------------------------------------------------------------- event sheet
 
 @Composable
-fun EventSheetContent(world: WorldUi, eventId: Long, viewModel: TownViewModel) {
+fun EventSheetContent(world: WorldUi, eventId: Long, sprites: SpriteProvider, viewModel: TownViewModel) {
     val chain by viewModel.causeChain.collectAsState()
     val event = chain.firstOrNull()?.firstOrNull { it.id == eventId }
         ?: chain.firstOrNull()?.firstOrNull()
@@ -146,7 +474,15 @@ fun EventSheetContent(world: WorldUi, eventId: Long, viewModel: TownViewModel) {
             .verticalScroll(rememberScrollState())
     ) {
         if (event == null) { EmptyNote("The record is missing."); return }
-        Text(event.typeLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                event.typeLabel,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f)
+            )
+            SeverityTierBadge(event.severity, event.importance)
+        }
         Text(event.description, style = MaterialTheme.typography.titleLarge)
         Text(event.timeLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         TextButton(onClick = { expanded = !expanded }) {
@@ -154,28 +490,48 @@ fun EventSheetContent(world: WorldUi, eventId: Long, viewModel: TownViewModel) {
         }
         if (expanded && !elaboration.isNullOrBlank()) {
             Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceVariant) {
-                Text(
-                    elaboration!!,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(10.dp)
-                )
+                Column(Modifier.padding(10.dp)) {
+                    Text(elaboration!!, style = MaterialTheme.typography.bodyMedium)
+                    // Light-touch memory reinforcement (task 5, added 2026-07-10): if any involved
+                    // resident already has a prior memory naming this same place, surface it here as
+                    // a read-time enrichment of the elaboration text — not a new memory mechanic
+                    // (Memory only ever decays, see priorMemoryEcho's doc comment below), and never
+                    // fabricated: shown only when a real matching Memory exists on that resident.
+                    val recall = event.involvedResidentIds.asSequence()
+                        .mapNotNull { world.resident(it) }
+                        .mapNotNull { r -> priorMemoryEcho(world, event, r) }
+                        .firstOrNull()
+                    if (recall != null) {
+                        Text(
+                            recall,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 6.dp)
+                        )
+                    }
+                }
             }
         }
         val involved = event.involvedResidentIds.mapNotNull { world.resident(it) }
         if (involved.isNotEmpty()) {
             SectionTitle("People involved")
-            involved.forEach { r ->
-                Row(
-                    Modifier.fillMaxWidth().clickable { viewModel.openResident(r.id) }.padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("• ${r.name}", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-                    if (r.id !in world.favouriteIds) {
-                        TextButton(onClick = { viewModel.toggleFavourite(r.id) }) { Text("☆ Favourite") }
-                    }
-                }
+            involved.forEachIndexed { i, r ->
+                EventResidentCard(
+                    resident = r,
+                    role = roleLabel(event, i),
+                    sprites = sprites,
+                    isFavourite = r.id in world.favouriteIds,
+                    onOpen = { viewModel.openResident(r.id) },
+                    onToggleFavourite = { viewModel.toggleFavourite(r.id) }
+                )
             }
         }
+        // Location (task 3, added 2026-07-10): Ripple's homes are hand-authored with the
+        // street baked directly into the building name ("8 Rowan Street" etc — see
+        // WorldGenerator.slots()), so that name already reads as "name, street" on its own.
+        // Business buildings ("Bell's Bakery") carry no separate street field anywhere in the
+        // simulation layer — there is genuinely nothing truthful to append for them, so this
+        // stays a plain name read rather than inventing a "High Street" suffix.
         world.building(event.buildingId)?.let {
             Text("Where: ${it.name}", style = MaterialTheme.typography.bodyMedium)
         }
@@ -202,6 +558,137 @@ fun EventSheetContent(world: WorldUi, eventId: Long, viewModel: TownViewModel) {
             EmptyNote("As far as anyone can tell, this simply happened.")
         }
     }
+}
+
+/**
+ * Compact resident card (task 2, added 2026-07-10): replaces the old plain-text "• Name" bullet
+ * row with an avatar + name/age/occupation/mood + a short role label, mirroring the row shape
+ * `PeopleScreen.PersonRow`/`FamilyTreeScreen` already use. Reuses [PixelAvatar]/[SpriteProvider]
+ * and `poseFor` (from `TownRenderer.kt`, same package) — no new sprite-rendering path. Tapping
+ * still opens the resident's profile via the same `viewModel.openResident` call the old row used.
+ */
+@Composable
+private fun EventResidentCard(
+    resident: com.ripple.town.data.ResidentUi,
+    role: String,
+    sprites: SpriteProvider,
+    isFavourite: Boolean,
+    onOpen: () -> Unit,
+    onToggleFavourite: () -> Unit
+) {
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp).clickable(onClick = onOpen)
+    ) {
+        Row(
+            Modifier.padding(10.dp).fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            PixelAvatar(resident.sprite, sprites, size = 40.dp, pose = poseFor(resident), lifeStage = resident.lifeStage, occupation = resident.occupation)
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(resident.name, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f, fill = false))
+                    Spacer(Modifier.width(6.dp))
+                    Surface(shape = MaterialTheme.shapes.extraSmall, color = MaterialTheme.colorScheme.surface) {
+                        Text(
+                            role,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+                val occupationLabel = resident.occupation.ifBlank { "no occupation" }
+                Text(
+                    "Age ${resident.age} · $occupationLabel · ${resident.mood.label}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (!isFavourite) {
+                TextButton(onClick = onToggleFavourite) { Text("☆") }
+            }
+        }
+    }
+}
+
+/**
+ * Role label (task 2): derived only from data the event actually carries — never guessed beyond
+ * what's traceable. `EventUi.involvedResidentIds` is built source-then-targets (see
+ * `WorldRepository.toUi`), so index 0 is the event's actual source/initiator whenever one exists.
+ * A handful of event types have an unambiguous, event-type-derivable role for that source (e.g.
+ * the business owner in a closure); everyone else — including every target — reads as the
+ * generic "Involved", which is honest rather than invented ("Witness"/"Employee" for a specific
+ * person would need data — which employee, which witness — this UI layer doesn't have).
+ */
+private fun roleLabel(event: EventUi, index: Int): String {
+    if (index != 0) return "Involved"
+    return when (event.type) {
+        EventType.BUSINESS_CLOSED, EventType.BUSINESS_STRUGGLING, EventType.BUSINESS_OPENED,
+        EventType.BUSINESS_EXPANDED, EventType.BUSINESS_SUCCESSION -> "Owner"
+        EventType.JOB_LOST, EventType.JOB_STARTED, EventType.JOB_QUIT, EventType.HOURS_REDUCED -> "Employee"
+        EventType.CRIME_COMMITTED, EventType.SHOPLIFTING, EventType.BURGLARY, EventType.MUGGING,
+        EventType.VEHICLE_THEFT, EventType.FRAUD, EventType.ARSON_ATTEMPT, EventType.VANDALISM -> "Suspected"
+        EventType.PERSON_DIED -> "Deceased"
+        else -> "Involved"
+    }
+}
+
+/**
+ * Severity tiers (task 4): `WorldEvent.severity` (0..1) and `ImportanceScorer` already exist;
+ * this is the small pure bucketing function the brief asks for, not a new scoring system.
+ * "Historic" reuses `ImportanceScorer.HISTORY_THRESHOLD` (30.0) — the exact bar the History
+ * timeline itself already gates on, rather than inventing a new number. The other four bands
+ * split the remaining severity range (0..1) evenly; severity (not importance) drives them since
+ * importance already factors in reach/causal-boost and would double-count that here.
+ */
+private fun severityTierLabel(severity: Double, importance: Double): String = when {
+    importance >= com.ripple.town.core.simulation.ImportanceScorer.HISTORY_THRESHOLD -> "Historic"
+    severity >= 0.7 -> "Critical"
+    severity >= 0.5 -> "Major"
+    severity >= 0.25 -> "Moderate"
+    else -> "Minor"
+}
+
+@Composable
+private fun SeverityTierBadge(severity: Double, importance: Double) {
+    val label = severityTierLabel(severity, importance)
+    val color = when (label) {
+        "Historic", "Critical" -> RippleColors.DeepBrick
+        "Major" -> MaterialTheme.colorScheme.primary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Surface(shape = MaterialTheme.shapes.extraSmall, color = MaterialTheme.colorScheme.surfaceVariant) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = color,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+        )
+    }
+}
+
+/**
+ * Memory reinforcement (task 5, light touch, added 2026-07-10): looks for a prior [MemoryUi] on
+ * `resident` that plausibly references this same place — `Memory` itself has no resurfacing
+ * mechanic (`lastRecalledAt`/`decayPerYear` in `core/model/Goal.kt` only ever decay towards
+ * fading and eventual removal in `TickContext.addMemory`; there is no "resurface" path anywhere
+ * in the engine) — building a real resurfacing engine is a genuinely large feature and explicitly
+ * out of scope here (see docs/backlog.md's 2026-07-10 entry). This is purely a read-time text
+ * lookup over the resident's existing `memories` list already carried on `ResidentUi` — no
+ * simulation state changes, no new mechanic. Matches only on the building's own name appearing in
+ * a memory's description (the one signal actually available client-side); returns null rather
+ * than guessing when nothing matches.
+ */
+private fun priorMemoryEcho(world: WorldUi, event: EventUi, resident: com.ripple.town.data.ResidentUi): String? {
+    val buildingName = world.building(event.buildingId)?.name ?: return null
+    val echo = resident.memories
+        .filter { it.description.contains(buildingName, ignoreCase = true) }
+        .maxByOrNull { it.intensity }
+        ?: return null
+    return "${resident.firstName} remembers this place: \"${echo.description}\""
 }
 
 // -------------------------------------------------------- intervention sheet

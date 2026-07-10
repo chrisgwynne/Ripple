@@ -173,10 +173,33 @@ object HealthSystem {
         if (r.needs.health < 12) risk += 0.004
         if (risk <= 0.0) return
         if (ctx.rng.nextBoolean(risk)) {
-            val cause = r.activeConditions().filter { it.type.serious && it.severity > 60 }
-                .maxByOrNull { it.severity }?.type?.label
+            val fatalCondition = r.activeConditions().filter { it.type.serious && it.severity > 60 }
+                .maxByOrNull { it.severity }
+            val cause = fatalCondition?.type?.label
                 ?: if (age > 78) "old age" else "a sudden decline"
-            LifecycleSystem.die(ctx, r, cause)
+            // Underlying cause (added 2026-07-10, see docs/simulation-rules.md "Events, causes,
+            // importance"): when death traces to a specific diagnosed condition, link back to
+            // that diagnosis event — real history already on record, never invented — so the
+            // cause chain shows "diagnosed X" -> "died of X" rather than death appearing to come
+            // from nowhere. Old-age/sudden-decline deaths genuinely have no such event, so they
+            // correctly carry no extra causeId.
+            val diagnosisEvent = fatalCondition?.let { diagnosisEventFor(ctx, r, it) }
+            LifecycleSystem.die(ctx, r, cause, causeIds = listOfNotNull(diagnosisEvent?.id))
         }
+    }
+
+    /** The most recent `ILLNESS_DIAGNOSED` event for this resident matching [condition]'s type,
+     *  from this tick or the bounded recent-events window — mirrors
+     *  `CrimeSystem.mostRecentDesperationCause`'s "never invent a cause" discipline. */
+    private fun diagnosisEventFor(ctx: TickContext, r: Resident, condition: HealthCondition): com.ripple.town.core.model.WorldEvent? {
+        val matches: (com.ripple.town.core.model.WorldEvent) -> Boolean = {
+            it.type == EventType.ILLNESS_DIAGNOSED &&
+                it.sourceResidentId == r.id &&
+                it.payload["condition"] == condition.type.name
+        }
+        ctx.newEvents.lastOrNull(matches)?.let { return it }
+        return ctx.state.recentEventIds.asReversed()
+            .mapNotNull { ctx.eventIndex.get(it) }
+            .firstOrNull(matches)
     }
 }

@@ -182,11 +182,24 @@ object EconomySystem {
         val building = state.building(biz.buildingId)
         building?.abandoned = true
         building?.visibleChanges?.add("Shutters down — closed")
+        // Cause payload (added 2026-07-10, see docs/simulation-rules.md "Events, causes,
+        // importance"): "immediate" is just `why` — already the daysInTrouble-based reason
+        // string this function has always taken, genuinely descriptive on its own.
+        // "underlying" only gets set when something *specific* and real explains the trouble
+        // in the first place — a recent weather-damage hit to this building, a rivalry the
+        // owner is party to, or the national fuel-price pressure being active while the books
+        // were already bad. Never a placeholder: if none of those are on record, the key is
+        // simply omitted rather than filled with invented text.
+        val underlying = underlyingClosureCause(ctx, biz)
         val closure = ctx.emit(
             EventType.BUSINESS_CLOSED,
             "${biz.name} has closed its doors $why.",
             sourceResidentId = biz.ownerId, businessId = biz.id, buildingId = biz.buildingId,
-            severity = 0.7, causeIds = causeIds
+            severity = 0.7, causeIds = causeIds,
+            payload = buildMap {
+                put("immediate_cause", why)
+                if (underlying != null) put("underlying_cause", underlying)
+            }
         )
         // Everyone employed there loses their job — direct causal children.
         for (emp in state.employeesOf(biz.id).sortedBy { it.id }) {
@@ -213,6 +226,47 @@ object EconomySystem {
             ctx.addMemory(owner, MemoryType.LOSS, "Losing ${biz.name} broke something in me.", 80.0, closure.id)
         }
         ConsequenceEngine.onEvent(ctx, closure)
+    }
+
+    /**
+     * A real, traceable underlying reason for a closure, when one is genuinely on record —
+     * never invented. Checked in order of how directly each would plausibly explain a
+     * business's books going bad: a recent weather-damage hit to this exact building, an
+     * active rivalry the owner is party to (see `BusinessRivalrySystem`/`RIVALRY_FORMED`),
+     * then the national fuel-price pressure if it's been pushing overheads up while this
+     * business was already in trouble. Returns null — not a placeholder string — if none
+     * apply, same discipline `CrimeSystem.mostRecentDesperationCause` already established.
+     */
+    private fun underlyingClosureCause(ctx: TickContext, biz: Business): String? {
+        val state = ctx.state
+        val recentWeatherHit = mostRecentBuildingEventOfType(ctx, EventType.WEATHER_DAMAGE, biz.buildingId)
+        if (recentWeatherHit != null) return "storm damage to the building never fully recovered from"
+
+        val ownerId = biz.ownerId
+        if (ownerId != null) {
+            val rivalry = state.relationships.values.firstOrNull {
+                it.kind == com.ripple.town.core.model.RelationshipKind.RIVAL &&
+                    (it.aId == ownerId || it.bId == ownerId)
+            }
+            if (rivalry != null) return "a long-running rivalry that never let up"
+        }
+
+        if (state.externalPressure?.kind == com.ripple.town.core.model.ExternalPressureKind.FUEL_PRICES_RISE) {
+            return "rising fuel and delivery costs from beyond the town"
+        }
+        return null
+    }
+
+    /** The most recent event of a given type, from this tick or the recent-events window.
+     *  Mirrors `CrimeSystem.mostRecentEventOfType` — same bounded lookback, same "never invents
+     *  a cause" discipline, kept local since `EconomySystem` has no crime-shaped context to share it with. */
+    private fun mostRecentEventOfType(ctx: TickContext, type: EventType, residentId: Long?, businessId: Long?): com.ripple.town.core.model.WorldEvent? {
+        ctx.newEvents.lastOrNull {
+            it.type == type && (businessId == null || it.businessId == businessId)
+        }?.let { return it }
+        return ctx.state.recentEventIds.asReversed()
+            .mapNotNull { ctx.eventIndex.get(it) }
+            .firstOrNull { it.type == type && (businessId == null || it.businessId == businessId) }
     }
 
     private fun expandBusiness(ctx: TickContext, biz: Business) {

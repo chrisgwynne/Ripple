@@ -181,7 +181,23 @@ data class BuildingUi(
     val businessBalance: Double?,
     val businessReputation: Double?,
     val employeeNames: List<String>,
-    val visibleChanges: List<String>
+    val visibleChanges: List<String>,
+    /**
+     * Building sheet redesign (2026-07-10): fields already present on the engine-side
+     * [Building]/[Business] models but never previously carried onto the UI snapshot.
+     * Exposed as-is, no new simulation data invented — see `BuildingSheetContent` in
+     * `TownSheets.kt` for what reads these.
+     */
+    val ownerId: Long? = null,
+    val businessDaysInTrouble: Int? = null,
+    val businessDemand: Double? = null,
+    val businessPriceLevel: Double? = null,
+    val businessCustomersToday: Int? = null,
+    val businessRevenueToday: Double? = null,
+    val businessExpensesToday: Double? = null,
+    val businessEmployeeCapacity: Int? = null,
+    val businessEmployeeIds: List<Long> = emptyList(),
+    val businessClosedAt: Long? = null
 )
 
 /** Simulation status shown while catching up after reopening the app. */
@@ -352,7 +368,17 @@ object SnapshotBuilder {
             employeeNames = biz?.let { bz ->
                 state.employeesOf(bz.id).mapNotNull { state.resident(it.residentId)?.fullName }
             } ?: emptyList(),
-            visibleChanges = b.visibleChanges.takeLast(5)
+            visibleChanges = b.visibleChanges.takeLast(5),
+            ownerId = b.ownerId,
+            businessDaysInTrouble = biz?.daysInTrouble,
+            businessDemand = biz?.demand,
+            businessPriceLevel = biz?.priceLevel,
+            businessCustomersToday = biz?.customersToday,
+            businessRevenueToday = biz?.revenueToday,
+            businessExpensesToday = biz?.expensesToday,
+            businessEmployeeCapacity = biz?.employeeCapacity,
+            businessEmployeeIds = biz?.let { bz -> state.employeesOf(bz.id).map { it.residentId } } ?: emptyList(),
+            businessClosedAt = biz?.closedAt
         )
     }
 }

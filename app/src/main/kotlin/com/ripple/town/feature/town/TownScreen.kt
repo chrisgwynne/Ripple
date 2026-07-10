@@ -465,7 +465,7 @@ fun TownScreen(
                         world = w, buildingId = current.buildingId, viewModel = viewModel
                     )
                     is TownSheet.EventSheet -> EventSheetContent(
-                        world = w, eventId = current.eventId, viewModel = viewModel
+                        world = w, eventId = current.eventId, sprites = sprites, viewModel = viewModel
                     )
                     is TownSheet.InterventionSheet -> InterventionSheetContent(
                         world = w, residentId = current.residentId, viewModel = viewModel

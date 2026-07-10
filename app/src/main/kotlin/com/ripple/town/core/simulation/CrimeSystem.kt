@@ -199,7 +199,8 @@ object CrimeSystem {
                 "Something has gone missing from ${target.name} — a quiet till, easily overlooked.",
                 sourceResidentId = r.id, businessId = target.id,
                 severity = 0.3, visibility = EventVisibility.HIDDEN,
-                causeIds = listOfNotNull(priorCause?.id)
+                causeIds = listOfNotNull(priorCause?.id),
+                payload = desperationCausePayload(priorCause)
             )
             r.needs.safety -= 4.0
             ConsequenceEngine.onEvent(ctx, crime)
@@ -271,7 +272,8 @@ object CrimeSystem {
                 sourceResidentId = burglar.id, buildingId = target.id,
                 targetResidentIds = victims.map { it.id },
                 severity = 0.55, visibility = EventVisibility.HIDDEN,
-                causeIds = listOfNotNull(priorCause?.id)
+                causeIds = listOfNotNull(priorCause?.id),
+                payload = desperationCausePayload(priorCause)
             )
             for (v in victims) {
                 v.needs.safety -= 14.0
@@ -343,7 +345,8 @@ object CrimeSystem {
                     sourceResidentId = mugger.id, buildingId = buildingId,
                     targetResidentIds = listOf(victim.id),
                     severity = 0.6, visibility = EventVisibility.HIDDEN,
-                    causeIds = listOfNotNull(priorCause?.id)
+                    causeIds = listOfNotNull(priorCause?.id),
+                    payload = desperationCausePayload(priorCause)
                 )
                 victim.needs.safety -= 18.0
                 victim.needs.stress += 14.0
@@ -540,6 +543,22 @@ object CrimeSystem {
      * genuine causal link back to whatever actually created the desperation; returns null (never
      * invents a cause) if nothing plausible is still on record.
      */
+    /**
+     * Cause payload (added 2026-07-10, see docs/simulation-rules.md "Events, causes,
+     * importance"): "immediate" is always the plain fact of the theft itself — the crime's own
+     * description already says that, so the payload only ever adds "underlying_cause", and only
+     * when [priorCause] is non-null (a real, traced `JOB_LOST`/`DEBT_CRISIS` event or memory —
+     * see [mostRecentDesperationCause]'s own doc comment). No entry at all, never a placeholder
+     * string, when nothing genuine is on record.
+     */
+    private fun desperationCausePayload(priorCause: WorldEvent?): Map<String, String> =
+        if (priorCause == null) emptyMap()
+        else mapOf("underlying_cause" to when (priorCause.type) {
+            EventType.JOB_LOST -> "still reeling from losing their job"
+            EventType.DEBT_CRISIS -> "drowning in debt with no way out in sight"
+            else -> "circumstances that had been building for a while"
+        })
+
     private fun mostRecentDesperationCause(ctx: TickContext, r: Resident): WorldEvent? {
         val fromRecent = ctx.state.recentEventIds.asReversed()
             .mapNotNull { ctx.eventIndex.get(it) }
