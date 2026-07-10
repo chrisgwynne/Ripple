@@ -371,6 +371,45 @@ non-public-service businesses per day:
   default `StoryCategory.TOWN_NEWS` bucket, so no scoring/newspaper wiring
   changes were needed for the new type.
 
+## Business succession
+
+Economy v2's last open slice: **voluntary, in-life** ownership handoff, as
+distinct from the pre-existing, unchanged silent transfer in
+`LifecycleSystem.die` (which still applies whenever an owner dies without
+having already retired — the "no chosen heir was ready in time" fallback).
+`BusinessSuccessionSystem.updateDaily` runs daily, straight after
+`PriceDriftSystem`, and models exactly one shape of succession — a parent
+handing the business to a child who already works there — deliberately
+narrow; founding a new business or a non-family sale to an outside buyer are
+not attempted:
+
+- **Eligibility.** The owner must be alive, in town, and at least
+  `RETIREMENT_AGE` (68). They must also have an adult child (alive, in town)
+  currently *employed at that same business* — the heir already knows the
+  trade, so this is a natural handoff rather than a random pick, not a
+  general "any relative" rule.
+- **Timing.** Once eligible, a `SUCCESSION_CHANCE_PER_DAY` (6%) daily roll
+  through `ctx.rng` decides whether it happens that day — a slow, considered
+  decision spread over weeks/months, matching every other daily system's
+  gentle pacing rather than firing the instant someone turns 68.
+- **What happens.** `Business.ownerId` moves to the heir; the heir's
+  employment record at that business ends (they're not staff anymore, they
+  run it) via the same `Employment.endedAt` field job-loss/quitting already
+  use. Any active `RETIRE_WELL` goal the former owner was working towards is
+  marked `COMPLETED`. A `BUSINESS_SUCCESSION` event (`PUBLIC`) fires, and
+  both parties get an `ACHIEVEMENT` memory of the day — pride for the parent
+  handing it on, trust for the child receiving it. Bounded to
+  `MAX_BUSINESSES_PER_DAY` (40) businesses considered per day, like every
+  other daily system.
+- **Still open:** non-family succession (selling to an outside buyer),
+  succession disputes between multiple ready heirs (currently just picks the
+  first eligible child by id), and voluntary sale/closure unrelated to
+  retirement — none of these are attempted here. Combined with price drift
+  and rivalries above, this closes out the Economy v2 backlog item's three
+  originally-scoped pieces (rivalries, prices-that-move, succession); the
+  property market (residents buying/selling homes) is a related but
+  separate, still-open item.
+
 ## Crime & suspicion
 
 Motive: poverty. `JOB_LOST` seeds a `CRIME_TEMPTATION` delayed effect

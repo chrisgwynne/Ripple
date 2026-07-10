@@ -4,6 +4,30 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-10 — Phase 3: Economy v2 — business succession (voluntary retirement handoff)
+
+Fifth Phase 3 backlog item, closing out Economy v2's third and last
+originally-scoped piece. New `BusinessSuccessionSystem.updateDaily`, run
+daily right after `PriceDriftSystem`, following the same bounded-`object`
+pattern as the rest. Deliberately narrow: only one succession shape is
+modelled — an owner at or past `RETIREMENT_AGE` (68) with an adult child
+already *employed at that same business* has a small daily chance
+(`SUCCESSION_CHANCE_PER_DAY`, 6%) of handing the business down and
+retiring. `Business.ownerId` moves to the heir, the heir's employment record
+there ends (they run it now, they don't work for it), any active
+`RETIRE_WELL` goal completes, a new `BUSINESS_SUCCESSION` event fires
+(`PUBLIC`), and both parent and child get an `ACHIEVEMENT` memory of the
+day. Bounded to `MAX_BUSINESSES_PER_DAY` (40). This is distinct from —
+and doesn't touch — the pre-existing silent ownership transfer in
+`LifecycleSystem.die`, which remains the fallback for an owner who dies
+without having already retired. See
+`docs/simulation-rules.md#business-succession`.
+
+Still open, explicitly out of scope for this pass: non-family succession
+(sale to an outside buyer), disputes between multiple ready heirs, and the
+property market (residents actually buying/selling homes) — the last
+genuinely separate item under the Economy v2 umbrella.
+
 ### 2026-07-10 — Phase 3: Economy v2 — prices that move (town-wide price drift)
 
 Fourth Phase 3 backlog item, continuing directly off the price-competition-
@@ -819,11 +843,19 @@ rather than duplicating it wholesale into this doc.
   for prosperous ones (balance > `EconomySystem.EXPANSION_BALANCE`),
   clamped to 0.7–1.4; a new `PRICES_SHIFTED` event fires the day a
   business's price first crosses 10% away from baseline. See
-  `docs/simulation-rules.md#price-drift`. Still open: the **property
-  market** (residents actually buying/selling homes) and further
-  **business succession** work beyond the existing death-of-owner heir
-  handoff (`LifecycleSystem.die` passes a business to an adult heir or
-  partner) — neither of these two were attempted here.*
+  `docs/simulation-rules.md#price-drift`. **Business succession now also
+  implemented**: new `BusinessSuccessionSystem`, run daily straight after
+  `PriceDriftSystem` — an owner at or past age 68 with an adult child
+  already employed at that same business has a small daily chance (6%) of
+  voluntarily handing it down and retiring, distinct from (and not touching)
+  the pre-existing silent death-of-owner heir handoff in
+  `LifecycleSystem.die`, which remains the fallback for an owner who dies
+  before retiring. `Business.ownerId` transfers, a `BUSINESS_SUCCESSION`
+  event fires, both parties get an `ACHIEVEMENT` memory. See
+  `docs/simulation-rules.md#business-succession`. Still open: the
+  **property market** (residents actually buying/selling homes) — the last
+  genuinely separate item under this bullet — plus non-family succession and
+  multi-heir disputes within succession itself.*
 - Multiple towns: `World` already separates from `Town`; add a second map and
   slow migration between towns.
 - Counterfactual viewer ("what nearly happened"): replay a checkpoint with
@@ -847,6 +879,16 @@ rather than duplicating it wholesale into this doc.
 
 ## Engineering debt to pay alongside
 
+- Scale to thousands of residents: spatial partitioning for tick/render
+  proximity queries (currently linear scans over `state.residents.values`),
+  distance/interest-based culling so only nearby or `DetailLevel.DETAILED`
+  residents get full per-tick simulation, and event-driven wake instead of
+  polling every system every tick. Not urgent at the current small seeded
+  population, but every daily system added this session (`PetitionSystem`,
+  `BusinessRivalrySystem`, `PriceDriftSystem`, `BusinessSuccessionSystem`,
+  etc.) does an unbounded-by-population `state.X.values.filter{}` pass
+  bounded only by a flat `MAX_...` cap, not by proximity/relevance — fine
+  today, a real ceiling once population count grows substantially.
 - Split packages into real Gradle modules once a second app target appears.
 - Move mirror writes to incremental dirty-tracking instead of full rewrite at
   checkpoint.
