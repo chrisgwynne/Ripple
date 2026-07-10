@@ -56,6 +56,49 @@ against the same `TestWorld`/Truth patterns every other engine test in this file
 Read but did not touch the concurrently-developed `TownSentiment`/`TownSentimentSystem` work
 below — no file overlap beyond additive fields on the shared `WorldState.kt`.
 
+### 2026-07-11 — Economy calibration audit: measuring, not guessing, the debt/business-distress flag
+
+The Simulation Reality Review flagged the economy as possibly overtuned toward debt/business
+distress, but that was an anecdotal observation, never actually measured. Built a real,
+instrumented calibration audit rather than changing constants blindly — see `docs/simulation-
+rules.md`'s new "Economy calibration audit" section for the full write-up, this is the summary.
+
+New `app/src/test/kotlin/com/ripple/town/simulation/calibration/`:
+- `EconomyMetricsCollector.kt` — pure `WorldState` snapshot reader (per-resident wealth/debt/
+  employment, per-business balance/daysInTrouble/revenue/expenses/demand/reputation/priceLevel/
+  open-state) plus a real sort+index `Distribution` (p10/p25/median/p75/p90), never average-only.
+- `EconomyCalibrationRunner.kt` — runs fresh, fully independent `TestWorld` simulations across a
+  seed list, snapshotting every N in-game days. Explicitly scoped down from the brief's suggested
+  ~100 seeds × 5-10 years to **10 seeds × 1 simulated year** (documented in the file's own doc
+  comment) after confirming a smaller run actually completes fast: measured at ~30-45s wall clock
+  for the full 10-seed run, comfortably inside a normal targeted test invocation, vs. an
+  unrunnable multi-hour job at the brief's original suggested scope.
+- `EconomyCalibrationReport.kt` — the actual `@Test` deliverable: runs the audit and prints a full
+  distribution-based report (trend-over-time tables, final-state distributions, per-seed
+  breakdown, and a hypothesis-by-hypothesis diagnosis citing real `EconomySystem`/`GoalSystem`
+  constants) to stdout, so a future session can regenerate this on demand rather than trust a
+  stale write-up. Actually run via `./gradlew :app:testDebugUnitTest --tests
+  "com.ripple.town.simulation.calibration.EconomyCalibrationReport"` — real output captured, not
+  fabricated example numbers; deterministic (same numbers reproduced across two separate runs).
+
+**Real headline finding:** resident-side debt/wage pressure is **not** structurally broken (wages
+comfortably exceed `LIVING_COST_PER_DAY`; only 2.9% of residents end the year over
+`DEBT_CRISIS_THRESHOLD`). Business-side distress **is** real and structural: 66.7% of tracked
+businesses closed within one simulated year, consistently across all 10 independently-seeded
+towns (56-78% per-seed range — not a small-sample artifact). The most plausible mechanical driver,
+found directly in the actual constants rather than assumed: `GoalSystem.START_BUSINESS` opens a
+new business with `balance = STARTUP_CAPITAL × 0.6` = 240.0, against ~70.0/day in overhead+wages
+once a single employee is hired — roughly 3.4 days of runway with zero revenue — while the new
+business also starts at a below-average `demand` of 35.0. The existing 18-day `CLOSURE_DAYS`
+cutoff itself looks reasonably generous in isolation; the problem is how often a business never
+gets the one profitable day needed to reset its `daysInTrouble` counter in the first place.
+
+Audit-only, as scoped: no production tuning constants were touched. Did not touch
+`WorldGenerator.kt` (concurrent work this session) or any other production `core/simulation/*.kt`
+file beyond reading them. A future remediation pass should treat the `× 0.6` startup-balance
+multiplier and/or new-business starting `demand` as the first candidates to retune, informed by
+this measurement.
+
 ### 2026-07-11 — Town sentiment: a persistent, town-wide aggregate mood
 
 New `TownSentiment` (`core/model/WorldState.kt`) + `WorldState.townSentiment` field (safe
