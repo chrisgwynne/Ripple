@@ -4,6 +4,136 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-10 — Severity-graded incident system (shoplifting, burglary, mugging, domestic disturbance, missing person, vandalism, and more)
+
+Extended `CrimeSystem`'s existing motive-weighted-suspect + constable pattern
+with a genuine variety of incident types, rather than the one generic
+theft-flavoured crime it modelled before. Full causal writeup (trigger
+conditions, risk formula, bounds, cooldowns, cause-chain links) lives in
+`docs/simulation-rules.md`'s new "Incidents: severity-graded texture"
+section — this entry is the honest what-was-built-vs-deferred summary.
+
+**Built, MUST-tier (fully causally modelled, core deliverable) — 3 types:**
+shoplifting (`CrimeSystem.updateShoplifting`, Level 1: desperation + low
+honesty + a genuinely quiet business = opportunity), burglary
+(`CrimeSystem.updateBurglary`, Level 2: real desperation + dishonesty against
+a home with **nobody currently inside** — an actual occupancy check, not a
+flat roll), mugging (`CrimeSystem.updateMugging`, Level 2: two adults
+actually co-located in the park, desperation + impulsiveness + an *existing
+grudge* between them raising the odds sharply — the feud-plus-personality
+shape the brief's own design principle asks for).
+
+Also built two more MUST-tier items the brief named alongside those three:
+domestic disturbance (`IncidentSystem.updateDomesticDisturbance`, Level 2:
+reuses `InteractionSystem`'s own resentment/affection thresholds for a
+struggling `SPOUSE`/`PARTNER` pair, gated on both actually being home right
+now) and missing person (`IncidentSystem.updateMissingPerson`/
+`resolveMissingPersons`, Level 2: severe stress, a recent grief/fright
+memory, or elder confusion — resolves gently 1–4 days later, always found
+safe, never sinister). All 5 MUST-tier types shipped.
+
+**Built, SHOULD-tier (leaner, reusing more existing machinery) — 6 types,
+all shipped, none skipped:** vehicle theft and fraud and arson attempt
+(`CrimeSystem`, all three constable-routed), workplace accident and protest
+disruption (`IncidentSystem` — the latter genuinely extends `PetitionSystem`
+rather than being a new mechanic, called from `PetitionSystem.resolveDue`
+right after a petition resolves), and vandalism (`IncidentSystem`,
+technically Level 1 but built to should-tier depth — two independent
+causally-gated routes, rivalry-driven and restless-youth-driven, both reusing
+existing tension/resentment tracking rather than a new "aggression" stat).
+
+**Deferred, CAN-tier (honest, not thinned out to rush) — 6 types:**
+public drunkenness, lost property, harassment complaint, school fight, minor
+traffic accident (Level 1) — no causally-grounded precondition set was
+designed for these in the time available, and shipping a thin, under-gated
+version would have violated the brief's own "never a flat dice roll"
+standard, so they're left for a future session with **no** speculative new
+`EventType` values reserved for them. Noise complaint / neighbour dispute
+(Level 1) was deliberately **not** rebuilt as a separate mechanic — it
+heavily overlaps `PetitionSystem`'s existing `NOISE` petition subject
+(comfort genuinely dropping near a noisy building), documented as such in
+`simulation-rules.md` rather than duplicated; a true "neighbour dispute"
+(two specific residents, not a building-vs-petitioner shape) would need its
+own precondition design not attempted here. "Verbal argument" (Level 1)
+was **already fully implemented** before this session
+(`InteractionSystem.argue`/`EventType.ARGUMENT`) — explicitly not rebuilt,
+just documented and cross-referenced.
+
+**Explicitly, permanently REJECTED — levels 3–5.** Knife attacks, shootings,
+terror, war, riots, and any weapons/gun-availability system were **rejected
+by the user for tonal reasons** and must not be reintroduced by a future
+session. Ripple stays a gentle small-English-town sim. Nothing added this
+pass models weapons, armed violence, terrorism, war, riots, or political
+violence — "assault"/"mugging" mean the mundane crime-blotter sense (a
+shove, a snatched purse), never anything beyond that. Flagging this in
+writing, plainly, so nobody accidentally re-scopes it back in later.
+
+**Architecture notes.** Two files: `CrimeSystem` gained the 6 crime-flavoured
+types genuinely police-shaped enough to route through its existing
+`investigate()` (shoplifting, burglary, mugging, vehicle theft, fraud, arson
+attempt); a new `IncidentSystem.kt` holds the 5 lower-stakes/non-police types
+(vandalism, domestic disturbance, missing person, workplace accident) plus
+the petition-extension. Both wired into `SimulationCoordinator`'s
+`if (newDay)` block via `CrimeSystem.updateDaily`/`IncidentSystem.updateDaily`,
+straight after `CuratedWorldPressureFeed`. 13 new `EventType` values (only
+for genuinely missing incident flavours — `ARGUMENT` was reused as-is, no new
+type for it). No new `MemoryType` values needed — `FEAR`, `HUMILIATION`,
+`ARGUMENT`, `LOSS` already covered every incident's emotional shape. One new
+shared cooldown map, `WorldState.lastIncidentAt: MutableMap<Long, Long>`
+(21-day window), plus three small missing-person-specific fields
+(`missingResidentIds`, `missingResolveAt`, `missingPersonEventId` — an active
+roster needs more than a timestamp). Every new event's `causeIds` links back
+to a real prior event where one is genuinely on record (recent `JOB_LOST`/
+`DEBT_CRISIS` for desperation-driven crimes, the pair's own `ARGUMENT` for
+domestic disturbance, the resident's own grief/fright memory for missing
+person, the petition's own `PETITION_STARTED` for protest disruption,
+`RIVALRY_FORMED` for arson/vandalism) — never invented when nothing
+plausible survives `WorldState.recentEventIds`'/`memories`' bounded windows.
+Confirmed the notification pipeline (`FollowedResidentNotifier`) needed zero
+changes — it's DB-driven off `ImportanceScorer.HISTORY_THRESHOLD` against
+whichever residents are followed, automatically picking up any new
+`EventType` with no per-type wiring; likewise `ImportanceScorer.baseImportance`
+and `NewspaperGenerator.categoryFor`/`headlineFor` both have safe `else`
+fallbacks, so the 13 new types would have flowed through even before the
+explicit entries added here for better weighting/headlines/newspaper
+category placement.
+
+### 2026-07-10 — Ripple Asset Studio: real-world detection bug fixed + validated
+
+`tools/ripple-asset-studio` (standalone Python tool, converts AI-generated
+pixel-art reference sheets into game-ready sprite atlases for this app —
+not itself part of the Kotlin/Android codebase) had a bug where detection
+returned **0 regions** against real AI-generated reference sheets, despite
+39 passing tests — because those tests only ever ran against synthetic
+fixtures. Root cause (confirmed empirically): the old checkerboard
+autocorrelation detector assumed the checker grid was phase-aligned with
+pixel (0,0); real exports aren't, so it silently failed, background
+removal became a no-op, and the entire opaque image collapsed into one
+connected component that got rejected by the max-area-fraction filter.
+
+Fixed with a real-world detection redesign: alpha-usefulness detection
+(rejects a uniformly-opaque alpha channel instead of trusting it),
+phase-independent histogram-based two-colour background/checkerboard
+detection, a colour-distance foreground mask, geometric title-bar/banner
+masking, a two-stage raw-permissive → optional-merge → optional-text-filter
+detection pipeline with a real union-find component merger, a
+never-silently-zero warning mechanism, and new GUI staged-debug views +
+a manual rectangle-selection fallback tool.
+
+**Regression validated against two real Gemini-generated reference sheets**
+in `C:\Users\admin\Downloads\` (both 1408×768, alpha uniformly opaque, dark
+two-tone checkerboard background):
+
+| File | Raw | After size filter | After merge | Final |
+|---|---|---|---|---|
+| Building/construction icon grid | 928 | 928 | 348 | 348 |
+| "RIPPLE — MASTER UI ICON LIBRARY" icon sheet | 629 | 629 | 140 | 140 |
+
+Both previously produced 0 detections; both now exceed the 50-raw-region
+validation target with sane final counts and zero silent-zero results.
+`pytest -q` in `tools/ripple-asset-studio`: **66 passed** (39 original +
+27 new). Full details in `tools/ripple-asset-studio/README.md`.
+
 ### 2026-07-10 — Event system audit + "Recently discovered" bug, newspaper weighting, Town Chronicle, memory gaps
 
 A brief this round asked for a ground-up "simulation event system" rebuild —

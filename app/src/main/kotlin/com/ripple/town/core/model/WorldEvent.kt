@@ -63,7 +63,35 @@ enum class EventType(val label: String) {
     HOME_PURCHASED("Home purchased"),
     /** A curated, abstract national-scale pressure starting or resolving. See
      *  `ExternalWorldEventProvider`. Deliberately background/town-wide news, not personal. */
-    NATIONAL_PRESSURE("National pressure")
+    NATIONAL_PRESSURE("National pressure"),
+
+    // --- Incident severity system (added 2026-07-10) — see docs/simulation-rules.md
+    // "Incidents: severity-graded texture". ARGUMENT (Level 1) already existed above and is
+    // reused as-is for "verbal argument"; these are the genuinely new incident flavours.
+    /** Level 1 — shoplifting caught or suspected at a business. Routed through `CrimeSystem`. */
+    SHOPLIFTING("Shoplifting"),
+    /** Level 1 — a building or public space is deliberately damaged, short of arson. */
+    VANDALISM("Vandalism"),
+    /** Level 2 — a resident goes missing for a period, prompting a town search. */
+    MISSING_PERSON_REPORTED("Missing person"),
+    /** Level 2 — a missing resident is found (safe, or otherwise). */
+    MISSING_PERSON_FOUND("Missing person found"),
+    /** Level 2 — a home is broken into while unoccupied. Routed through `CrimeSystem`. */
+    BURGLARY("Burglary"),
+    /** Level 2 — a resident is confronted and robbed in a public space. Routed through `CrimeSystem`. */
+    MUGGING("Mugging"),
+    /** Level 2 — a household relationship's strain boils over into a reported disturbance. */
+    DOMESTIC_DISTURBANCE("Domestic disturbance"),
+    /** Level 2 — should-tier: a vehicle-equivalent (cart/bicycle) is stolen. Routed through `CrimeSystem`. */
+    VEHICLE_THEFT("Vehicle theft"),
+    /** Level 2 — should-tier: a business owner falsifies books or claims for money. Routed through `CrimeSystem`. */
+    FRAUD("Fraud"),
+    /** Level 2 — should-tier: a deliberate fire-setting attempt at a business. Routed through `CrimeSystem`. */
+    ARSON_ATTEMPT("Arson attempt"),
+    /** Level 2 — should-tier: a workplace accident significant enough to injure a worker. */
+    WORKPLACE_ACCIDENT("Workplace accident"),
+    /** Level 2 — should-tier: a petition's supporters turn a resolution into a public disruption. */
+    PROTEST_DISRUPTION("Protest disruption")
 }
 
 enum class EventVisibility {

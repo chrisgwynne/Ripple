@@ -44,6 +44,21 @@ object ImportanceScorer {
             EventType.BUILDING_REPAIRED -> 10.0
             EventType.PETITION_STARTED -> 20.0
             EventType.PETITION_RESOLVED -> 28.0
+            // Incident severity system (2026-07-10): Level 2 incidents score close to
+            // CRIME_COMMITTED (30.0) — genuinely significant town news; Level 1 sits lower,
+            // nearer JOB_LOST/RUMOUR_SPREAD — everyday texture, not headline news on its own.
+            EventType.BURGLARY -> 32.0
+            EventType.MUGGING -> 32.0
+            EventType.ARSON_ATTEMPT -> 34.0
+            EventType.DOMESTIC_DISTURBANCE -> 26.0
+            EventType.MISSING_PERSON_REPORTED -> 30.0
+            EventType.MISSING_PERSON_FOUND -> 22.0
+            EventType.VEHICLE_THEFT -> 24.0
+            EventType.FRAUD -> 26.0
+            EventType.WORKPLACE_ACCIDENT -> 24.0
+            EventType.PROTEST_DISRUPTION -> 26.0
+            EventType.SHOPLIFTING -> 14.0
+            EventType.VANDALISM -> 14.0
             else -> 8.0
         }
         val severityFactor = 0.6 + severity * 0.8

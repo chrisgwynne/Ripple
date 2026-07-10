@@ -49,7 +49,11 @@ implemented in `core/simulation`.
    abstract national-scale pressure, mapped through `WorldPressureMechanicMapper`
    to business overhead and, for the tax-rate pair, resident living costs;
    also drifts `WorldState.nationalTaxRate` and records rolling pressure
-   trend history).
+   trend history), `CrimeSystem.updateDaily` (severity-graded incident system:
+   shoplifting, burglary, mugging, vehicle theft, fraud, arson attempt) and
+   `IncidentSystem.updateDaily` (vandalism, domestic disturbance, missing
+   person, workplace accident — see "Incidents: severity-graded texture"
+   below).
 9. Nudge regeneration.
 10. Newspaper when due (weekly, 08:00).
 11. Daily statistics; checkpoint flag every 36 ticks (6 in-game hours).
@@ -690,6 +694,283 @@ accusation costs the real culprit stress and reputation; a false one costs
 the wrongly-accused resident more of both, a `HUMILIATION` memory, and
 resentment/trust damage towards the constable — while the actual culprit
 gets away with it (a little private unease, never public).
+
+## Incidents: severity-graded texture (added 2026-07-10)
+
+A wider variety of everyday-to-significant incidents on top of the existing
+`CrimeSystem` motive-weighted-suspect + constable-investigation pattern —
+**not** a rebuild, an extension. Two tiers, matching the backlog brief's own
+naming:
+
+- **Level 1 (everyday, common).** Small texture — mundane, low-severity,
+  routes through the constable only rarely if at all.
+- **Level 2 (significant, uncommon).** Genuinely notable — higher severity,
+  more consistently investigated, real financial/relationship/health stakes.
+
+**Explicitly out of scope, permanently.** Levels 3–5 (knife attacks,
+shootings, terror, war, riots) were **rejected by the user for tonal
+reasons** and must not be reintroduced by a future session: Ripple stays a
+gentle small-English-town sim. Nothing in either `CrimeSystem` or
+`IncidentSystem` models weapons, gun/weapon availability, terrorism, war,
+riots, or political violence — "assault"/"mugging" here mean the mundane
+crime-blotter sense (a shove, a snatched purse), never armed violence.
+
+**The standard every type below follows** (the brief's own words): *"Bad
+implementation: 2% chance of stabbing today. Correct implementation:
+long-running feud + alcohol + impulsive personality + weapon access +
+crowded location + recent humiliation = elevated risk."* Every check reads
+real `Resident`/`Business`/`Building`/`Relationship` fields into a bounded
+`risk` score (never a flat daily roll), rolled once via `ctx.rng`, bounded by
+a `MAX_..._CANDIDATES_PER_DAY` cap, and cooled down per resident via the new
+`WorldState.lastIncidentAt: MutableMap<Long, Long>` (`INCIDENT_COOLDOWN_DAYS`
+= 21 — shared between `CrimeSystem`'s and `IncidentSystem`'s incidents, so
+one resident can't rack up back-to-back incidents of either flavour). Two new
+files: `CrimeSystem` gained the crime-flavoured types that plausibly reach
+the constable (shoplifting, burglary, mugging, vehicle theft, fraud, arson
+attempt); `IncidentSystem` (new file) holds the lower-stakes, non-police
+types (vandalism, domestic disturbance, missing person, workplace accident)
+plus the petition-extension (protest disruption). Both run daily from
+`SimulationCoordinator`'s `if (newDay)` block, after
+`CuratedWorldPressureFeed`. `causeIds` link back to the real prior event that
+created the plausibility, wherever one is genuinely on record — via either
+`WorldState.recentEventIds` (the same bounded 60-id sliding window the live
+ticker already maintains) or the resident's own decaying `memories`; **never
+invented** if nothing plausible survives that window.
+
+**Already existing, not rebuilt.** "Verbal argument" (Level 1) is exactly
+`InteractionSystem.argue`/`EventType.ARGUMENT`, documented under
+[Relationships](#relationships) above — tension from stress/resentment/
+impulsiveness vs patience, already firing far more often than anything
+below. "Noise complaint"/"neighbour dispute" (Level 1) heavily overlap
+`PetitionSystem`'s existing `NOISE` petition subject (a resident's comfort
+genuinely dropping near a noisy building) — rather than a second, parallel
+noise mechanic, this pass extends that same system with **protest
+disruption** below instead of duplicating its trigger condition.
+
+### Shoplifting (Level 1) — `CrimeSystem.updateShoplifting`
+
+- **Trigger conditions.** A detailed non-child resident with real desperation
+  (`needs.financialSecurity < 30` or `debt > 400`) and low honesty
+  (`personality.honesty < 0.55`), against any open non-public-service business
+  currently getting low footfall (`demand < LOW_FOOTFALL_DEMAND` = 35) —
+  opportunity, not certainty; a busy shop is a harder target.
+- **Risk formula.** `desperation (financialSecurity/debt, up to 0.4+0.2) +
+  dishonesty ((1 − honesty) × 0.3) + opportunity (footfall gap × 0.2)`,
+  clamped to `SHOPLIFTING_MAX_CHANCE` (0.12).
+- **Bound.** `MAX_SHOPLIFTING_CANDIDATES_PER_DAY` (25).
+- **Cooldown.** 21 days (shared `lastIncidentAt`).
+- **Cause link.** The resident's most recent `JOB_LOST`/`DEBT_CRISIS` event
+  (via `recentEventIds` or a `LOSS` memory), if still on record.
+- Reported only `SHOPLIFTING_REPORT_CHANCE` (35%) of the time — most petty
+  theft simply isn't caught. `HIDDEN` visibility until/unless investigated.
+
+### Burglary (Level 2) — `CrimeSystem.updateBurglary`
+
+- **Trigger conditions.** An adult resident with `financialSecurity < 25` and
+  `honesty < 0.45` (genuine desperation, not opportunism alone), against any
+  home — other than their own — with **nobody currently inside**
+  (`state.residentsIn(homeId).isEmpty()`, the real "unoccupied household"
+  opportunity check the brief calls for).
+- **Risk formula.** `desperation (financialSecurity gap × 0.35) + dishonesty
+  ((0.45 − honesty) × 0.5) + lowStakes ((50 − reputation) × 0.15/50)` — a
+  low-reputation burglar has less to lose socially, so the stakes of getting
+  caught feel lower. Clamped to `BURGLARY_MAX_CHANCE` (0.10).
+- **Bound.** `MAX_BURGLARY_CANDIDATES_PER_DAY` (20).
+- **Cooldown.** 21 days.
+- **Cause link.** Same `JOB_LOST`/`DEBT_CRISIS`/`LOSS`-memory lookup as
+  shoplifting.
+- Takes from the wealthiest resident of the target household (capped at their
+  actual wealth); every victim gets a `FEAR` memory and a safety/stress hit.
+  **Always investigated** — too significant to sit unreported.
+
+### Mugging (Level 2) — `CrimeSystem.updateMugging`
+
+- **Trigger conditions.** Two detailed adults actually co-located in the
+  park right now (crowded-enough public opportunity — reuses
+  `InteractionSystem`'s co-location grouping shape rather than a second query)
+  where one has `honesty ≤ 0.4` and `financialSecurity ≤ 30`.
+- **Risk formula.** `desperation (financialSecurity gap × 0.25) +
+  impulsiveness (× 0.15) + grudge (existing pairwise `Relationship.resentment`
+  ÷ 100 × 0.3)` — the feud half of the brief's design principle: an existing
+  grudge between the two raises the odds sharply over a mugging "of pure
+  opportunity". Clamped to `MUGGING_MAX_CHANCE` (0.08).
+- **Bound.** `MAX_MUGGING_CANDIDATES_PER_DAY` (20 pairs).
+- **Cooldown.** 21 days.
+- **Cause link.** Same desperation lookup as shoplifting/burglary.
+- Victim gets a `FEAR` memory naming the mugger, safety/stress hit. **Always
+  investigated** (a mugging victim saw a face).
+
+### Vehicle theft (Level 2, should-tier) — `CrimeSystem.updateVehicleTheft`
+
+- **Trigger conditions.** A desperate, dishonest adult
+  (`financialSecurity < 28`, `honesty < 0.5`) and a victim genuinely away from
+  their own home right now (`currentBuildingId != homeBuildingId` — can't be
+  watching their own property). Modelled as a lighter cousin of burglary
+  against the victim's `wealth` directly rather than a new vehicle-ownership
+  model — Ripple has no tracked vehicle objects, so "cart taken and sold on"
+  is represented the same way a burglary's takings are.
+- **Risk formula.** `desperation × 0.3 + dishonesty × 0.4`, clamped to
+  `VEHICLE_THEFT_MAX_CHANCE` (0.08).
+- **Bound.** `MAX_VEHICLE_THEFT_CANDIDATES_PER_DAY` (15).
+- **Cooldown / cause link.** Same shared pattern as the crimes above.
+- Reported 50% of the time.
+
+### Fraud (Level 2, should-tier) — `CrimeSystem.updateFraud`
+
+- **Trigger conditions.** A business genuinely `daysInTrouble ≥ 3` (real
+  balance-sheet pressure via `EconomySystem`, not opportunism) whose owner has
+  `honesty ≤ 0.4` — specifically the owner skimming their own books, not an
+  employee.
+- **Risk formula.** `pressure (daysInTrouble ÷ CLOSURE_DAYS × 0.3) +
+  dishonesty ((0.4 − honesty) × 0.4)`, clamped to `FRAUD_MAX_CHANCE` (0.06).
+- **Bound.** `MAX_FRAUD_CANDIDATES_PER_DAY` (15 businesses).
+- **Cause link.** The business's own most recent `BUSINESS_STRUGGLING` event.
+- Reported 40% of the time; deliberately small amounts — a slow bleed, not a
+  windfall.
+
+### Arson attempt (Level 2, should-tier) — `CrimeSystem.updateArson`
+
+- **Trigger conditions.** The single most gated incident in this pass: an
+  existing `RelationshipKind.RIVAL` pair (via `BusinessRivalrySystem`/
+  `InteractionSystem`'s existing, unmodified rivalry thresholds — never a
+  fresh rivalry mechanic) with `resentment > 65`, where one side has a
+  volatile profile (`impulsiveness > 0.6`, `courage < 0.4` — bitterness
+  tipping into action despite personal fear) and the other owns an open
+  business.
+- **Risk formula.** `resentment × 0.15 + volatility ((impulsiveness −
+  courage) × 0.1)`, clamped to `ARSON_MAX_CHANCE` (0.04) — deliberately the
+  lowest ceiling of any incident here.
+- **Bound.** `MAX_ARSON_CANDIDATES_PER_DAY` (10 rival pairs).
+- **Cause link.** The pair's own `RIVALRY_FORMED` event.
+- **Deliberately never destroys the building** — condition loss (15–30,
+  floor 5) through the exact field `BuildingLifecycleSystem` already repairs,
+  "Scorch marks by the door" in `visibleChanges`, never a structure fire —
+  keeping this inside Ripple's gentle tone even at its most severe incident
+  type. **Always investigated.**
+
+### Vandalism (Level 1) — `IncidentSystem.updateVandalism`
+
+Two independent routes, reusing existing tension/resentment mechanics rather
+than a new "aggression" stat, per the brief's explicit guidance:
+
+- **Route 1 — rivalry-driven.** An existing `RIVAL` pair (`resentment > 50`)
+  where one side is impulsive (`> 0.5`) targets the other's business
+  building. Risk = `resentment × 0.25 + impulsiveness × 0.1`.
+- **Route 2 — restless youth.** A teen or young adult (< 25) with real,
+  sustained stress (`> 60`) and low patience (`< 0.4`) hits a public building
+  (park/town hall) instead — nobody in particular to blame. Risk =
+  `stress-over-threshold × 0.15 + impatience × 0.2`.
+- Both clamped to `VANDALISM_MAX_CHANCE` (0.10), bounded
+  `MAX_VANDALISM_CANDIDATES_PER_DAY` (20), 21-day cooldown.
+- Condition loss (6–16) on the target building, `HIDDEN` visibility (only
+  30% investigated) — vandalism is rarely caught in the act.
+
+### Domestic disturbance (Level 2) — `IncidentSystem.updateDomesticDisturbance`
+
+- **Trigger conditions.** A `SPOUSE`/`PARTNER` pair already under real
+  strain (`resentment > 55`, `affection < 30` — the exact shape
+  `InteractionSystem`'s own break-up/separation checks use) who share a home
+  and are **both physically there right now** — a real domestic moment, not
+  an abstract relationship-stat check.
+- **Risk formula.** `strain (resentment × 0.3 + (100 − affection) × 0.1) +
+  bothStressed (combined stress ÷ 200 × 0.15)`, clamped to
+  `DOMESTIC_DISTURBANCE_MAX_CHANCE` (0.12).
+- **Bound.** `MAX_DOMESTIC_DISTURBANCE_CANDIDATES_PER_DAY` (15 pairs).
+- **Cooldown.** 21 days, on both residents.
+- **Cause link.** The pair's own most recent `ARGUMENT` event, if one is
+  still on record — this incident is framed explicitly as what an ordinary
+  argument (which already exists and fires far more often) looks like once
+  it escalates into something the neighbours report.
+- Both get `ARGUMENT`-type memories and a heavier resentment/affection/trust
+  hit than an ordinary argument; `PRIVATE` visibility (can still reach the
+  paper via `RumourSystem`, same as any other private event).
+
+### Missing person (Level 2) — `IncidentSystem.updateMissingPerson`/`resolveMissingPersons`
+
+- **Trigger conditions.** A non-child resident with a genuine at-risk
+  condition: severe stress (`> 75`), a `LOSS`/`FEAR` memory within the last 14
+  days (recent grief or a bad fright), or elder confusion (`ELDER` life
+  stage with `health < 40`, standing in for disorientation) — never a bare
+  dice roll.
+- **Risk formula.** `stressTerm (excess over 60 × 0.06) + griefTerm (0.03 flat
+  if a qualifying memory exists) + elderTerm (0.03 flat if elder-confused)`,
+  clamped to `MISSING_PERSON_MAX_CHANCE` (0.04) — deliberately the rarest
+  Level 2 type alongside arson.
+- **Bound.** `MAX_MISSING_PERSON_CANDIDATES_PER_DAY` (10).
+- **Cooldown.** 21 days.
+- **Cause link.** The resident's own most recent qualifying `LOSS`/`FEAR`
+  memory's source event, if any.
+- **Resolution.** Deliberately gentle, never sinister: a random 1–4 in-game
+  days later (`MISSING_MIN_DAYS`/`MISSING_MAX_DAYS`), `resolveMissingPersons`
+  always brings them home safe — `MISSING_PERSON_FOUND` causeIds-links back
+  to the original report. Tracked via three small new `WorldState` fields
+  (`missingResidentIds`, `missingResolveAt`, `missingPersonEventId`) rather
+  than overloading `lastIncidentAt`, since this needs an active roster with a
+  resolution time, not just a cooldown timestamp. Partner/parents get a
+  `FEAR` memory while missing and a stress relief once found.
+
+### Workplace accident (Level 2, should-tier) — `IncidentSystem.updateWorkplaceAccident`
+
+- **Trigger conditions.** A worker actively `WORKING` at an open
+  `FACTORY`/`WORKSHOP` business (the only building types in this town with
+  real physical machinery) who is exhausted (`energy < 30`) or badly
+  stressed (`stress > 65`) — a tired, distracted worker is a genuine safety
+  risk, never a flat roll.
+- **Risk formula.** `exhaustion (energy gap × 0.1) + stressTerm (stress gap
+  × 0.06)`, clamped to `WORKPLACE_ACCIDENT_MAX_CHANCE` (0.05).
+- **Bound.** `MAX_WORKPLACE_ACCIDENT_CANDIDATES_PER_DAY` (15).
+- **Cooldown.** 21 days.
+- Reuses `HealthConditionType.INJURY` exactly as `HealthSystem` already
+  models ordinary injuries (severity 25–55) rather than a second injury
+  system; health/stress hit, a `FEAR` memory. No causeIds link (there's no
+  single prior event that "caused" fatigue in the way job loss causes
+  desperation) — an honest `emptyList()` rather than an invented one.
+
+### Protest disruption (Level 2, should-tier) — `IncidentSystem.updateProtestDisruption`
+
+Extends `PetitionSystem` rather than an unrelated new mechanic, exactly as
+the brief specifies — called once from `PetitionSystem.resolveDue`, right
+after a petition resolves, reading its final `status`/`signatureCount`/
+`signatureThreshold` directly rather than tracking anything new:
+
+- **Trigger conditions.** Either the petition's signatures overshot its
+  threshold by more than `PROTEST_SIGNATURE_RATIO` (1.6× — unusually
+  organised, strong backing) or it *failed* despite clearing at least half
+  its threshold (a controversial resolution — real sympathy that the town
+  ultimately ignored) — **and** the starter is genuinely passionate
+  (`politicalInterest ≥ 0.6`, `patience ≤ 0.5` — otherwise strong support
+  alone just means the petition succeeded quietly, no disruption follows).
+- **Risk formula.** `0.12` (overwhelming) or `0.08` (controversial failure)
+  plus `(politicalInterest − 0.6) × 0.2`, clamped to `PROTEST_MAX_CHANCE`
+  (0.15).
+- **Cooldown.** 21 days, on the starter only.
+- **Cause link.** The petition's own `PETITION_STARTED` event
+  (`petition.startEventId`) — always available, so always linked.
+- `PUBLIC` visibility (town business, matching `PetitionSystem`'s own
+  convention) at the petition's target building (or the town hall). The
+  starter takes a small reputation knock and purpose lift; up to 6 named
+  supporters get a small stress bump. Deliberately mild — this is townsfolk
+  making themselves heard loudly, not a riot.
+
+### Deferred incident types (honest, not attempted)
+
+Per the brief's explicit scope priority — MUST-tier finished properly before
+attempting CAN-tier — the following were **not** built this pass:
+
+- **Public drunkenness, lost property, harassment complaint, school fight,
+  minor traffic accident (all Level 1, CAN-tier).** No causally-grounded
+  precondition set was designed for these in the time available; rather than
+  ship a thin, under-gated version that would violate the brief's own "never
+  a flat dice roll" standard, they're left for a future session. `EventType`
+  intentionally has **no** new values reserved for these yet — adding unused
+  enum values speculatively was judged worse than adding them alongside their
+  actual implementation later.
+- **Noise complaint / neighbour dispute (Level 1, CAN-tier).** Deliberately
+  not rebuilt as a separate mechanic — see the "already existing" note above.
+  `PetitionSystem`'s `NOISE` subject already covers the causally-real shape
+  of this (comfort genuinely dropping near a noisy building); a true
+  "neighbour dispute" (two specific residents, not a building-vs-petitioner
+  shape) would need its own precondition design, not attempted here.
 
 ## Events, causes, importance
 

@@ -156,14 +156,19 @@ object NewspaperGenerator {
     private fun categoryFor(type: EventType): StoryCategory = when (type) {
         EventType.BUSINESS_OPENED, EventType.BUSINESS_CLOSED, EventType.BUSINESS_EXPANDED,
         EventType.BUSINESS_STRUGGLING, EventType.JOB_STARTED, EventType.JOB_LOST -> StoryCategory.BUSINESS
-        EventType.CRIME_COMMITTED, EventType.CRIME_REPORTED -> StoryCategory.CRIME
-        EventType.ILLNESS_DIAGNOSED, EventType.ILLNESS_RECOVERED -> StoryCategory.HEALTH
+        EventType.CRIME_COMMITTED, EventType.CRIME_REPORTED,
+        EventType.SHOPLIFTING, EventType.BURGLARY, EventType.MUGGING,
+        EventType.VEHICLE_THEFT, EventType.FRAUD, EventType.ARSON_ATTEMPT,
+        EventType.VANDALISM -> StoryCategory.CRIME
+        EventType.ILLNESS_DIAGNOSED, EventType.ILLNESS_RECOVERED, EventType.WORKPLACE_ACCIDENT -> StoryCategory.HEALTH
         EventType.WEATHER_DAMAGE -> StoryCategory.WEATHER
         EventType.ELECTION_WON, EventType.ELECTION_CALLED,
-        EventType.PETITION_STARTED, EventType.PETITION_RESOLVED -> StoryCategory.TOWN_NEWS
+        EventType.PETITION_STARTED, EventType.PETITION_RESOLVED, EventType.PROTEST_DISRUPTION -> StoryCategory.TOWN_NEWS
         EventType.MEETING, EventType.FRIENDSHIP_FORMED, EventType.COMMUNITY_EVENT,
         EventType.RUMOUR_SPREAD, EventType.BUILDING_REPAIRED, EventType.SKILL_MILESTONE,
-        EventType.APOLOGY, EventType.INJURY -> StoryCategory.HUMAN_INTEREST
+        EventType.APOLOGY, EventType.INJURY,
+        EventType.MISSING_PERSON_REPORTED, EventType.MISSING_PERSON_FOUND,
+        EventType.DOMESTIC_DISTURBANCE -> StoryCategory.HUMAN_INTEREST
         EventType.PRICES_SHIFTED -> StoryCategory.BUSINESS
         else -> StoryCategory.TOWN_NEWS
     }
@@ -256,6 +261,29 @@ object NewspaperGenerator {
             ))
             EventType.GOAL_FORMED -> rng.pick(listOf(
                 "Ambitions stirring", "Someone's got a plan"
+            ))
+            // Incident severity system (2026-07-10) — see docs/simulation-rules.md.
+            EventType.SHOPLIFTING -> rng.pick(listOf(
+                "Sticky fingers on the high street", "Till comes up short again"
+            ))
+            EventType.BURGLARY -> rng.pick(listOf(
+                "Break-in shakes a quiet street", "Home targeted while family was out"
+            ))
+            EventType.MUGGING -> rng.pick(listOf(
+                "Robbed in broad daylight", "Confronted and robbed — police appeal for calm"
+            ))
+            EventType.VEHICLE_THEFT -> "Cart taken from outside the owner's nose"
+            EventType.FRAUD -> "Books don't add up at local trader"
+            EventType.ARSON_ATTEMPT -> "Scorch marks spark alarm"
+            EventType.VANDALISM -> rng.pick(listOf(
+                "Fresh damage overnight", "Someone's had a bad night with a can of paint"
+            ))
+            EventType.DOMESTIC_DISTURBANCE -> "Raised voices worry the neighbours"
+            EventType.MISSING_PERSON_REPORTED -> "Town asked to keep an eye out"
+            EventType.MISSING_PERSON_FOUND -> "Relief as missing resident turns up safe"
+            EventType.WORKPLACE_ACCIDENT -> "Accident at work — nothing life-threatening"
+            EventType.PROTEST_DISRUPTION -> rng.pick(listOf(
+                "Voices raised outside the town hall", "Feelings run high at public gathering"
             ))
             else -> e.type.label
         }

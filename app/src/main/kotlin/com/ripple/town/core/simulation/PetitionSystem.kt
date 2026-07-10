@@ -223,6 +223,10 @@ object PetitionSystem {
             val expired = ctx.now >= petition.deadlineAt
             if (!succeeded && !expired) continue
             if (succeeded) resolveSuccess(ctx, petition) else resolveFailure(ctx, petition)
+            // Level 2 "protest disruption" incident — extends this system rather than being a
+            // separate mechanic; see `IncidentSystem.updateProtestDisruption`'s KDoc. Checked
+            // once, right after resolution, so it can read the petition's final status/counts.
+            IncidentSystem.updateProtestDisruption(ctx, petition)
         }
     }
 

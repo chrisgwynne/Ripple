@@ -147,6 +147,29 @@ data class WorldState(
     /** residentId -> sim time an intervention was last applied to them (cooldown). */
     val lastInterventionAt: MutableMap<Long, Long> = mutableMapOf(),
 
+    /**
+     * residentId -> sim time this resident was last the subject (victim, culprit, or reported
+     * party — whichever the specific incident check cares about) of an incident-severity-system
+     * event (`CrimeSystem`'s new incident types plus `IncidentSystem`). Same shape as
+     * `lastInterventionAt`, kept separate since the two cooldowns are conceptually unrelated and
+     * shouldn't share a key space. Read/written by each incident's own `COOLDOWN_DAYS` check —
+     * see `docs/simulation-rules.md`'s "Incidents" section.
+     */
+    val lastIncidentAt: MutableMap<Long, Long> = mutableMapOf(),
+
+    /**
+     * Residents currently reported missing (`IncidentSystem.updateMissingPerson`), a small
+     * transient roster distinct from `lastIncidentAt` — a resident stays listed here for the
+     * whole window between `MISSING_PERSON_REPORTED` and `MISSING_PERSON_FOUND`, not just a
+     * cooldown timestamp. Kept small and self-cleaning: entries are removed the day
+     * `IncidentSystem.resolveMissingPersons` finds them.
+     */
+    val missingResidentIds: MutableList<Long> = mutableListOf(),
+    /** residentId -> sim time `IncidentSystem.resolveMissingPersons` should bring them home. */
+    val missingResolveAt: MutableMap<Long, Long> = mutableMapOf(),
+    /** residentId -> the `MISSING_PERSON_REPORTED` event id, so `MISSING_PERSON_FOUND` can causeIds-link back to it. */
+    val missingPersonEventId: MutableMap<Long, Long> = mutableMapOf(),
+
     // Election
     var nextElectionAt: Long = 0L,
     var mayorId: Long? = null,

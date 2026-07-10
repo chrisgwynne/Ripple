@@ -79,7 +79,8 @@ class SimulationCoordinator(
         // 10-12. Daily passes: health, lifecycle (births/deaths/election), council seats &
         // campaign-driven elections (layers on top of the same-day election result above), goals,
         // building repairs, seasonal events (harvest fair / winter market / river floods), local
-        // politics (petitions over noise / rent), business rivalries (same-type price/
+        // politics (petitions over noise / rent — also where a resolving petition may spark a
+        // protest disruption incident, see IncidentSystem), business rivalries (same-type price/
         // reputation competition, owner resentment), town-wide price drift (independent,
         // slow inflation/deflation on top of rivalry-driven demand shifts), business
         // succession (elderly owners voluntarily handing down to a working adult child),
@@ -88,7 +89,10 @@ class SimulationCoordinator(
         // pressure that may start or resolve, mapped through WorldPressureMechanicMapper to a
         // small nudge on EconomySystem's overhead expenses; the national layer adds a slow-
         // moving national tax rate, nudged daily and mapped to living-cost expense, plus a
-        // rolling history of past pressures for a sense of national "trends").
+        // rolling history of past pressures for a sense of national "trends"), the severity-
+        // graded incident system (CrimeSystem's new police-shaped incident types — shoplifting,
+        // burglary, mugging, vehicle theft, fraud, arson attempt — and IncidentSystem's lower-
+        // stakes ones — vandalism, domestic disturbance, missing person, workplace accident).
         if (newDay) {
             HealthSystem.updateDaily(ctx)
             LifecycleSystem.updateDaily(ctx)
@@ -102,6 +106,8 @@ class SimulationCoordinator(
             BusinessSuccessionSystem.updateDaily(ctx)
             PropertyMarketSystem.updateDaily(ctx)
             CuratedWorldPressureFeed.updateDaily(ctx)
+            CrimeSystem.updateDaily(ctx)
+            IncidentSystem.updateDaily(ctx)
         }
         // 13. Intervention influence regenerates through observation.
         InterventionEngine.regenerate(state, SimTime.MINUTES_PER_TICK)
