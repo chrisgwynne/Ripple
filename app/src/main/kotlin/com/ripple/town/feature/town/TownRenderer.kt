@@ -50,10 +50,20 @@ class TownCamera {
     var scale by mutableFloatStateOf(3.2f)
     var offsetX by mutableFloatStateOf(0f)
     var offsetY by mutableFloatStateOf(0f)
+    /** True while the camera should gently track the followed resident; a manual pan/zoom clears it. */
+    var isFollowing by mutableStateOf(true)
 
     fun centreOn(tileX: Float, tileY: Float, canvasW: Float, canvasH: Float) {
         offsetX = canvasW / 2f - tileX * TILE_PX * scale
         offsetY = canvasH / 2f - tileY * TILE_PX * scale
+    }
+
+    /** Nudges the camera a fraction of the way towards centring on (tileX, tileY) — smooth tracking, never a snap. */
+    fun easeToward(tileX: Float, tileY: Float, canvasW: Float, canvasH: Float, factor: Float = 0.05f) {
+        val targetX = canvasW / 2f - tileX * TILE_PX * scale
+        val targetY = canvasH / 2f - tileY * TILE_PX * scale
+        offsetX += (targetX - offsetX) * factor
+        offsetY += (targetY - offsetY) * factor
     }
 }
 
@@ -92,6 +102,8 @@ fun TownRenderer(
         modifier = modifier
             .pointerInput(Unit) {
                 detectTransformGestures { centroid, pan, zoom, _ ->
+                    // Any manual gesture takes over from automatic tracking.
+                    if (pan != Offset.Zero || zoom != 1f) camera.isFollowing = false
                     val newScale = (camera.scale * zoom).coerceIn(1.4f, 9f)
                     // Zoom about the gesture centroid.
                     val scaleChange = newScale / camera.scale
@@ -196,6 +208,12 @@ fun TownRenderer(
                 )
             }
             canvas.restore()
+
+            // Gentle continuous tracking: nudge next frame's offset towards the followed
+            // resident rather than snapping, so the camera drifts smoothly with them.
+            if (camera.isFollowing && followId != null) {
+                eased[followId]?.let { pos -> camera.easeToward(pos.x, pos.y, size.width, size.height) }
+            }
         }
 
         // Time-of-day & weather washes (screen space, cheap).

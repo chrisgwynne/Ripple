@@ -4,14 +4,21 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Newspaper
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -44,13 +51,13 @@ object Routes {
     const val HISTORY = "history"
 }
 
-private data class NavItem(val route: String, val label: String, val glyph: String)
+private data class NavItem(val route: String, val label: String, val icon: ImageVector)
 
 private val NAV_ITEMS = listOf(
-    NavItem(Routes.TOWN, "Town", "⌂"),
-    NavItem(Routes.PEOPLE, "People", "☺"),
-    NavItem(Routes.NEWS, "News", "✎"),
-    NavItem(Routes.HISTORY, "History", "⧗")
+    NavItem(Routes.TOWN, "Town", Icons.Filled.Home),
+    NavItem(Routes.PEOPLE, "People", Icons.Filled.People),
+    NavItem(Routes.NEWS, "News", Icons.Filled.Newspaper),
+    NavItem(Routes.HISTORY, "History", Icons.Filled.History)
 )
 
 @Composable
@@ -93,7 +100,7 @@ fun RippleNavScaffold(
                                 }
                             }
                         },
-                        icon = { Text(item.glyph, style = MaterialTheme.typography.titleLarge) },
+                        icon = { Icon(item.icon, contentDescription = item.label) },
                         label = { Text(item.label) }
                     )
                 }

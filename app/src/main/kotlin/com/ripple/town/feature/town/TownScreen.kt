@@ -101,6 +101,7 @@ fun TownScreen(
             LaunchedEffect(jump) {
                 jump?.let { (x, y) ->
                     camera.centreOn(x, y, cw, ch)
+                    camera.isFollowing = true
                     viewModel.consumeJump()
                 }
             }
@@ -183,6 +184,34 @@ fun TownScreen(
                     Text(
                         it, style = MaterialTheme.typography.labelMedium, color = RippleColors.Ink,
                         maxLines = 2, modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
+            }
+        }
+
+        // ------- Return-to-follow control (bottom-centre, only when panned away) -------
+        val followedId = w.followedResidentId
+        val followedName = w.resident(followedId)?.name
+        if (!camera.isFollowing && followedId != null && followedName != null) {
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = RippleColors.Ink.copy(alpha = 0.78f),
+                shadowElevation = 3.dp,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 14.dp)
+                    .clickable { viewModel.jumpToResident(followedId) }
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("◎", color = RippleColors.Gold, style = MaterialTheme.typography.labelLarge)
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        "Return to $followedName",
+                        color = RippleColors.Cream,
+                        style = MaterialTheme.typography.labelMedium
                     )
                 }
             }

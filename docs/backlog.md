@@ -131,6 +131,116 @@ code issue.)
 Phase 3 and 4 are a substantially larger undertaking (generational systems,
 local politics, an LLM narrative layer, etc.).
 
+### 2026-07-10 — Mobile UI rebuild kicked off (Phase 1: town canvas)
+
+The user provided a detailed mobile-UI-rebuild brief plus a desktop-dashboard
+mockup as visual reference, explicitly reprioritising work: **pause new
+simulation systems, focus on the visual/interaction layer**, reinterpreting
+the dense reference (full pixel-art town, newspaper, family tree, town
+stats…) as a mobile-first observation experience — full-screen town canvas,
+bottom sheets, overlays, not a literal desktop-dashboard port. Full brief
+condensed into a new `## Mobile UI rebuild` section below with its own
+phase/status tracking; the five phases from the brief (canvas → visual
+identity → life animation → information architecture → secondary screens)
+are tracked there rather than folded into the Phase 2 Product list above,
+since the brief is far more detailed than that list's single bullet.
+
+**Constraint worth flagging:** no Android emulator/device is configured in
+this environment, so Compose UI work here is verified by compilation +
+the existing Robolectric UI tests (`NavigationTest`, `TownViewModelTest`),
+not by looking at it. That's fine for interaction logic (camera behaviour,
+state wiring) but risky for anything about *how something looks* (density,
+spacing, the modular pixel-art asset system the brief asks for) — those
+need actual visual iteration. Checked in with the user about pacing before
+going further into the visually-unverifiable parts of the brief.
+
+**Phase 1 (town canvas) progress this session:**
+- [x] Camera follow-with-override: the camera now gently, continuously
+  tracks the followed resident's eased on-screen position every animation
+  frame (`TownCamera.easeToward`, 5%/frame) instead of only snapping once
+  on load. Any manual pan or pinch-zoom clears `TownCamera.isFollowing`; a
+  "Return to `<name>`" pill appears bottom-centre when tracking is off and
+  re-engages it on tap. Jumping to a resident (from People, death-summary,
+  etc.) now also re-engages tracking.
+- [x] Navigation icons: swapped the four bottom-nav glyphs (`⌂ ☺ ✎ ⧗`, plain
+  `Text`) for real Material vector icons (`Icons.Filled.Home/People/
+  Newspaper/History`) — addresses the brief's "no emoji, consistent stroke
+  weight, custom icons" requirement without needing custom art.
+- Already close to the brief before this pass: the town canvas is already
+  full-bleed (`Modifier.fillMaxSize()`), the top HUD is already a compact
+  translucent chip strip (date/time/weather/pop/nudges, not a dense stats
+  bar), the followed-resident indicator is already a small pill (not a full
+  banner), time controls are already a compact row, and event/alert banners
+  already auto-dismiss (~5s). These weren't rebuilt since they already
+  roughly match the brief's intent; revisit if the user wants them
+  restyled rather than just re-architected.
+- Not yet started: population moved out of the always-visible top strip
+  into a dedicated town-overview overlay; time controls collapsed to a
+  single expandable pill rather than an always-visible row; event banners
+  stacking up to 2 with slide/fade animation (currently one at a time, no
+  animated transition); the entire modular pixel-art asset system (building
+  variants/condition states, resident appearance/animation, environmental
+  props) — buildings and residents are still flat procedural rectangles
+  (`SpriteProvider`), which is most of what the brief is actually about
+  visually and the biggest remaining gap.
+
+Verified via the full local unit test suite: same 3 pre-existing failures
+as before (nothing new), `NavigationTest` still passes. Committed and
+pushed directly to `main`.
+
+## Mobile UI rebuild (current priority — supersedes new Phase 2 Simulation work for now)
+
+User brief, 2026-07-10, reference: a dense desktop pixel-art town-management
+dashboard mockup. **Reinterpret, don't port**: mobile-first, town-canvas-
+dominant, detail lives in overlays/sheets, not permanent panels. Central
+experience to preserve: *"Open Ripple. Find the person you follow. Watch
+their world continue without you."*
+
+Development order from the brief (status noted inline):
+
+1. **Town canvas** — full-bleed map, pan/zoom, camera follow, compact
+   overlays, compact time controls. *In progress — see session log above
+   for what's done (camera follow-with-override, vector nav icons) vs. not
+   (population out of top strip, collapsible time-control pill, stacked
+   animated event banners).*
+2. **Visual identity** — modular buildings (footprint × wall × roof ×
+   windows × door × chimney × sign × awning × garden × fence × condition
+   overlay…), environmental props, resident appearance variation
+   (body/hair/clothing/occupation cues), consistent icons, palette/type
+   system. *Not started — this is the large one. Buildings/residents are
+   currently flat procedural rectangles (`core/ui/SpriteProvider.kt`); the
+   brief wants real distinguishable modular pixel art. This needs either a
+   genuine asset pipeline or a much richer procedural generator, and ideally
+   visual iteration against a real device/emulator — this environment has
+   neither.*
+3. **Life animation** — resident movement/behaviour states (idle, walk,
+   talk, work, eat, sit, sleep, argue, hug, celebrate, mourn, ill, injured,
+   carry, wait, run — brief wants 2-4 frames each), town rhythm (shops
+   open/close, school run, deliveries, traffic, weather, day/night).
+   *Partial groundwork exists (`TownRenderer.poseFor`, weather washes,
+   day/night tint) but nowhere near the full state list.*
+4. **Mobile information architecture** — resident bottom sheet (compact +
+   expanded tabs: Life/Relationships/Memories/Skills/History, "why are they
+   doing this?"), building bottom sheet, town overview overlay, event
+   details, Outside World overlay. *`TownSheets.kt` already has resident/
+   building/event/intervention sheets — brief wants them richer (tabs,
+   explicit "why" reasoning surfaced) and a new town-overview + Outside
+   World overlay that don't exist yet.*
+5. **Secondary screens** — People rebuild (search, non-wrapping filter
+   chips, followed-resident card, expandable family tree), News as a real
+   newspaper (paper texture, masthead, registers, archive), History as a
+   real vertical timeline with cause chains and filters, dedicated family
+   tree + relationship-network overlays. *Existing `PeopleScreen`,
+   `NewsScreen`, `HistoryScreen` are functional but per the brief "feel like
+   unfinished placeholders" relative to the reference's density — not yet
+   assessed in detail against the specific acceptance criteria.*
+
+Full acceptance criteria (20 items), palette/typography guidance, and the
+complete asset/animation checklists are in the original brief (session
+transcript, 2026-07-10) — not reproduced in full here to keep this file
+readable; re-derive detail from the brief text as each phase is tackled
+rather than duplicating it wholesale into this doc.
+
 ## Phase 2 — Depth of life (make watching richer)
 
 **Simulation**
