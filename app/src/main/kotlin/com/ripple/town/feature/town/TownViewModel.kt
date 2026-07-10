@@ -25,6 +25,7 @@ sealed class TownSheet {
     data class BuildingSheet(val buildingId: Long) : TownSheet()
     data class EventSheet(val eventId: Long) : TownSheet()
     data class InterventionSheet(val residentId: Long) : TownSheet()
+    object TownOverviewSheet : TownSheet()
 }
 
 @HiltViewModel
@@ -90,6 +91,10 @@ class TownViewModel @Inject constructor(
     fun openIntervention(residentId: Long) {
         _sheet.value = TownSheet.InterventionSheet(residentId)
         _interventionMessage.value = null
+    }
+
+    fun openTownOverview() {
+        _sheet.value = TownSheet.TownOverviewSheet
     }
 
     fun closeSheet() {

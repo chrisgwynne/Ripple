@@ -1,5 +1,10 @@
 package com.ripple.town.feature.town
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -16,8 +21,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -28,6 +36,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -44,7 +54,9 @@ import com.ripple.town.core.model.TimeOfDay
 import com.ripple.town.core.model.Weather
 import com.ripple.town.core.ui.RippleColors
 import com.ripple.town.core.ui.SpriteProvider
+import com.ripple.town.data.EventUi
 import com.ripple.town.data.WorldUi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 
 /**
@@ -71,6 +83,17 @@ fun TownScreen(
             alert = it
             kotlinx.coroutines.delay(5_000)
             alert = null
+        }
+    }
+
+    // Event banners: at most 2 shown at once, newest first, each auto-expiring
+    // independently ~4s after it first appears (mirrors the `alert` pattern above).
+    val eventBanners = remember { mutableStateListOf<EventUi>() }
+    LaunchedEffect(recentEvents) {
+        val latest = recentEvents.firstOrNull() ?: return@LaunchedEffect
+        if (eventBanners.none { it.id == latest.id }) {
+            eventBanners.add(0, latest)
+            while (eventBanners.size > 2) eventBanners.removeAt(eventBanners.lastIndex)
         }
     }
 
@@ -126,7 +149,7 @@ fun TownScreen(
                 Spacer(Modifier.width(6.dp))
                 HudChip("${weatherGlyph(w.weather, w.timeOfDay)} ${w.weather.label}")
                 Spacer(Modifier.weight(1f))
-                HudChip("Pop ${w.population}")
+                HudVectorIconButton(Icons.Filled.Insights, contentDescription = "Town overview", onClick = viewModel::openTownOverview)
                 Spacer(Modifier.width(6.dp))
                 HudIconButton("⚙", onClick = onOpenSettings)
             }
@@ -159,23 +182,40 @@ fun TownScreen(
                 Spacer(Modifier.weight(1f))
                 HudChip("✨ ${w.nudges}/${w.maxNudges}")
             }
-            // Live event ticker
-            val latest = recentEvents.firstOrNull()
-            if (latest != null) {
-                Spacer(Modifier.height(6.dp))
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = RippleColors.Cream.copy(alpha = 0.88f),
-                    modifier = Modifier.clickable { viewModel.openEvent(latest.id) }
-                ) {
-                    Text(
-                        "◦ ${latest.description}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = RippleColors.Ink,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                    )
+            // Live event banners: newest first, max 2, each fades/slides in and
+            // auto-dismisses independently a few seconds after it appears.
+            eventBanners.forEach { banner ->
+                key(banner.id) {
+                    var visible by remember { mutableStateOf(true) }
+                    LaunchedEffect(banner.id) {
+                        delay(4_000)
+                        visible = false
+                        delay(300) // let the exit animation finish before dropping it
+                        eventBanners.remove(banner)
+                    }
+                    AnimatedVisibility(
+                        visible = visible,
+                        enter = fadeIn() + slideInVertically(initialOffsetY = { -it / 2 }),
+                        exit = fadeOut() + slideOutVertically(targetOffsetY = { -it / 2 })
+                    ) {
+                        Column {
+                            Spacer(Modifier.height(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = RippleColors.Cream.copy(alpha = 0.88f),
+                                modifier = Modifier.clickable { viewModel.openEvent(banner.id) }
+                            ) {
+                                Text(
+                                    "◦ ${banner.description}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = RippleColors.Ink,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
+                    }
                 }
             }
             alert?.let {
@@ -218,19 +258,37 @@ fun TownScreen(
         }
 
         // ------- Speed controls (bottom-left, above nav) -------
-        Row(
+        // Collapsed: a single pill showing the current speed. Tapping it expands
+        // to the full set of options; picking one (or tapping the pill again)
+        // collapses it back.
+        var speedExpanded by remember { mutableStateOf(false) }
+        Column(
             Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = 12.dp, bottom = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(start = 12.dp, bottom = 10.dp)
         ) {
-            SpeedButton("⏸", speed == SimSpeed.PAUSED) { viewModel.setSpeed(SimSpeed.PAUSED) }
-            Spacer(Modifier.width(5.dp))
-            SpeedButton("1×", speed == SimSpeed.NORMAL) { viewModel.setSpeed(SimSpeed.NORMAL) }
-            Spacer(Modifier.width(5.dp))
-            SpeedButton("3×", speed == SimSpeed.FAST) { viewModel.setSpeed(SimSpeed.FAST) }
-            Spacer(Modifier.width(5.dp))
-            SpeedButton("10×", speed == SimSpeed.VERY_FAST) { viewModel.setSpeed(SimSpeed.VERY_FAST) }
+            AnimatedVisibility(visible = speedExpanded, enter = fadeIn(), exit = fadeOut()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SpeedButton("⏸", speed == SimSpeed.PAUSED) {
+                        viewModel.setSpeed(SimSpeed.PAUSED); speedExpanded = false
+                    }
+                    Spacer(Modifier.width(5.dp))
+                    SpeedButton("1×", speed == SimSpeed.NORMAL) {
+                        viewModel.setSpeed(SimSpeed.NORMAL); speedExpanded = false
+                    }
+                    Spacer(Modifier.width(5.dp))
+                    SpeedButton("3×", speed == SimSpeed.FAST) {
+                        viewModel.setSpeed(SimSpeed.FAST); speedExpanded = false
+                    }
+                    Spacer(Modifier.width(5.dp))
+                    SpeedButton("10×", speed == SimSpeed.VERY_FAST) {
+                        viewModel.setSpeed(SimSpeed.VERY_FAST); speedExpanded = false
+                    }
+                }
+            }
+            if (!speedExpanded) {
+                SpeedButton(speedPillLabel(speed), selected = true) { speedExpanded = true }
+            }
         }
 
         // ------- Catch-up overlay -------
@@ -300,6 +358,7 @@ fun TownScreen(
                 is TownSheet.InterventionSheet -> InterventionSheetContent(
                     world = w, residentId = current.residentId, viewModel = viewModel
                 )
+                TownSheet.TownOverviewSheet -> TownOverviewSheetContent(world = w)
             }
         }
     }
@@ -343,6 +402,26 @@ private fun HudIconButton(glyph: String, onClick: () -> Unit) {
 }
 
 @Composable
+private fun HudVectorIconButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = CircleShape,
+        color = RippleColors.Cream.copy(alpha = 0.88f),
+        modifier = Modifier.clickable(onClick = onClick)
+    ) {
+        Icon(
+            icon,
+            contentDescription = contentDescription,
+            tint = RippleColors.Ink,
+            modifier = Modifier.padding(8.dp).size(20.dp)
+        )
+    }
+}
+
+@Composable
 private fun SpeedButton(label: String, selected: Boolean, onClick: () -> Unit) {
     Surface(
         shape = RoundedCornerShape(10.dp),
@@ -356,6 +435,14 @@ private fun SpeedButton(label: String, selected: Boolean, onClick: () -> Unit) {
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
         )
     }
+}
+
+/** Compact label for the collapsed speed pill, e.g. "▶ 1×" or "⏸ Paused". */
+private fun speedPillLabel(speed: SimSpeed): String = when (speed) {
+    SimSpeed.PAUSED -> "⏸ Paused"
+    SimSpeed.NORMAL -> "▶ 1×"
+    SimSpeed.FAST -> "▶ 3×"
+    SimSpeed.VERY_FAST -> "▶ 10×"
 }
 
 fun weatherGlyph(weather: Weather, timeOfDay: TimeOfDay): String = when (weather) {

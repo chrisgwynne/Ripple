@@ -1,0 +1,172 @@
+package com.ripple.town.core.simulation
+
+import com.ripple.town.core.model.Building
+import com.ripple.town.core.model.BuildingType
+import com.ripple.town.core.model.BusinessType
+import com.ripple.town.core.model.EventType
+import com.ripple.town.core.model.SimTime
+import com.ripple.town.core.model.Tile
+import com.ripple.town.core.model.TileType
+import com.ripple.town.core.model.TownMap
+import com.ripple.town.core.model.Weather
+
+/**
+ * The calendar isn't just a clock — a couple of fixed dates and one weather
+ * condition give the town its own rhythm on top of the daily grind:
+ *
+ * - **Harvest fair** (`HARVEST_FAIR_MONTH`/`HARVEST_FAIR_DAY`): a calendar-fixed
+ *   autumn date. Detailed residents get a social/purpose/stress lift, open
+ *   food-and-drink businesses see a demand bump, and a `COMMUNITY_EVENT` fires
+ *   at the park (if one exists).
+ * - **Winter market** (`WINTER_MARKET_MONTH`/`WINTER_MARKET_DAY`): the same
+ *   shape, smaller and comfort-flavoured, anchored at the town hall, boosting
+ *   a different set of businesses.
+ * - **River floods**: during `RAIN`/`STORM`, a small daily chance hits one
+ *   building near a `WATER` tile with harsher, water-specific damage than the
+ *   generic storm-damage roll in [NeedsSystem.updateWeather] — plus a safety/
+ *   comfort hit for anyone currently inside.
+ *
+ * All three are deliberately bounded: fixed one-shot dates for the fairs, and
+ * a low daily probability capped at one flood per day for the river.
+ */
+object SeasonalEventSystem {
+
+    // Harvest fair — an autumn date, ahead of the winter months used elsewhere
+    // (`month == 11 || month == 0 || month == 1`).
+    const val HARVEST_FAIR_MONTH = 8
+    const val HARVEST_FAIR_DAY = 15
+
+    // Winter market — squarely in the winter stretch.
+    const val WINTER_MARKET_MONTH = 11
+    const val WINTER_MARKET_DAY = 10
+
+    const val HARVEST_SOCIAL_BOOST = 8.0
+    const val HARVEST_STRESS_RELIEF = 6.0
+    const val HARVEST_PURPOSE_BOOST = 4.0
+    const val HARVEST_DEMAND_BOOST = 14.0
+
+    const val WINTER_COMFORT_BOOST = 5.0
+    const val WINTER_STRESS_RELIEF = 3.0
+    const val WINTER_SOCIAL_BOOST = 4.0
+    const val WINTER_DEMAND_BOOST = 9.0
+
+    private val HARVEST_BUSINESS_TYPES = setOf(BusinessType.BAKERY, BusinessType.GROCER, BusinessType.PUB)
+    private val WINTER_BUSINESS_TYPES = setOf(BusinessType.CAFE, BusinessType.HARDWARE, BusinessType.TAILOR)
+
+    /** Daily chance of a flood while it's raining/storming, and how far from water it can reach. */
+    const val FLOOD_CHANCE_RAIN = 0.05
+    const val FLOOD_CHANCE_STORM = 0.08
+    const val FLOOD_PROXIMITY_TILES = 3
+    const val FLOOD_CONDITION_MIN = 18.0
+    const val FLOOD_CONDITION_MAX = 32.0
+    const val FLOOD_RESIDENT_SAFETY_HIT = 12.0
+    const val FLOOD_RESIDENT_COMFORT_HIT = 10.0
+    const val MAX_FLOODS_PER_DAY = 1
+
+    fun updateDaily(ctx: TickContext) {
+        val month = SimTime.monthIndex(ctx.now)
+        val day = SimTime.dayOfMonth(ctx.now)
+
+        if (month == HARVEST_FAIR_MONTH && day == HARVEST_FAIR_DAY) {
+            runHarvestFair(ctx)
+        }
+        if (month == WINTER_MARKET_MONTH && day == WINTER_MARKET_DAY) {
+            runWinterMarket(ctx)
+        }
+
+        maybeFlood(ctx)
+    }
+
+    private fun runHarvestFair(ctx: TickContext) {
+        val state = ctx.state
+        for (r in state.detailedResidents()) {
+            if (!r.inTown) continue
+            r.needs.social = (r.needs.social + HARVEST_SOCIAL_BOOST).coerceAtMost(100.0)
+            r.needs.purpose = (r.needs.purpose + HARVEST_PURPOSE_BOOST).coerceAtMost(100.0)
+            r.needs.stress = (r.needs.stress - HARVEST_STRESS_RELIEF).coerceAtLeast(0.0)
+        }
+        for (biz in state.businesses.values) {
+            if (biz.open && biz.type in HARVEST_BUSINESS_TYPES) {
+                biz.demand = (biz.demand + HARVEST_DEMAND_BOOST).coerceAtMost(100.0)
+            }
+        }
+        val park = state.buildings.values.firstOrNull { it.type == BuildingType.PARK }
+        ctx.emit(
+            EventType.COMMUNITY_EVENT,
+            "The harvest fair filled the town with music, stalls and the smell of fresh baking.",
+            buildingId = park?.id, severity = 0.35
+        )
+    }
+
+    private fun runWinterMarket(ctx: TickContext) {
+        val state = ctx.state
+        for (r in state.detailedResidents()) {
+            if (!r.inTown) continue
+            r.needs.comfort = (r.needs.comfort + WINTER_COMFORT_BOOST).coerceAtMost(100.0)
+            r.needs.social = (r.needs.social + WINTER_SOCIAL_BOOST).coerceAtMost(100.0)
+            r.needs.stress = (r.needs.stress - WINTER_STRESS_RELIEF).coerceAtLeast(0.0)
+        }
+        for (biz in state.businesses.values) {
+            if (biz.open && biz.type in WINTER_BUSINESS_TYPES) {
+                biz.demand = (biz.demand + WINTER_DEMAND_BOOST).coerceAtMost(100.0)
+            }
+        }
+        val townHall = state.buildings.values.firstOrNull { it.type == BuildingType.TOWN_HALL }
+        ctx.emit(
+            EventType.COMMUNITY_EVENT,
+            "Stalls of mulled cider, woollens and winter fare lined the square for the winter market.",
+            buildingId = townHall?.id, severity = 0.25
+        )
+    }
+
+    private fun maybeFlood(ctx: TickContext) {
+        val state = ctx.state
+        val weather = state.weather
+        val chance = when (weather) {
+            Weather.STORM -> FLOOD_CHANCE_STORM
+            Weather.RAIN -> FLOOD_CHANCE_RAIN
+            else -> return
+        }
+        // MAX_FLOODS_PER_DAY is 1: a single daily roll already enforces the cap.
+        if (!ctx.rng.nextBoolean(chance)) return
+
+        val candidates = state.buildings.values
+            .filter { !it.abandoned && it.condition > 15.0 && isNearWater(state.map, it) }
+            .sortedBy { it.id }
+        val hit = ctx.rng.pickOrNull(candidates) ?: return
+
+        hit.condition = (hit.condition - ctx.rng.nextDouble(FLOOD_CONDITION_MIN, FLOOD_CONDITION_MAX))
+            .coerceAtLeast(5.0)
+        hit.visibleChanges += "Flood damage"
+        if (hit.visibleChanges.size > 6) hit.visibleChanges.removeAt(0)
+
+        val occupants = state.residentsIn(hit.id)
+        for (r in occupants) {
+            r.needs.safety = (r.needs.safety - FLOOD_RESIDENT_SAFETY_HIT).coerceAtLeast(0.0)
+            r.needs.comfort = (r.needs.comfort - FLOOD_RESIDENT_COMFORT_HIT).coerceAtLeast(0.0)
+        }
+
+        val event = ctx.emit(
+            EventType.WEATHER_DAMAGE,
+            "The river burst its banks and floodwater tore through ${hit.name}, far worse than the usual storm battering.",
+            buildingId = hit.id,
+            severity = 0.65
+        )
+        ConsequenceEngine.onEvent(ctx, event)
+    }
+
+    /** True if any tile within [FLOOD_PROXIMITY_TILES] of the building's footprint is water. */
+    private fun isNearWater(map: TownMap, building: Building): Boolean {
+        val minX = building.origin.x - FLOOD_PROXIMITY_TILES
+        val maxX = building.origin.x + building.width - 1 + FLOOD_PROXIMITY_TILES
+        val minY = building.origin.y - FLOOD_PROXIMITY_TILES
+        val maxY = building.origin.y + building.height - 1 + FLOOD_PROXIMITY_TILES
+        for (y in minY..maxY) {
+            for (x in minX..maxX) {
+                if (building.containsTile(Tile(x, y))) continue
+                if (map.tileAt(x, y) == TileType.WATER) return true
+            }
+        }
+        return false
+    }
+}

@@ -43,7 +43,36 @@ data class WorldUi(
     val buildingsById: Map<Long, BuildingUi> by lazy { buildings.associateBy { it.id } }
     fun resident(id: Long?): ResidentUi? = id?.let { residentsById[it] }
     fun building(id: Long?): BuildingUi? = id?.let { buildingsById[it] }
+
+    /**
+     * Town-level stats for the overview overlay. Derived client-side from the
+     * living, in-town resident list already carried on this snapshot — the
+     * simulation core has no dedicated town-statistics tracker, so this is
+     * everything that can be shown without inventing new simulation data.
+     */
+    val townStats: TownStatsUi by lazy {
+        val livingInTown = residents.filter { it.alive && it.inTown }
+        TownStatsUi(
+            population = population,
+            averageWellbeing = livingInTown.map { 100.0 - it.stress }.average0(),
+            averageHealth = livingInTown.map { it.health }.average0(),
+            averageWealth = livingInTown.map { it.wealth }.average0(),
+            employedCount = livingInTown.count { it.occupation.isNotBlank() && it.employerName != null }
+        )
+    }
 }
+
+private fun List<Double>.average0(): Double = if (isEmpty()) 0.0 else average()
+
+/** Town-wide aggregate figures for the town-overview overlay. */
+@Immutable
+data class TownStatsUi(
+    val population: Int,
+    val averageWellbeing: Double,
+    val averageHealth: Double,
+    val averageWealth: Double,
+    val employedCount: Int
+)
 
 @Immutable
 data class ResidentUi(

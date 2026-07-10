@@ -37,7 +37,9 @@ implemented in `core/simulation`.
 6. `EconomySystem` — hourly footfall; daily settlement at 23:50.
 7. `DelayedEffectSystem` — fire due effects (bounded).
 8. Daily at midnight: `HealthSystem.updateDaily`, `LifecycleSystem.updateDaily`
-   (births, separations, elections, memory decay), `GoalSystem.updateDaily`.
+   (births, separations, elections, memory decay), `GoalSystem.updateDaily`,
+   `BuildingLifecycleSystem.updateDaily`, `SeasonalEventSystem.updateDaily`
+   (harvest fair / winter market / river floods).
 9. Nudge regeneration.
 10. Newspaper when due (weekly, 08:00).
 11. Daily statistics; checkpoint flag every 36 ticks (6 in-game hours).
@@ -139,6 +141,31 @@ there's a 15 %/day chance they get round to it: condition rises 25–45,
 is emitted. Bounded to 3 repairs per day. A home below condition 40 also
 chips at its residents' comfort, the same way persistent noise does — repairs
 aren't just cosmetic.
+
+## Seasonal events
+
+The calendar carries its own fixed rhythm on top of daily life, run from
+`SeasonalEventSystem.updateDaily`:
+
+- **Harvest fair** — a calendar-fixed autumn date (month 8, day 15; ahead of
+  the winter stretch used elsewhere, `month == 11 || month == 0 || month ==
+  1`). Every detailed in-town resident gets a wellbeing lift (social +8,
+  purpose +4, stress −6); open bakeries, grocers and pubs get a demand bump
+  (+14); a `COMMUNITY_EVENT` fires at the park, if one exists.
+- **Winter market** — the same shape, smaller and comfort-flavoured (comfort
+  +5, social +4, stress −3), on a fixed winter date (month 11, day 10). Open
+  cafés, hardware shops and tailors get a smaller demand bump (+9); the
+  `COMMUNITY_EVENT` is anchored at the town hall instead of the park.
+- **River floods** — `WorldGenerator` seeds a river down the map's east edge
+  (`TileType.WATER`, the last two columns). While it's raining or storming, a
+  small daily chance (5%/8% for rain/storm) hits one non-abandoned building
+  within 3 tiles of a water tile: condition −18..−32 (floor 5), harsher than
+  the generic storm-damage roll in `NeedsSystem.updateWeather` (−6..−18,
+  which isn't water-proximity-aware), plus a safety/comfort hit for any
+  resident currently inside. Marks `visibleChanges` with "Flood damage"
+  (capped at 6 like other systems) and emits `WEATHER_DAMAGE` with
+  flood-specific text and higher severity (0.65 vs 0.45), fed through
+  `ConsequenceEngine` like any other event. Bounded to one flood per day.
 
 ## Education & returning students
 

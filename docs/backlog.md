@@ -4,6 +4,43 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-10 — Seasonal events: harvest fair, winter market, river floods
+
+Sixth Phase 2 **Simulation** backlog item, same rigour as the other five
+(implementation + `docs/simulation-rules.md` section + backlog checkbox).
+Note: this ran alongside a parallel session doing unrelated Mobile UI rebuild
+work on the same checkout, so this pass deliberately made no `./gradlew` or
+`git` calls of its own — code-only, reasoned through by reading, left for the
+orchestrating session to build/test/commit.
+
+- **`SeasonalEventSystem`**, called daily from `SimulationCoordinator`
+  alongside `HealthSystem`/`LifecycleSystem`/`GoalSystem`/
+  `BuildingLifecycleSystem`. Two fixed calendar dates plus one weather-gated
+  mechanic:
+  - **Harvest fair** (month 8, day 15 — ahead of the winter months used
+    elsewhere): detailed in-town residents get a social/purpose/stress lift,
+    open bakeries/grocers/pubs get a demand boost, and a `COMMUNITY_EVENT`
+    fires at the park (if one exists) — following the same precedent as
+    `ConsequenceEngine`'s "community gathers" rule for `PERSON_DIED`.
+  - **Winter market** (month 11, day 10): the same shape, smaller and
+    comfort-flavoured, boosting cafés/hardware shops/tailors instead, anchored
+    at the town hall.
+  - **River floods**: `WorldGenerator` already seeds `TileType.WATER` down
+    the map's east edge. While it's raining or storming, a small daily chance
+    (5%/8%) hits one building within 3 tiles of water — condition −18..−32,
+    harsher than the existing generic storm-damage roll in
+    `NeedsSystem.updateWeather` (−6..−18, not water-proximity-aware), plus a
+    safety/comfort hit for any resident currently inside, `visibleChanges`
+    marked "Flood damage" (capped at 6), and a `WEATHER_DAMAGE` event with
+    flood-specific text/severity fed through `ConsequenceEngine.onEvent` for
+    further fallout. Bounded to one flood per day.
+
+  See `docs/simulation-rules.md#seasonal-events`.
+
+Not run this session (per the parallel-work constraint above): `./gradlew`
+build/test and any `git` commands. The change is code-only and ready for the
+orchestrating session to verify and commit.
+
 ### 2026-07-10 — Phase 2 simulation: affairs, rumours, building repairs
 
 No `./gradlew` wrapper was checked in, so the README's build instructions
@@ -166,27 +203,64 @@ going further into the visually-unverifiable parts of the brief.
   `Text`) for real Material vector icons (`Icons.Filled.Home/People/
   Newspaper/History`) — addresses the brief's "no emoji, consistent stroke
   weight, custom icons" requirement without needing custom art.
+- [x] Population moved out of the top strip into a town-overview overlay:
+  `HudChip("Pop …")` removed from the always-visible HUD row; a new
+  `HudVectorIconButton(Icons.Filled.Insights, …)` next to the settings gear
+  opens `TownSheet.TownOverviewSheet` (new sealed-class case, reuses the
+  existing `ModalBottomSheet`). Content (`TownOverviewSheetContent` in
+  `TownSheets.kt`) shows population, in-work count, wellbeing (derived as
+  `100 - average stress`), average health, and average savings — all
+  computed client-side in a new lazy `WorldUi.townStats` (`WorldSnapshot.kt`)
+  from the resident list already on the snapshot. **Simplification:** the
+  simulation has no dedicated town-statistics tracker (no crime rate,
+  education, or environment metric anywhere in `core/model`), so those
+  brief-requested metrics are not shown — the overlay says so explicitly
+  rather than fabricating numbers, and only surfaces what's genuinely
+  computable from `ResidentUi` fields already exposed (`health`, `stress`,
+  `wealth`, `occupation`/`employerName`).
+- [x] Time controls collapsed into a single expandable pill: bottom-left
+  now shows one `SpeedButton` with the current speed (e.g. "▶ 1×", "⏸
+  Paused") when collapsed; tapping it reveals the full pause/1×/3×/10× row
+  in an `AnimatedVisibility(fadeIn/fadeOut)`, and picking any option (or the
+  same option again) collapses it back via a local
+  `remember { mutableStateOf(false) }` in `TownScreen.kt`. No new ViewModel
+  state needed.
+- [x] Event banners now stack up to 2 with enter/exit animation: replaced
+  the old "always show `recentEvents.firstOrNull()`, never dismissed" ticker
+  with a local `mutableStateListOf<EventUi>` capped at 2 (newest first). A
+  `LaunchedEffect(recentEvents)` appends newly-seen event ids; each banner
+  gets its own `LaunchedEffect(banner.id)` that waits ~4s then flips its
+  `visible` flag off (giving `AnimatedVisibility` — fade + slight vertical
+  slide — time to animate out) before removing it from the list, mirroring
+  the existing `alerts`/`collectLatest`+`delay` pattern already used for the
+  gold alert banner.
 - Already close to the brief before this pass: the town canvas is already
   full-bleed (`Modifier.fillMaxSize()`), the top HUD is already a compact
-  translucent chip strip (date/time/weather/pop/nudges, not a dense stats
+  translucent chip strip (date/time/weather/nudges, not a dense stats
   bar), the followed-resident indicator is already a small pill (not a full
-  banner), time controls are already a compact row, and event/alert banners
-  already auto-dismiss (~5s). These weren't rebuilt since they already
-  roughly match the brief's intent; revisit if the user wants them
-  restyled rather than just re-architected.
-- Not yet started: population moved out of the always-visible top strip
-  into a dedicated town-overview overlay; time controls collapsed to a
-  single expandable pill rather than an always-visible row; event banners
-  stacking up to 2 with slide/fade animation (currently one at a time, no
-  animated transition); the entire modular pixel-art asset system (building
+  banner). These weren't rebuilt since they already roughly match the
+  brief's intent; revisit if the user wants them restyled rather than just
+  re-architected.
+- Not yet started: the entire modular pixel-art asset system (building
   variants/condition states, resident appearance/animation, environmental
   props) — buildings and residents are still flat procedural rectangles
   (`SpriteProvider`), which is most of what the brief is actually about
-  visually and the biggest remaining gap.
+  visually and the biggest remaining gap. That's Phase 2 (Visual identity),
+  tracked separately, and needs real visual iteration this environment
+  can't do.
 
 Verified via the full local unit test suite: same 3 pre-existing failures
 as before (nothing new), `NavigationTest` still passes. Committed and
 pushed directly to `main`.
+
+**2026-07-10, later same day — remainder of Phase 1 (population overlay,
+collapsible time pill, stacked animated event banners) implemented by a
+parallel session working only on `feature/town/*` + `core/ui` files (no
+Gradle/git access in that session — another agent handled backend
+simulation work concurrently in the same working tree). Changed files:
+`TownScreen.kt`, `TownViewModel.kt`, `TownSheets.kt`, `data/WorldSnapshot.kt`.
+Not yet compiled/tested by that session — needs a build + the Robolectric
+suite run before the next commit.**
 
 ## Mobile UI rebuild (current priority — supersedes new Phase 2 Simulation work for now)
 
@@ -199,10 +273,11 @@ their world continue without you."*
 Development order from the brief (status noted inline):
 
 1. **Town canvas** — full-bleed map, pan/zoom, camera follow, compact
-   overlays, compact time controls. *In progress — see session log above
-   for what's done (camera follow-with-override, vector nav icons) vs. not
-   (population out of top strip, collapsible time-control pill, stacked
-   animated event banners).*
+   overlays, compact time controls. *All session-tracked items done: camera
+   follow-with-override, vector nav icons, population moved into a
+   town-overview overlay, collapsible time-control pill, stacked animated
+   event banners — see session log above. Remaining gap for this phase is
+   purely visual (Phase 2, below), not interaction/architecture.*
 2. **Visual identity** — modular buildings (footprint × wall × roof ×
    windows × door × chimney × sign × awning × garden × fence × condition
    overlay…), environmental props, resident appearance variation
@@ -275,7 +350,15 @@ rather than duplicating it wholesale into this doc.
   choices, new construction and demolition still open; the latter two need
   map/tile placement work, which is riskier while the building-overlap bug
   below is unresolved.*
-- Seasonal events: harvest fair, winter market, floods by the river tiles.
+- [x] Seasonal events: harvest fair, winter market, floods by the river
+  tiles. *Implemented: `SeasonalEventSystem.updateDaily`. Fixed-date harvest
+  fair (month 8/day 15, wellbeing + food/drink demand boost, `COMMUNITY_EVENT`
+  at the park) and winter market (month 11/day 10, smaller comfort boost +
+  café/hardware/tailor demand, `COMMUNITY_EVENT` at the town hall); river
+  floods roll a small daily chance during rain/storm against buildings near
+  the seeded east-edge river, harsher than generic storm damage, feeding
+  `ConsequenceEngine` via `WEATHER_DAMAGE`. See
+  `docs/simulation-rules.md#seasonal-events`.*
 
 **Product**
 - Family tree visualisation (proper generational graph) and a relationship

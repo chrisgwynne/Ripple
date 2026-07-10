@@ -422,6 +422,37 @@ fun InterventionSheetContent(world: WorldUi, residentId: Long, viewModel: TownVi
     }
 }
 
+// ------------------------------------------------------------- town overview
+
+@Composable
+fun TownOverviewSheetContent(world: WorldUi) {
+    val stats = world.townStats
+    Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
+        Text(world.townName, style = MaterialTheme.typography.headlineSmall)
+        Text(
+            "${world.dateLabel} · ${world.clockLabel}",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        SectionTitle("At a glance")
+        Text("Population: ${stats.population}", style = MaterialTheme.typography.bodyMedium)
+        Text("In work: ${stats.employedCount}", style = MaterialTheme.typography.bodyMedium)
+        SectionTitle("Wellbeing")
+        StatBar("Wellbeing (low stress)", stats.averageWellbeing)
+        StatBar("Health", stats.averageHealth)
+        SectionTitle("Economy")
+        Text("Average savings: ${stats.averageWealth.toInt()} coins", style = MaterialTheme.typography.bodyMedium)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "These are town-wide averages across everyone currently living here. " +
+                "Crime and environment aren't tracked by the simulation yet, so they " +
+                "aren't shown.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
 // ---------------------------------------------------------------- death card
 
 @Composable
