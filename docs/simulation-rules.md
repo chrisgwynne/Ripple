@@ -7,6 +7,54 @@ The single guiding principle:
 This document describes each system's rules and tuning constants as
 implemented in `core/simulation`.
 
+## Personality drift from lived experience
+
+The birth-baseline `Personality` (`inheritPersonality`, set once at birth via parent-mix +
+Gaussian noise) is never mutated. `Resident.personalityModifiers` (`PersonalityModifiers`, one
+signed `Double` per trait, default 0.0) is a separate, additive layer;
+`Resident.effectivePersonality()` returns baseline+modifier, each trait individually clamped to
+`[0,1]`. `PersonalityDevelopmentSystem.updateDaily` looks for *patterns* in a resident's recent
+memories (≥2 matching significant memories within a 45-day window, or one memory at
+importance ≥ 80 on its own) and nudges the relevant trait(s) by a small `±0.01..0.03` delta,
+scaled ×1.6 for children/teens vs ×1.0 for adults/elders (more malleable young). Every trait's
+*lifetime* accumulated modifier is hard-capped at `±0.25` (`MAX_LIFETIME_DRIFT`) — the clamp is
+applied to the running modifier itself, not the effective trait, so the cap can never be
+exceeded no matter how many triggers fire. Every applied delta emits a low-severity, private
+`PERSONALITY_SHIFTED` event with the real trait/delta/reason and `causeIds` back to the
+triggering memories. Brief-to-trait mapping (the brief's vocabulary doesn't have a 1:1 match to
+the existing 10 traits): "confidence"/"caution" → `courage`; "optimism" → `ambition`; "trust in
+others" → `honesty`. `effectivePersonality()` is wired into `DecisionSystem`'s `personalityFit`
+terms, `InteractionSystem`'s compatibility/tension calc, and `GoalSystem`'s ambition gates — the
+places drift is actually felt; the birth-inheritance calculation itself still reads parents'
+*baseline*, not their drifted personality, so drift doesn't compound across generations.
+Separate hooks exist for leadership (mayor/councillor/business owner, small steady courage/
+ambition uptick), parenthood (patience/empathy on each birth), and crime outcomes (guilty vs.
+wrongly-accused drift differently) — `PersonalityDevelopmentSystem.evaluateLeadership` is wired
+into the daily loop; `evaluateParenthood` is wired into `LifecycleSystem.bear`.
+**Still open:** `evaluateRecovery` (a small resilience uptick when a shock period ends cleanly)
+and `evaluateCrimeOutcome` (personality shift after a crime investigation resolves) exist as
+callable functions but aren't yet wired to their intended call sites — a small follow-up.
+
+## Active emotions
+
+Distinct, decaying emotional states layered on top of the `Needs` sliders — `Resident
+.activeEmotions` (`ActiveEmotion`: type, intensity 0-100, source event/resident, decay rate),
+capped at 6 concurrent per resident (weakest evicted first). `EmotionSystem.spawnEmotion` is
+called additively alongside whatever instant need-delta code already exists at a given site
+(e.g. `EconomySystem.closeBusiness`'s existing `stress += 18.0` is untouched); re-triggering an
+already-active emotion of the same type deepens it in place rather than stacking a duplicate.
+`EmotionSystem.updateDaily` decays every active emotion by its per-type rate (grief/loneliness
+linger longest at 3-4/day, anger/relief fade fastest at 12-14/day), removing it once negligible
+— purely one-directional, matching `NeedsSystem.traumaRecoveryDamping`'s existing tone.
+`EmotionSystem.behaviourModifier(resident, category)` returns a bounded `0.5..1.5` multiplier
+DecisionSystem composes into `personalityFit` at 6 candidate-action sites (sleep, visit-friend,
+socialise-public, exercise, work-on-goal, relax-home) — grief/loneliness favour low-key/social
+actions, fear/anxiety favour avoidant ones, hope/pride favour goal-pursuit — composing
+multiplicatively with the existing shock-period nudge and every personality-trait term, never
+replacing any of them. Currently wired to spawn at business closure (owner: `GRIEF`, laid-off
+staff: `ANXIETY`), bereavement (`GRIEF` for close family/partner), and birth (`PRIDE` for both
+parents) — the highest-value sites; not every event type spawns an emotion.
+
 ## Time
 
 - 1 tick = **10 in-game minutes**; 144 ticks per day.

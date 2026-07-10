@@ -116,7 +116,8 @@ object DecisionSystem {
                 durationMinutes = if (night) (7 * 60L) else 90L,
                 reason = if (night) "It's late and the day is done" else "Running on empty",
                 needPressure = (sleepy + if (night) 0.7 else 0.0).coerceIn(0.05, 1.6),
-                personalityFit = 1.0 * (if (inShock) SHOCK_LOW_KEY_BOOST else 1.0), expectedReward = 1.2, confidence = 1.0,
+                personalityFit = 1.0 * (if (inShock) SHOCK_LOW_KEY_BOOST else 1.0) *
+                    EmotionSystem.behaviourModifier(r, EmotionSystem.ActionCategory.LOW_KEY), expectedReward = 1.2, confidence = 1.0,
                 socialInfluence = 1.0, opportunity = 1.0,
                 risk = 0.0, cost = 0.0, effort = 0.02, moralResistance = 0.0
             )
@@ -226,7 +227,8 @@ object DecisionSystem {
                         ActionKind.VISIT_FRIEND, friendHome, friend.id, Activity.VISITING, 90L,
                         "Calling on ${friend.firstName}",
                         needPressure = lonely * 1.2,
-                        personalityFit = (0.5 + p.sociability * 0.8) * (if (inShock) SHOCK_LOW_KEY_BOOST else 1.0),
+                        personalityFit = (0.5 + p.sociability * 0.8) * (if (inShock) SHOCK_LOW_KEY_BOOST else 1.0) *
+                            EmotionSystem.behaviourModifier(r, EmotionSystem.ActionCategory.SOCIAL),
                         expectedReward = 0.8 + (state.relationship(r.id, friend.id)?.warmth() ?: 0.0) / 100.0,
                         confidence = 0.9, socialInfluence = 1.1, opportunity = 1.0,
                         risk = 0.02, cost = 0.02, effort = 0.15, moralResistance = 0.0
@@ -239,7 +241,8 @@ object DecisionSystem {
                     ActionKind.SOCIALISE_PUBLIC, spot.id, null, Activity.SOCIALISING, 80L,
                     "Some company at ${spot.name}",
                     needPressure = lonely,
-                    personalityFit = (0.4 + p.sociability * 0.9) * (if (inShock) SHOCK_LOW_KEY_BOOST else 1.0),
+                    personalityFit = (0.4 + p.sociability * 0.9) * (if (inShock) SHOCK_LOW_KEY_BOOST else 1.0) *
+                        EmotionSystem.behaviourModifier(r, EmotionSystem.ActionCategory.SOCIAL),
                     expectedReward = 0.9, confidence = 0.9, socialInfluence = 1.15, opportunity = 1.0,
                     risk = 0.02, cost = if (spot.type == BuildingType.PARK) 0.0 else 0.1,
                     effort = 0.12, moralResistance = 0.0
@@ -272,7 +275,8 @@ object DecisionSystem {
                 "A run around the park",
                 needPressure = 0.25 + (n.stress / 100.0) * 0.5,
                 personalityFit = (0.3 + p.discipline * 0.5 + (r.skill(SkillType.FITNESS) / 200.0)) *
-                    (if (inShock) SHOCK_EFFORTFUL_DAMPEN else 1.0),
+                    (if (inShock) SHOCK_EFFORTFUL_DAMPEN else 1.0) *
+                    EmotionSystem.behaviourModifier(r, EmotionSystem.ActionCategory.EFFORTFUL),
                 expectedReward = 0.8, confidence = 0.95, socialInfluence = 1.0, opportunity = 1.0,
                 risk = 0.02, cost = 0.0, effort = 0.3, moralResistance = 0.0
             )
@@ -287,7 +291,8 @@ object DecisionSystem {
                 goalReason(activeGoal.type),
                 needPressure = 0.4 + pressure(n.purpose) * 0.8,
                 personalityFit = (0.4 + p.ambition * 0.7 + p.discipline * 0.2) *
-                    (if (inShock) SHOCK_EFFORTFUL_DAMPEN else 1.0),
+                    (if (inShock) SHOCK_EFFORTFUL_DAMPEN else 1.0) *
+                    EmotionSystem.behaviourModifier(r, EmotionSystem.ActionCategory.GOAL_PURSUING),
                 expectedReward = 1.0 - activeGoal.risk * 0.3,
                 confidence = 0.7 + activeGoal.progress * 0.3,
                 socialInfluence = 1.0, opportunity = 1.0,
@@ -301,7 +306,8 @@ object DecisionSystem {
                 ActionKind.RELAX_HOME, home, null, Activity.RELAXING, 60L,
                 "A quiet hour at home",
                 needPressure = 0.3 + (n.stress / 100.0) * 0.6,
-                personalityFit = (0.6 + (1.0 - p.sociability) * 0.3) * (if (inShock) SHOCK_LOW_KEY_BOOST else 1.0),
+                personalityFit = (0.6 + (1.0 - p.sociability) * 0.3) * (if (inShock) SHOCK_LOW_KEY_BOOST else 1.0) *
+                    EmotionSystem.behaviourModifier(r, EmotionSystem.ActionCategory.LOW_KEY),
                 expectedReward = 0.75, confidence = 1.0, socialInfluence = 1.0, opportunity = 1.0,
                 risk = 0.0, cost = 0.0, effort = 0.02, moralResistance = 0.0
             )

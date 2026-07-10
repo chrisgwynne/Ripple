@@ -218,6 +218,7 @@ object EconomySystem {
                 severity = 0.55, causeIds = listOf(closure.id)
             )
             ctx.addMemory(worker, MemoryType.LOSS, "The day ${biz.name} closed.", 55.0, jobLost.id)
+            EmotionSystem.spawnEmotion(ctx, worker, com.ripple.town.core.model.EmotionType.ANXIETY, 60.0, jobLost.id)
             scheduleShock(ctx, worker, jobLost.id)
             ConsequenceEngine.onEvent(ctx, jobLost)
         }
@@ -229,6 +230,7 @@ object EconomySystem {
             owner.reputation -= 6.0
             if (biz.balance < 0) owner.debt += -biz.balance
             ctx.addMemory(owner, MemoryType.LOSS, "Losing ${biz.name} broke something in me.", 80.0, closure.id)
+            EmotionSystem.spawnEmotion(ctx, owner, com.ripple.town.core.model.EmotionType.GRIEF, 70.0, closure.id)
             scheduleShock(ctx, owner, closure.id)
         }
         ConsequenceEngine.onEvent(ctx, closure)

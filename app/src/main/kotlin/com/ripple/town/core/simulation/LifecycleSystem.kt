@@ -110,6 +110,10 @@ object LifecycleSystem {
         )
         ctx.addMemory(parentA, MemoryType.ACHIEVEMENT, "The day ${child.firstName} was born.", 90.0, e.id, listOf(child.id))
         ctx.addMemory(parentB, MemoryType.ACHIEVEMENT, "The day ${child.firstName} was born.", 90.0, e.id, listOf(child.id))
+        EmotionSystem.spawnEmotion(ctx, parentA, com.ripple.town.core.model.EmotionType.PRIDE, 70.0, e.id, child.id)
+        EmotionSystem.spawnEmotion(ctx, parentB, com.ripple.town.core.model.EmotionType.PRIDE, 70.0, e.id, child.id)
+        PersonalityDevelopmentSystem.evaluateParenthood(ctx, parentA, e.id)
+        PersonalityDevelopmentSystem.evaluateParenthood(ctx, parentB, e.id)
         ConsequenceEngine.onEvent(ctx, e)
     }
 
@@ -216,6 +220,7 @@ object LifecycleSystem {
             m.needs.social -= 10.0
             ctx.beginActivity(m, Activity.MOURNING, 12 * 60, "Grieving for ${r.firstName}")
             ctx.addMemory(m, MemoryType.LOSS, "We lost ${r.firstName}.", 80.0, death.id, listOf(r.id))
+            EmotionSystem.spawnEmotion(ctx, m, com.ripple.town.core.model.EmotionType.GRIEF, 75.0, death.id, r.id)
             // Close family/partner (not every warm acquaintance) get the same bounded shock
             // window as job loss/business closure — see EconomySystem.scheduleShock.
             if (m.id == partner?.id || m.id in r.childIds || m.id == r.motherId || m.id == r.fatherId) {

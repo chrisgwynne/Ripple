@@ -4,6 +4,43 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-11 — Simulation Reality Remediation, Phase A.1/A.2: personality drift, active emotions
+
+Following the Simulation Reality Review's core finding ("residents don't change from what
+happens to them"), this begins the Phase A remediation. Two systems landed; three more
+(memory resurfacing, personality-shaped relationship thresholds, panic/impulse override) are
+queued next.
+
+**Personality drift** — `PersonalityDevelopmentSystem`, new. The birth-baseline `Personality`
+is never touched; a new additive `PersonalityModifiers` layer + `Resident.effectivePersonality()`
+accessor is what actually drifts, hard-capped at ±0.25 lifetime per trait, driven by *patterns*
+in recent memories (not single ordinary events), scaled faster for children/teens than adults.
+Wired into `DecisionSystem`/`InteractionSystem`/`GoalSystem`'s personality-reading call sites,
+`LifecycleSystem.bear` (parenthood), and the daily loop (leadership). Every applied delta emits
+a real, causally-linked `PERSONALITY_SHIFTED` event — see `docs/simulation-rules.md#personality-
+drift-from-lived-experience` for the full trait-mapping writeup.
+
+**Active emotions** — `EmotionSystem`, new. 12 distinct, decaying emotional states
+(`ActiveEmotion`) layered additively on top of the existing `Needs` sliders — spawned at
+business closure, bereavement, and birth (the highest-value sites, not every event type), decay
+one-directionally per type, and feed a bounded multiplier into `DecisionSystem`'s scoring at 6
+candidate-action sites. See `docs/simulation-rules.md#active-emotions`.
+
+**Note on how this landed:** both systems were built by two agents that hit a subagent session
+rate limit before finishing wiring/docs — the orchestrating session read their partial work
+directly, fixed a real bug (a broken/no-op cooldown check in `PersonalityDevelopmentSystem` that
+would have let a pattern trigger fire every single day instead of respecting its 20-day
+cooldown), completed all the `SimulationCoordinator`/`DecisionSystem` wiring, and wrote these
+docs. Both agents' test-file deliverables did not land — **no new test coverage exists yet for
+either system**, flagged honestly as an immediate follow-up rather than skipped silently.
+
+**Explicitly not yet wired** (functions exist, callable, just no call site yet):
+`PersonalityDevelopmentSystem.evaluateRecovery` (resilience uptick when a shock period ends
+cleanly) and `evaluateCrimeOutcome` (personality shift after a crime investigation resolves).
+
+Not verified beyond compilation — the standing full-gradle-test-suite instability in this
+environment means this is compile-checked only, same caveat as every other change this session.
+
 ### 2026-07-10 — Life events unfold over days: shock period, delayed ambition, newspaper follow-up (skipped)
 
 Explicit ground rule for this session: extend `DelayedEffectSystem`/`GoalSystem`

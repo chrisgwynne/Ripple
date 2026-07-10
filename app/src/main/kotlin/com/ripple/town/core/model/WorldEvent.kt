@@ -91,7 +91,13 @@ enum class EventType(val label: String) {
     /** Level 2 — should-tier: a workplace accident significant enough to injure a worker. */
     WORKPLACE_ACCIDENT("Workplace accident"),
     /** Level 2 — should-tier: a petition's supporters turn a resolution into a public disruption. */
-    PROTEST_DISRUPTION("Protest disruption")
+    PROTEST_DISRUPTION("Protest disruption"),
+
+    /** A resident's lived experience has nudged one trait of their [effectivePersonality]
+     *  slightly, permanently, within the lifetime drift cap. See `PersonalityDevelopmentSystem`
+     *  and `docs/simulation-rules.md` "Personality drift from lived experience". Internal
+     *  character-development texture, not town news — always `PRIVATE`, low severity. */
+    PERSONALITY_SHIFTED("Personality shift")
 }
 
 enum class EventVisibility {

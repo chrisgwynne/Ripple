@@ -108,6 +108,8 @@ class SimulationCoordinator(
             CuratedWorldPressureFeed.updateDaily(ctx)
             CrimeSystem.updateDaily(ctx)
             IncidentSystem.updateDaily(ctx)
+            EmotionSystem.updateDaily(ctx)
+            PersonalityDevelopmentSystem.updateDaily(ctx)
         }
         // 13. Intervention influence regenerates through observation.
         InterventionEngine.regenerate(state, SimTime.MINUTES_PER_TICK)

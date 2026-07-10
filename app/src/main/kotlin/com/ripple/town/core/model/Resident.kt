@@ -90,6 +90,33 @@ data class Personality(
     val impulsiveness: Double = 0.5
 )
 
+/**
+ * Lifetime accumulated drift on top of a resident's inherited-at-birth
+ * [Personality] baseline — see `PersonalityDevelopmentSystem` and
+ * `docs/simulation-rules.md` "Personality drift from lived experience".
+ * Deliberately a *sibling* field, never folded into [Personality] itself:
+ * dozens of call sites read `resident.personality.kindness` etc. directly
+ * and must keep compiling and returning the untouched birth baseline.
+ * Each field is a signed delta, one per [Personality] trait, independently
+ * capped to `±PersonalityDevelopmentSystem.MAX_LIFETIME_DRIFT` by
+ * [Resident.applyPersonalityDrift] — never written to directly by
+ * simulation code outside that helper. `var` (not `val`) because these
+ * mutate in place tick over tick, same convention as [Needs]' fields.
+ */
+@Serializable
+data class PersonalityModifiers(
+    var kindness: Double = 0.0,
+    var ambition: Double = 0.0,
+    var curiosity: Double = 0.0,
+    var sociability: Double = 0.0,
+    var patience: Double = 0.0,
+    var honesty: Double = 0.0,
+    var courage: Double = 0.0,
+    var discipline: Double = 0.0,
+    var empathy: Double = 0.0,
+    var impulsiveness: Double = 0.0
+)
+
 enum class SkillType(val label: String) {
     COOKING("Cooking"), CARPENTRY("Carpentry"), REPAIR("Repair"), TEACHING("Teaching"),
     MEDICINE("Medicine"), BUSINESS("Business"), POLITICS("Politics"), SOCIAL("Social ability"),
@@ -131,6 +158,53 @@ data class SpriteConfig(
 )
 
 enum class RelationshipStatus { SINGLE, DATING, ENGAGED, MARRIED, SEPARATED, DIVORCED, WIDOWED }
+
+/**
+ * Distinct, actively-felt emotional states — layered ON TOP of the [Needs] sliders, not a
+ * replacement for them. Needs are slow-drifting background pressures ("how full is my life");
+ * emotions are sharper, shorter-lived reactions to specific events, spawned by
+ * `EmotionSystem.spawnEmotion` and decayed by `EmotionSystem.updateDaily`. See
+ * `docs/simulation-rules.md` "Active emotions" for spawn triggers and behavioural effects.
+ *
+ * Deliberately a practical 12, not the full textbook set: `EMBARRASSMENT` is skipped because it
+ * would just duplicate `HUMILIATION` (already a distinct [MemoryType] with its own
+ * `traumaRecoveryDamping` handling in `NeedsSystem`); `CONFIDENCE` is skipped because it would
+ * duplicate the existing `courage`/`ambition` personality traits (continuous, not event-driven,
+ * and owned by the personality-drift work); `AFFECTION` is skipped because relationship warmth
+ * already has a dedicated, richer continuous model (`Relationship.affection`) that this system
+ * would only shadow, not improve.
+ */
+enum class EmotionType(val label: String) {
+    GRIEF("Grief"),
+    FEAR("Fear"),
+    SHAME("Shame"),
+    JEALOUSY("Jealousy"),
+    ANGER("Anger"),
+    RELIEF("Relief"),
+    HOPE("Hope"),
+    REGRET("Regret"),
+    LONELINESS("Loneliness"),
+    PRIDE("Pride"),
+    ANXIETY("Anxiety"),
+    GUILT("Guilt")
+}
+
+/**
+ * One active, decaying emotional reaction. `intensity` follows the same 0..100 convention as
+ * [Memory.emotionalIntensity]. `createdAt`/`lastTriggeredAt` are sim minutes, matching every
+ * other time field on [Resident]. `decayRate` is intensity lost per in-world day, applied by
+ * `EmotionSystem.updateDaily`; the emotion is removed once its intensity is negligible.
+ */
+@Serializable
+data class ActiveEmotion(
+    val type: EmotionType,
+    var intensity: Double,
+    val sourceEventId: Long? = null,
+    val relatedResidentId: Long? = null,
+    val createdAt: Long,
+    var lastTriggeredAt: Long,
+    val decayRate: Double
+)
 
 @Serializable
 data class Resident(
@@ -174,10 +248,19 @@ data class Resident(
 
     val needs: Needs = Needs(),
     val personality: Personality = Personality(),
+    /** Lifetime drift accumulated from lived experience, on top of [personality]'s
+     *  untouched birth baseline. Safe default so existing checkpoints deserialize
+     *  unchanged. See [PersonalityModifiers] and [effectivePersonality]. */
+    val personalityModifiers: PersonalityModifiers = PersonalityModifiers(),
     val skills: MutableMap<SkillType, Double> = mutableMapOf(),
     val conditions: MutableList<HealthCondition> = mutableListOf(),
     val memories: MutableList<Memory> = mutableListOf(),
     val goals: MutableList<Goal> = mutableListOf(),
+    /** Currently-felt emotional reactions — see [ActiveEmotion]/`EmotionSystem`. A new, safe-
+     *  default field (empty list) so existing checkpoints deserialize unchanged. Bounded to
+     *  `EmotionSystem.MAX_ACTIVE_EMOTIONS`, oldest/weakest evicted first, same convention as
+     *  [memories]' own cap in `TickContext.addMemory`. */
+    val activeEmotions: MutableList<ActiveEmotion> = mutableListOf(),
 
     // Family
     var motherId: Long? = null,
@@ -220,6 +303,33 @@ data class Resident(
     fun locationBuildingId(): Long? = currentBuildingId ?: travelToBuildingId
 
     val inTown: Boolean get() = alive && leftTownAt == null
+
+    /**
+     * The personality this resident actually acts on: birth [personality] baseline plus
+     * accumulated [personalityModifiers] drift, each trait individually clamped back into
+     * [Personality]'s own 0.0..1.0 range. A fresh [Personality] instance each call — never
+     * mutates [personality] itself, so the birth baseline stays exactly as
+     * `LifecycleSystem.inheritPersonality` produced it, unmodified, forever (checkpoint- and
+     * inheritance-stable). Call sites that care about "who this resident has become" (decision
+     * scoring, compatibility, goal gates) should read this; call sites that care about "who a
+     * parent innately was" (breeding the next generation) should keep reading [personality].
+     */
+    fun effectivePersonality(): Personality {
+        val m = personalityModifiers
+        fun eff(base: Double, delta: Double) = (base + delta).coerceIn(0.0, 1.0)
+        return Personality(
+            kindness = eff(personality.kindness, m.kindness),
+            ambition = eff(personality.ambition, m.ambition),
+            curiosity = eff(personality.curiosity, m.curiosity),
+            sociability = eff(personality.sociability, m.sociability),
+            patience = eff(personality.patience, m.patience),
+            honesty = eff(personality.honesty, m.honesty),
+            courage = eff(personality.courage, m.courage),
+            discipline = eff(personality.discipline, m.discipline),
+            empathy = eff(personality.empathy, m.empathy),
+            impulsiveness = eff(personality.impulsiveness, m.impulsiveness)
+        )
+    }
 
     fun knows(eventId: Long): Boolean = eventId in knownFacts
 
