@@ -278,7 +278,24 @@ data class Resident(
     // knowledge state only needs to answer "have they heard this one yet?" — which is all
     // RumourSystem's leak-eligibility check and any future dialogue/reaction logic need.
     // Bounded like memories so it can't grow without limit over a long-running world.
-    val knownFacts: MutableList<Long> = mutableListOf()
+    val knownFacts: MutableList<Long> = mutableListOf(),
+
+    // Abstract, ownable ideas this resident currently holds (any strength) — see [IdeaTemplate]/
+    // [ResidentIdeaState] and `IdeaDiffusionSystem`. Distinct from [ideaSeeds] above: ideaSeeds is
+    // a single narrow string hint consumed once by GoalSystem's START_BUSINESS check; this is a
+    // real spreading/mutating/decaying social phenomenon with per-resident strength. Safe default
+    // (empty list) so existing checkpoints deserialize unchanged. Bounded like [activeEmotions],
+    // see `IdeaDiffusionSystem.MAX_ACTIVE_IDEAS`.
+    val activeIdeas: MutableList<ResidentIdeaState> = mutableListOf(),
+
+    /** This resident's formed views on [BeliefTopic]s — see [Belief]/`BeliefSystem`. A new,
+     *  safe-default field (empty map) so existing checkpoints deserialize unchanged. A resident
+     *  only has an entry for a topic they've actually formed a view on; a missing entry means
+     *  "no strong opinion yet" — read via `BeliefSystem.positionOn`/`confidenceOn` rather than
+     *  this map directly. Not to be confused with [Memory.beliefFormed] (a short quoted-saying
+     *  string passed down at death, see `LifecycleSystem.passDownBeliefs`) — a different, older,
+     *  unrelated concept despite the similar name. */
+    val beliefs: MutableMap<BeliefTopic, Belief> = mutableMapOf()
 ) {
     val fullName: String get() = "$firstName $surname"
 

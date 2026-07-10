@@ -4,6 +4,163 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-11 — Simulation Reality Remediation, Phase A.6: idea diffusion
+
+Closes out the "ideas do not exist" gap flagged by the Simulation Reality Review: *"rumours
+propagate facts about specific events, not abstract, ownable ideas that can spread/mutate/die
+independent of any single event."* `RumourSystem` (unchanged) still owns fact propagation;
+this is the genuinely new, separate mechanic the review asked for.
+
+**`core/model/Idea.kt`** — new file. `IdeaTemplate` (id, label, `IdeaTone`, `complexity` 0..1,
+`baseAppealTraits`) plus a fixed, hand-authored `IdeaLibrary` of ten town-appropriate ideas
+(community garden, boycott a struggling business, healthier eating, neighbourhood watch,
+support increased council spending — deliberately no named candidate, new local
+tradition/festival, distrust of rising crime, a new business concept, share tools and labour,
+simpler living). `ResidentIdeaState` (per-resident: awareness/interest/beliefStrength/
+advocacyStrength, all independent 0..100 fields, plus `distorted: Boolean`).
+
+**`Resident.kt`** — additive `activeIdeas: MutableList<ResidentIdeaState> = mutableListOf()`,
+safe-default, bounded to 5 like `activeEmotions`. Landed alongside a concurrent agent's own
+`beliefs: MutableMap<BeliefTopic, Belief>` addition to the same file — read the file fresh
+immediately before and after editing to confirm no collision; the two fields sit side by side,
+`Belief.kt`/`BeliefSystem.kt` untouched as instructed.
+
+**`core/simulation/IdeaDiffusionSystem.kt`** — new file, four responsibilities:
+- **Spawn** (`updateDaily`) — ≤3%/day per eligible template, capped at `MAX_TOWN_ACTIVE_IDEAS`
+  (2) concurrent town-wide origins, weighted (not locked) towards residents whose
+  `effectivePersonality()` best fits the template's `baseAppealTraits`.
+- **Spread** (`update`, per-tick) — deliberately rides `InteractionSystem.update`'s exact
+  co-located/sociable/grouped-by-building sampling shape rather than a second social-graph
+  walker; transfer chance scales with listener trait-affinity, speaker `advocacyStrength`,
+  relationship `trust`/`warmth()`, damped by the idea's `complexity`. Capped at 0.35, ≤4
+  transfers/tick.
+- **Mutation** — 25% chance a genuinely new transfer starts `distorted` with a further belief
+  penalty; lightweight flag + number, no text-mutation system.
+- **Decay/death** (`updateDaily`) — unreinforced ideas lose interest/advocacy fastest, belief
+  slower, awareness slowest; pruned outright once interest and belief both go negligible, same
+  shape as `EmotionSystem.updateDaily`.
+- **Adoption** — crossing `beliefStrength` 65 fires new `EventType.IDEA_ADOPTED` (`PRIVATE`, low
+  severity; verified safe against `ImportanceScorer`'s and `NewspaperGenerator`'s `when`
+  fallbacks before adding). For exactly the "new business concept" template, also appends one
+  `ideaSeeds` entry (capped at 3) — the one clean, small, optional integration point back into
+  the existing, deliberately-untouched `ideaSeeds` → `GoalSystem.START_BUSINESS` pipeline.
+  `Resident.ideaSeeds` itself is never read from or written to by any other path in this system.
+
+**`SimulationCoordinator.kt`** — `IdeaDiffusionSystem.update(ctx)` wired right after
+`InteractionSystem.update(ctx)` in the per-tick pipeline; `IdeaDiffusionSystem.updateDaily(ctx)`
+appended at the end of the `if (newDay)` block, after a concurrent agent's own
+`BeliefSystem.updateDaily(ctx)` line — read the block fresh immediately before editing, per
+instruction, to avoid clobbering the other agent's addition.
+
+New test file `IdeaDiffusionSystemTest.kt` covers: an idea transfers between two co-located,
+already-warm, trait-compatible residents within a bounded number of ticks; an unreinforced idea
+decays to zero and is pruned from `activeIdeas`; the active-idea list never exceeds its
+documented cap across repeated daily passes; a same-seed determinism check (two independent
+runs from identical starting state produce identical transfer outcomes and belief values); and a
+`traitAffinity` sanity check (always clamped to 0..1). Compile-checked only, per this session's
+constraints — the full gradle test suite was not run; `./gradlew` was not invoked.
+
+**Not touched:** `Belief.kt`, `BeliefSystem.kt` (owned by a concurrent agent this round) and all
+of `Resident.kt`'s belief-related fields — `activeIdeas` was added as a clean sibling field only.
+
+### 2026-07-11 — Simulation Reality Remediation, Phase A.5: panic/impulse override
+
+Closes out the panic/impulse-override item flagged by the Simulation Reality Review
+("residents cannot make a genuinely irrational, out-of-character choice; the system is
+architecturally incapable of it") and referenced as in-flight by the concurrent A.4 memory-recall
+entry above. Landed in `DecisionSystem.kt` as a strictly post-processing step — `candidateActions()`
+scoring and `chooseBest()`'s ranking/5%-near-tie tie-break are both completely unchanged.
+
+**`DecisionSystem.applyPanicOverride`** — runs immediately after `chooseBest` inside `decide()`.
+Rolls `ctx.rng.nextBoolean(panicOverrideProbability(...))`; if it fires and there are at least two
+candidate actions, the final chosen action becomes the second-ranked (by score) real candidate —
+never an arbitrary pick, always a genuine already-scored alternative. `panicOverrideProbability`
+composes a capped **additive** sum, clamped to `[0.0, 0.15]`
+(`DecisionSystem.PANIC_OVERRIDE_MAX_PROBABILITY`, matching the brief's 0-8% normal / 15%
+exceptional-crisis band): `+0.05` max from `needs.stress`, flat `+0.03` from active
+`EconomySystem.isInShock`, `+0.02` max per active `FEAR`/`ANGER`/`ANXIETY` emotion (scaled by
+intensity, summed across however many are active), the whole increasing sum amplified 0.5x-1.5x by
+`effectivePersonality().impulsiveness`; minus up to `-0.04` from `discipline` and `-0.03` from
+`patience`. Full weight rationale documented on `panicOverrideProbability`'s kdoc and in
+`docs/simulation-rules.md#panic-impulse-override`.
+
+**`DecisionDeliberation`** — small new data class recording the top 2-3 considered actions, the
+top-scored action, the actually-chosen action, and (when overridden) a human-readable reason.
+Deliberately transient/local, not persisted to `WorldState`/checkpoints — the override explanation
+is instead folded directly into the `reason` string passed to `TickContext.sendTo`/`beginActivity`,
+so it surfaces through the resident's existing `activityReason` field and the UI's already-built
+"Why this action?" text (`ResidentProfileScreen.kt`) with zero new UI/persistence work, e.g. *"Went
+with shopping instead of sleeping — panic overwhelmed normal judgement (stress: high, active
+fear)."*
+
+New test file `PanicOverrideTest.kt` covers: probability floors at exactly 0.0 for a calm resident
+(no stress/shock/negative-emotion contribution regardless of personality); probability never
+exceeds the 0.15 cap; probability is measurably higher for an extreme resident (stress=95, active
+FEAR+ANGER, discipline/patience driven to 0 and impulsiveness to 1 via `personalityModifiers` so
+the test doesn't depend on whatever birth-baseline traits `WorldGenerator` happened to roll); with
+probability forced to zero the top-scored action is always chosen (100 repeated ticks); the
+override never picks an action outside the real candidate list, and always lands on the specific
+second-ranked one, never arbitrary; a 4000-tick statistical check that the observed override rate
+for the extreme resident lands within a wide (0.03, ~6 standard-error) band of the formula's
+expected probability while the calm resident's observed rate is exactly zero; and a same-seed
+determinism check — two independent 300-tick runs from an identical starting state produce byte-
+identical override/no-override sequences (an exact reproducibility property, not the statistical
+one). Compile-checked only, per this session's constraints — the full gradle test suite was not
+run.
+
+**Not touched:** `InteractionSystem.kt` (owned by a concurrent agent this round) and
+`MemoryRecallSystem.kt` (ditto, landed as the A.4 entry above). No changes to `candidateActions()`'s
+scoring blocks or the existing `SHOCK_LOW_KEY_BOOST`/`EmotionSystem.behaviourModifier` wiring from
+earlier this session — verified by re-reading the file fresh before editing, per instruction.
+
+### 2026-07-11 — Simulation Reality Remediation, Phase A.4: memory recall
+
+Continuing the Phase A remediation queue (see the A.1/A.2 entry below and the A.3
+`RelationshipInterpretationSystem` entry directly below this one, landed concurrently by another
+agent this same round). This lands `MemoryRecallSystem` — memory stops being write-only. A third
+agent worked concurrently on `DecisionSystem`'s panic/impulse-override logic this round; that file
+was left untouched (see below).
+
+**Memory recall** — `MemoryRecallSystem`, new, wired as the last entry in `SimulationCoordinator`'s
+`if (newDay)` block. A resident's current context (location, company, active emotions) is checked
+daily against their own significant memories (`importance >= 40`) on three triggers: same
+location (text-matches a memory's description against the current building's name — the same
+proxy `TownSheets.priorMemoryEcho` already used at the UI layer, now reused at the simulation
+layer), same person (co-located with someone in a memory's `associatedResidentIds`), and
+emotional-state echo (a currently active emotion matches the nearest emotional flavour of an old
+memory's type — cheapest of the three). A fourth candidate trigger from the brief ("similar event
+type recurring") was deliberately dropped: `Memory` has no per-entry `EventType` field, so
+checking it honestly would mean chasing `eventId` through the event index for every memory of
+every resident every day — not cheap, not the same shape as the other three.
+
+**Bounded-vs-duplicate choice:** resurfacing updates the *original* `Memory` row in place
+(`lastRecalledAt` bumped, `importance`/`emotionalIntensity` nudged by a small capped amount)
+rather than spawning a new "echo" memory row — `lastRecalledAt` already existed on the model,
+unused since creation, exactly for this purpose, and this keeps the existing 40-memory cap
+completely unaffected by recall activity. Each resurfacing spawns a real, reduced-intensity
+(0.4× the original) emotion via `EmotionSystem.spawnEmotion` and a private, low-severity
+`EventType.MEMORY_RECALLED` event (new type — verified both `ImportanceScorer` and
+`NewspaperGenerator`'s `else` fallbacks handle an unlisted type safely before relying on them).
+Cooldown is a direct copy of `PersonalityDevelopmentSystem.onCooldown`/`markCooldown`'s
+`Resident.awareness` string-ledger pattern, own namespace, 14-day window per (resident, memory).
+
+**Childhood-to-adulthood influence** — `MemoryRecallSystem.childhoodInfluenceModifier` returns a
+bounded 0.9–1.1 multiplier off real childhood/teen memories (via `bornAt`/`lifeStageAt`), 1.0
+no-op by default. Wired into exactly two `GoalSystem.generateFromCircumstance` branches: a
+childhood memory of a family business failing raises the ambition bar for `START_BUSINESS`; a
+childhood memory of family financial hardship raises the financial-security trigger threshold for
+`FIND_JOB`. `GoalSystem.kt` was the only other file touched with real logic changes.
+
+**DecisionSystem.kt: untouched.** No new function was genuinely needed there — both wiring points
+found a cleaner, safer home in `GoalSystem`'s existing threshold checks, so the other agent's
+in-flight panic/impulse-override work was left completely alone.
+
+New test file `MemoryRecallSystemTest.kt` covers: a matching trigger resurfaces at reduced
+intensity; the same memory doesn't re-trigger inside its cooldown; the memory list never grows
+from recall; same-seed determinism over a 20-day run; the childhood modifier's no-op default and
+its dampening effect with a real matching memory. Compile-checked only, per this session's
+constraints — the full gradle test suite was not run.
+
 ### 2026-07-11 — Simulation Reality Remediation, Phase A.3: personality-shaped relationship thresholds
 
 Continuing Phase A remediation (see the A.1/A.2 entry directly below): the Simulation Reality

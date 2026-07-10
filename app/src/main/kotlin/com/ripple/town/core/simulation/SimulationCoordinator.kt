@@ -70,6 +70,9 @@ class SimulationCoordinator(
         DecisionSystem.update(ctx)
         // 6-7. Social interactions and relationship arcs.
         InteractionSystem.update(ctx)
+        // 7b. Ideas may spread between co-located, already-sociable residents — piggybacks on
+        // the same sampling shape as InteractionSystem.update, not a parallel social-graph walk.
+        IdeaDiffusionSystem.update(ctx)
         // 8. Businesses and money.
         EconomySystem.update(ctx)
         // 9. Delayed effects whose windows are open.
@@ -111,6 +114,8 @@ class SimulationCoordinator(
             EmotionSystem.updateDaily(ctx)
             PersonalityDevelopmentSystem.updateDaily(ctx)
             MemoryRecallSystem.updateDaily(ctx)
+            IdeaDiffusionSystem.updateDaily(ctx)
+            BeliefSystem.updateDaily(ctx)
         }
         // 13. Intervention influence regenerates through observation.
         InterventionEngine.regenerate(state, SimTime.MINUTES_PER_TICK)

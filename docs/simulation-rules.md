@@ -133,6 +133,79 @@ wander. Highest score wins; RNG only breaks ties within 5 % of the best score
 terms are kept on the resident (`activityReason`) so the UI can answer
 *"Why this action?"*.
 
+### Panic/impulse override (added 2026-07-11)
+
+The Simulation Reality Review flagged a real gap: residents could never make a
+genuinely irrational, out-of-character choice — the architecture picked the
+top-scored action deterministically (bar the existing 5 % near-tie RNG),
+which made panic, impulse, and "out of character in the moment" behaviour
+structurally impossible. `DecisionSystem.applyPanicOverride` closes that gap
+with a small, bounded, explainable deviation layered **after** — never
+inside — the existing scoring/ranking:
+
+1. `DecisionSystem.decide()` still calls `candidateActions()` and
+   `chooseBest()` exactly as before, completely unchanged. `chooseBest`'s own
+   ranking and 5 %-near-tie RNG tie-break are untouched.
+2. Only then does a new, isolated post-processing step,
+   `applyPanicOverride`, run: it rolls `ctx.rng.nextBoolean(probability)`
+   against `panicOverrideProbability(state, r, now)`. If it fires **and**
+   there are at least two candidate actions, the final chosen action becomes
+   the **second-ranked** (by score) real candidate — never an arbitrary or
+   nonsensical one, always a genuine, already-scored, plausible option that
+   simply wasn't the optimal one. "Panic picks the second-best real option."
+3. The override is recorded in a small transient `DecisionDeliberation`
+   (considered top 2–3 actions, the top-scored action, the actually-chosen
+   action, whether it was overridden, and — when it was — a human-readable
+   reason). This is **not** persisted to `WorldState`/checkpoints (kept
+   deliberately scoped, same "small, bounded, causally explainable" shape as
+   `PersonalityDevelopmentSystem`'s per-trigger bookkeeping); instead the
+   explanation is folded directly into the `reason` string passed to
+   `TickContext.sendTo`/`beginActivity`, i.e. it shows up in the resident's
+   existing `activityReason` field, already surfaced in the UI's "Why this
+   action?" text — e.g. *"Went with shopping instead of sleeping — panic
+   overwhelmed normal judgement (stress: high, active fear)."*
+
+**Override probability formula** — bounded to `[0.0, 0.15]`
+(`DecisionSystem.PANIC_OVERRIDE_MAX_PROBABILITY`), matching the brief's
+stated 0–8 % normal / up to 15 % exceptional-crisis range. Composed as a
+capped **sum** of independent, individually-bounded contributions (additive,
+not multiplicative, so each term is easy to reason about and tune in
+isolation — the same plain arithmetic style as `EmotionSystem
+.behaviourModifier` and `PersonalityDevelopmentSystem`'s delta bands):
+
+Increases:
+- `needs.stress` — up to **+0.05** at stress = 100, scaled linearly
+  (`stress/100 × 0.05`).
+- Active shock (`EconomySystem.isInShock`) — flat **+0.03** while a shock
+  window (job loss, business closure, bereavement) is active. Flat, not
+  scaled, same treatment `SHOCK_LOW_KEY_BOOST`/`SHOCK_EFFORTFUL_DAMPEN` give
+  it elsewhere in `DecisionSystem`.
+- Active `FEAR`/`ANGER`/`ANXIETY` emotions only (the high-arousal "panic"
+  flavours — `GRIEF`/`LONELINESS`/etc. are subdued, not impulsive, and don't
+  contribute) — each active one contributes up to **+0.02**, scaled by its
+  own `intensity/100`, summed across however many of the three are
+  simultaneously active.
+- `effectivePersonality().impulsiveness` (0..1) doesn't add its own slice —
+  it amplifies everything above: the whole increasing sum is scaled by
+  `(0.5 + impulsiveness)`, i.e. 0.5×–1.5×.
+
+Decreases:
+- `effectivePersonality().discipline` — up to **−0.04** at discipline = 1.0.
+- `effectivePersonality().patience` — up to **−0.03** at patience = 1.0.
+
+The `[0.0, 0.15]` clamp on the final sum is the only thing enforcing the
+ceiling — every individual term is bounded, but a genuine multi-factor
+crisis (high stress + active shock + fear + anger + high impulsiveness)
+could otherwise exceed it; the clamp is what caps that "exceptional crisis"
+case at exactly 15 %, never higher. In the calm/disciplined common case the
+formula floors at 0.0 (increase terms are all zero when stress is low, no
+shock, and no active panic emotion, regardless of personality).
+
+Deterministic like everything else: the override roll consumes
+`ctx.rng`, so the same world seed always reproduces the exact same sequence
+of override/no-override decisions across a re-run. See
+`app/src/test/kotlin/com/ripple/town/simulation/PanicOverrideTest.kt`.
+
 ## Relationships
 
 Eight dimensions (familiarity, trust, affection, attraction, respect,
@@ -321,6 +394,115 @@ routinely gossip itself into the open before the existing discovery mechanic
 partner's vigilance) gets a chance to fire first. A gossiped-out affair still
 goes through the same accurate/distorted 55/45 split and the same
 `leakRecipients` knowledge gate as any other rumour.
+
+## Idea diffusion (added 2026-07-11)
+
+`RumourSystem` (above) propagates *facts about specific events* — a real argument, a real
+affair, a real break-up — each leak traceable (or not) back to one true happening.
+`IdeaDiffusionSystem` is a deliberately different, genuinely new mechanic: an **idea** isn't
+tied to any single event, has no one "true" version, and spreads, mutates and dies purely as a
+social phenomenon. It's also distinct from the older, narrower `Resident.ideaSeeds` (a single
+string hint `GoalSystem` consumes once to help decide on `START_BUSINESS`) — that mechanic is
+untouched; idea diffusion optionally *feeds* it as a downstream effect (see "Adoption" below),
+never replaces it.
+
+### The idea library
+
+A small, fixed, hand-authored set of ten `IdeaTemplate`s in `IdeaLibrary` — residents never
+invent ideas themselves. Each has an `id`, a `label`, an `IdeaTone` (`POSITIVE`/`NEUTRAL`/
+`NEGATIVE`), a `complexity` (0..1, harder ideas spread slower), and `baseAppealTraits` (which
+`Personality` fields make a resident more naturally receptive):
+
+| Idea | Tone | Complexity | Appeal traits |
+|---|---|---|---|
+| Start a community garden | Positive | 0.3 | kindness, curiosity |
+| Boycott a business that's let the town down | Negative | 0.4 | honesty, impulsiveness |
+| Take up healthier eating habits | Positive | 0.2 | discipline, ambition |
+| Set up a neighbourhood watch | Neutral | 0.4 | courage, discipline |
+| Support increased council spending | Neutral | 0.6 | empathy, ambition |
+| Start a new local tradition or festival | Positive | 0.35 | curiosity, sociability |
+| Distrust that the town is getting less safe | Negative | 0.3 | courage, honesty |
+| A promising new business concept | Positive | 0.5 | ambition, curiosity |
+| Share tools and labour between neighbours | Positive | 0.25 | kindness, empathy |
+| Live a bit simpler, want less | Neutral | 0.45 | patience, discipline |
+
+Deliberately abstract and small-town-shaped — no real-world politics, no named candidates
+("support increased council spending" rather than backing any specific person).
+
+### Per-resident state
+
+`Resident.activeIdeas: MutableList<ResidentIdeaState>` — a new, safe-default (empty list) field,
+bounded to `IdeaDiffusionSystem.MAX_ACTIVE_IDEAS` (5) the same way `activeEmotions` is bounded to
+6: the weakest-believed entry is evicted once a new one would exceed the cap. Each entry tracks,
+independently, for one `IdeaTemplate`:
+
+- `awareness` — merely heard of it (can be high with low belief).
+- `interest` — how much they care either way; decays fastest.
+- `beliefStrength` — how much they've personally bought in; crossing `ADOPTION_THRESHOLD` (65)
+  fires `EventType.IDEA_ADOPTED`.
+- `advocacyStrength` — how likely they are to actively bring it up/push it on others.
+- `distorted` — flags a copy that mutated on transfer from a purer upstream version (see below).
+
+### Spawn
+
+Once per day (`IdeaDiffusionSystem.updateDaily`), if fewer than `MAX_TOWN_ACTIVE_IDEAS` (2)
+templates are currently held by anyone in town, a small chance (3 %/day per eligible template)
+one originates with a single plausible adult resident — weighted towards (never strictly locked
+to) whoever's effective personality best fits the template's `baseAppealTraits`, so origin feels
+plausible rather than scripted. A fresh origin starts at a moderate awareness/interest/belief and
+leaves an `INSPIRATION` memory.
+
+### Spread
+
+Rides `InteractionSystem`'s own co-located/sociable sampling shape exactly — grouped by
+building, up to 2 sampled pairs per busy building, capped at `MAX_TRANSFERS_PER_TICK` (4) per
+tick — rather than a second, parallel social-graph walker. When a sampled pair includes a
+speaker whose best-held idea has `advocacyStrength` at or above 30 and a listener who is an
+adult, a transfer chance is rolled, scaled by:
+
+- the listener's trait-affinity match to the idea (average of their `effectivePersonality`
+  values named in `baseAppealTraits`),
+- the speaker's `advocacyStrength`,
+- the pair's relationship `trust` and `warmth()`,
+- damped by the idea's own `complexity` (harder ideas spread slower).
+
+Capped at `MAX_TRANSFER_CHANCE` (0.35). A listener who already has some awareness of the idea
+gets reinforced (awareness/interest nudged up) rather than a fresh copy.
+
+### Mutation
+
+On a genuinely new transfer (listener didn't already have the idea), there's a 25 % chance the
+new copy is flagged `distorted` and starts at a lower belief than a pure copy would (a further
+40 % penalty on top of the usual halving from speaker to listener). Deliberately lightweight —
+no separate content/text-mutation system, just a flag plus a numeric penalty, the same "texture,
+not a new mechanic" restraint `RumourSystem`'s accurate/distorted split uses.
+
+### Decay & death
+
+Daily, any idea not reinforced *that day* loses interest and advocacy fastest, belief a bit
+slower, awareness slowest (`DAILY_DECAY` = 2.5/day, belief at 0.6× that, awareness at 0.3×).
+Once both interest and belief fall to ≤ 1.0, the entry is pruned from `activeIdeas` outright —
+same "fade to nothing, remove outright" shape as `EmotionSystem.updateDaily`.
+
+### Adoption
+
+The moment `beliefStrength` crosses `ADOPTION_THRESHOLD` (65) for the first time for a given
+idea, `IDEA_ADOPTED` fires (`PRIVATE`, low severity — a personal shift in outlook, not town
+news). Guarded against re-firing via a `idea_adopted:<templateId>` marker in the existing
+`Resident.awareness` string-flag list (the same list Warn interventions already use — no new
+per-resident collection needed for this one bookkeeping bit). For exactly one idea — "a
+promising new business concept" — adoption also appends an `idea_diffusion:new_business_concept`
+entry to `Resident.ideaSeeds` (capped at 3 entries, same cap `InteractionSystem.
+maybeSeedOpportunity` already respects), the one clean, small integration point back into the
+pre-existing `ideaSeeds` → `GoalSystem.START_BUSINESS` pipeline.
+
+### Determinism & bounds
+
+Every roll goes through `ctx.rng`; `update` (per-tick spread) and `updateDaily` (spawn/decay)
+are wired into `SimulationCoordinator.tick()` in fixed position (spread right after
+`InteractionSystem.update`, daily pass alongside every other `updateDaily` system). All lists
+involved — `activeIdeas` per resident, town-wide active-template count — are capped, so a
+long-running world's idea state can't grow without bound.
 
 ## Building lifecycle
 
@@ -1603,3 +1785,164 @@ above were also built data-first before any UI surfaced them.
 run in bounded batches (per-call tick caps) with progress reported to the UI,
 then summarised ("While you were away, 12 days passed — 3 notable things
 happened."). The cap and batching are covered by tests.
+
+## Beliefs (added 2026-07-11)
+
+`core/model/Belief.kt` (data model) + `core/simulation/BeliefSystem.kt`
+(daily formation/drift). Not to be confused with `Memory.beliefFormed` (a
+short quoted-saying string passed down at death — see "Family & generations"
+→ "Inherited beliefs") — a different, older, unrelated concept that just
+happens to share a name.
+
+### Topics
+
+A practical subset of the brief's full belief-topic list, deliberately not
+mapped to any real-world political party or ideology — nine topics, picked
+for the clearest tie to systems that already exist and already fire real,
+causally-traceable events:
+
+- `TRUST_IN_GOVERNMENT` — trust in the town's local governance (mayor,
+  council, petitions).
+- `TRUST_IN_POLICE` — trust in the constable specifically.
+- `ECONOMIC_OPTIMISM` — how good the future looks financially.
+- `SOCIAL_OPENNESS` — the brief's "conservatism vs. openness" axis.
+- `ENVIRONMENTAL_CONCERN` — concern about weather damage/the town's
+  environment. Modelled in the topic enum for a future trigger; no trigger
+  is wired to it this pass (see "Deliberately out of scope" below).
+- `COMMUNITY_LOYALTY` — attachment to and faith in the town as a community.
+- `INDIVIDUALISM_VS_COLLECTIVISM` — self-reliance vs. leaning on others/the
+  town. Modelled in the enum; no trigger wired this pass.
+- `RISK_TOLERANCE` — appetite for risk-taking.
+- `INSTITUTIONAL_TRUST` — trust in civic institutions generally, broader
+  than just the constable.
+
+Each `Belief` (per resident, per topic — `Resident.beliefs: MutableMap
+<BeliefTopic, Belief>`) has:
+
+- `position: Double` (`-1.0..1.0`) — which end of the topic's axis a
+  resident sits on (e.g. low trust ↔ high trust). A resident with no entry
+  for a topic reads as the neutral default (`position = 0.0, confidence =
+  0.0`, "no strong opinion yet") via `BeliefSystem.positionOn`/
+  `confidenceOn` — never read the map directly from outside `BeliefSystem`.
+- `confidence: Double` (`0.0..1.0`) — how firmly held the view is. Also
+  gates how fast `position` can move: a low-confidence belief drifts
+  faster from real experience than a long-held, high-confidence one (see
+  "Drift formula" below).
+- `emotionalAttachment: Double` (`0.0..1.0`) — how much the belief is tied
+  up with feeling rather than just opinion. Reserved for a future
+  conversation/persuasion system to read (not consumed by anything this
+  pass, deliberately — see "Deliberately out of scope").
+- `sourceEventIds` — the real events that shaped the current position,
+  capped at 6, oldest dropped first.
+
+### Formation from a parent
+
+A teen (`LifeStage.TEEN`) with no beliefs of their own yet, whose mother or
+father is in town and already holds at least one belief, seeds 1-2 of them
+(`BeliefSystem.MAX_INHERITED_BELIEFS`) as a noisy copy via
+`SimRandom.nextGaussianLike` — the same helper `LifecycleSystem
+.inheritPersonality` uses for personality inheritance, spread
+`INHERITANCE_NOISE_SPREAD = 0.35` — at `INHERITED_CONFIDENCE_FACTOR = 0.4`
+of the parent's own confidence: the teen hasn't earned the view through
+their own lived experience yet, so it starts markedly shakier than the
+parent's.
+
+There is no dedicated life-stage-transition hook anywhere in the codebase
+(`LifecycleSystem`/`PersonalityDevelopmentSystem` both just check
+`lifeStageAt(now)` fresh each call, every day) — "TEEN, no beliefs yet,
+in-town parent with beliefs" is used as a fine proxy for "just old enough to
+start forming a worldview" rather than inventing a new transition-detection
+mechanism.
+
+### Drift from real lived experience
+
+Four triggers, each gated on real, already-simulated state — never a flat
+daily dice roll — run once per detailed in-town resident per day, each
+independently cooldown-gated (`BeliefSystem.SAME_TRIGGER_COOLDOWN_DAYS =
+14`, same `Resident.awareness`-namespaced-flag trick
+`PersonalityDevelopmentSystem` uses for its own cooldowns, distinct
+`"belief_cooldown:"` prefix so the two systems' entries can never collide):
+
+1. **Crime victimisation** (`evaluateCrimeVictimisation`) — a resident who
+   appears as a *target* of the crime a `CRIME_REPORTED` event's `causeIds`
+   points back to (i.e. the crime happened *to* them, not that they were
+   accused of it) drifts `TRUST_IN_POLICE`: down (`-DRIFT_MAX`) if the
+   report's `payload["accurate"] == "false"` — the wrong person was blamed
+   while the real culprit got away with it; up (small, `+DRIFT_MIN`) if it
+   was accurate — the system worked for them.
+2. **Unemployment** (`evaluateUnemployment`) — a `JOB_LOST` event in the
+   resident's recent window, or `SUSTAINED_UNEMPLOYMENT_DAYS = 14`+ of
+   continuous unemployment with none available (tracked via a
+   `belief_unemployed_since:` awareness flag, cleared the moment they're
+   employed again), drifts `ECONOMIC_OPTIMISM` down (`-DRIFT_MAX`) and, a
+   smaller secondary knock, `TRUST_IN_GOVERNMENT`/`INSTITUTIONAL_TRUST`
+   down (`-DRIFT_MIN`) — struggling to find work reads, fairly or not, as
+   the town not having done right by them.
+3. **Personal success** (`evaluatePersonalSuccess`) — reuses
+   `PersonalityDevelopmentSystem`'s own repeated-`ACHIEVEMENT`-memories
+   pattern-density check verbatim (same `PATTERN_WINDOW_DAYS`/
+   `PATTERN_THRESHOLD` constants: 2+ significant achievement memories
+   within 45 days) — a real run of successes, not one lucky memory, drifts
+   `ECONOMIC_OPTIMISM`/`RISK_TOLERANCE` up (`+DRIFT_MIN`).
+4. **Community response** (`evaluateCommunityResponse`) — a
+   `PETITION_RESOLVED` event with `payload["outcome"] == "succeeded"` that
+   this resident started or signed drifts `TRUST_IN_GOVERNMENT`/
+   `COMMUNITY_LOYALTY` up (`+DRIFT_MIN`); separately, a `WEATHER_DAMAGE`
+   flood at this resident's own home followed by a later `BUILDING_REPAIRED`
+   for the same building drifts `COMMUNITY_LOYALTY` up the same way — the
+   town pulled together and fixed it. This is the one trigger that can
+   touch a resident who wasn't personally the one who acted (a signatory,
+   not just the starter), since both are genuinely public, town-level good
+   news.
+
+### Drift formula
+
+Every raw delta sits in `BeliefSystem.DRIFT_MIN..DRIFT_MAX` (`0.02..0.05`)
+on the `-1..1` position scale, then scaled by a confidence-resistance
+factor before being applied: `resistance = CONFIDENCE_RESISTANCE_FLOOR +
+(1 - CONFIDENCE_RESISTANCE_FLOOR) * (1 - confidence)`
+(`CONFIDENCE_RESISTANCE_FLOOR = 0.35`) — a brand-new belief (confidence 0)
+moves at the full raw delta; a maximally firm belief (confidence 1) still
+moves, but only at 35% of it, never fully stuck. `position` is clamped to
+`[-1, 1]` after every application, so lifetime drift structurally cannot
+leave the documented range no matter how many triggers fire. `confidence`
+itself creeps up `CONFIDENCE_GAIN_PER_TRIGGER = 0.03` on every genuine
+trigger (clamped to `[0, 1]`) — a belief formed from repeated real
+experience becomes more settled over time, which in turn makes it resist
+future drift more, the intended feedback loop.
+
+Every applied drift (skipped entirely if the post-clamp change rounds to
+~0 — an already-saturated belief correctly reports nothing) emits a
+low-severity, `PRIVATE` `EventType.BELIEF_SHIFTED` with `causeIds` back to
+the real triggering event(s)/memories and a `payload` of `topic`/`delta`/
+`reason` — verified safe against both `ImportanceScorer` (falls to the
+existing `else -> 8.0` default) and `NewspaperGenerator` (falls to the
+existing `else ->` branches in both `categoryFor` and `headlineFor`; moot
+anyway since `PRIVATE` visibility means it never reaches the newspaper's
+`public` filter in the first place).
+
+### Read helpers
+
+`BeliefSystem.positionOn(resident, topic)` / `BeliefSystem.confidenceOn
+(resident, topic)` — the only sanctioned way for other systems to read a
+resident's belief state; both return the neutral default (`0.0`) when the
+resident has no entry for that topic, so callers never need a null check.
+Not yet consumed by anything else in this pass — reserved for a future
+conversation-influence/election-voting system, and (per the task brief)
+`ElectionSystem` is deliberately not yet wired to read from these.
+
+### Deliberately out of scope for this pass
+
+- `ENVIRONMENTAL_CONCERN` and `INDIVIDUALISM_VS_COLLECTIVISM` exist in the
+  topic enum (for completeness against the brief's fuller list and so a
+  future trigger has somewhere to land) but have no trigger wired to them
+  yet.
+- `emotionalAttachment` is modelled and defaults to `0.0` but nothing in
+  this pass writes or reads it — reserved for a future persuasion/
+  conversation system.
+- No UI surface anywhere yet — beliefs are invisible to the player today,
+  same "modelled and maintained, ready for a later pass to read" convention
+  as `WorldState.pressureHistory` before any newspaper/town-sheet work read
+  it.
+- `ElectionSystem`/voting is not yet belief-driven — a separate, explicitly
+  future task per the brief.

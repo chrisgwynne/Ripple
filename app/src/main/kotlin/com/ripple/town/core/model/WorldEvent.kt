@@ -103,7 +103,22 @@ enum class EventType(val label: String) {
      *  recurring event type, or a current active emotion echoing an old one. See
      *  `MemoryRecallSystem` and `docs/simulation-rules.md` "Memory recall". Internal texture for
      *  the cause chain, essentially never newsworthy — always `PRIVATE`, very low severity. */
-    MEMORY_RECALLED("A memory resurfaces")
+    MEMORY_RECALLED("A memory resurfaces"),
+
+    /** A resident's [com.ripple.town.core.model.ResidentIdeaState.beliefStrength] for some
+     *  [com.ripple.town.core.model.IdeaTemplate] has crossed the adoption threshold — they've
+     *  genuinely come to hold the idea, not just heard of it. See `IdeaDiffusionSystem` and
+     *  `docs/simulation-rules.md` "Idea diffusion". Low severity, `PRIVATE`: a personal shift in
+     *  outlook, not town news the way a `RUMOUR_SPREAD` event is. */
+    IDEA_ADOPTED("Idea adopted"),
+
+    /** A resident's real lived experience (or inheritance from a parent) has nudged one
+     *  [com.ripple.town.core.model.BeliefTopic] position slightly. See `BeliefSystem` and
+     *  `docs/simulation-rules.md` "Beliefs". Internal character-development texture, not town
+     *  news — always `PRIVATE`, low severity. Falls through every exhaustive-`when`'s `else ->`
+     *  branch safely (verified against [com.ripple.town.core.simulation.ImportanceScorer] and
+     *  [com.ripple.town.core.simulation.NewspaperGenerator] before adding). */
+    BELIEF_SHIFTED("Belief shift")
 }
 
 enum class EventVisibility {
