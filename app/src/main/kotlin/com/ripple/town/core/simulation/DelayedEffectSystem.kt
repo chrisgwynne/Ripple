@@ -59,6 +59,15 @@ object DelayedEffectSystem {
     private fun conditionHolds(ctx: TickContext, e: DelayedEffect): Boolean {
         val state = ctx.state
         val target = e.targetResidentId?.let { state.resident(it) }
+        // New ambitions don't form while the resident is still in shock (see
+        // EconomySystem.isInShock/docs/simulation-rules.md "Delayed ambition formation") — the
+        // effect simply stays dormant, same as any other unmet condition, until either the
+        // shock window ends or this effect's own window lapses. Scoped to GOAL_SEED only: a
+        // grieving/job-losing resident's other pending consequences (stress, crime temptation,
+        // relationship pressure) are untouched by this gate.
+        if (e.type == DelayedEffectType.GOAL_SEED && target != null && EconomySystem.isInShock(state, target, ctx.now)) {
+            return false
+        }
         return when (e.condition) {
             EffectCondition.NONE -> true
             EffectCondition.STILL_POOR -> (target?.needs?.financialSecurity ?: 100.0) < 35.0
@@ -210,6 +219,12 @@ object DelayedEffectSystem {
             DelayedEffectType.DEMAND_SHIFT -> {
                 val biz = e.targetBusinessId?.let { state.businesses[it] } ?: return
                 biz.demand = (biz.demand + 8.0 * e.strength).coerceIn(5.0, 95.0)
+            }
+            DelayedEffectType.SHOCK_PERIOD -> {
+                // Deliberately a no-op — see the enum doc on SHOCK_PERIOD. Its entire job is to
+                // sit in ctx.state.delayedEffects as a queryable "still in shock" window; readers
+                // (ShockSystem.isInShock, DecisionSystem, GoalSystem's job-loss FIND_JOB seed)
+                // check for its presence directly rather than reacting to it firing here.
             }
         }
     }

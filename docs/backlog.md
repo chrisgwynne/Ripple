@@ -4,6 +4,93 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-10 — Life events unfold over days: shock period, delayed ambition, newspaper follow-up (skipped)
+
+Explicit ground rule for this session: extend `DelayedEffectSystem`/`GoalSystem`
+incrementally, do not build a parallel "phase" state machine. Read
+`DelayedEffectSystem.kt`, `WorldEvent.kt`'s `DelayedEffectType`/`EffectCondition`,
+`GoalSystem.kt`, `EconomySystem.kt`, `DecisionSystem.kt`,
+`NeedsSystem.traumaRecoveryDamping()` and `NewspaperGenerator.kt` in full before
+touching anything, per instruction.
+
+**Confirmed before changing anything:** `FIND_JOB` seeding on job loss *was*
+instant — but the actual instant-seed site turned out to be
+`ConsequenceEngine`'s `JOB_LOST` rule table (`"immediate strain"` rule called
+`GoalSystem.seedGoal(..., FIND_JOB, ...)` directly, same tick), not the
+`GoalSystem.generateFromCircumstance` branch the brief flagged as the primary
+suspect (that branch is a separate, general low-financial-security path,
+untouched and still instant by design — out of scope, see below).
+
+**Built — three targeted extensions, no new systems:**
+
+1. **Shock period** (`EconomySystem.scheduleShock`/`isInShock`, new
+   `DelayedEffectType.SHOCK_PERIOD` in `WorldEvent.kt`). Triggered from
+   `EconomySystem.closeBusiness` (owner + each laid-off employee) and
+   `LifecycleSystem.die`'s bereavement loop (partner/children/parents only).
+   Schedules one `DelayedEffect` per resident, 3–7 in-game days
+   (`ctx.rng`-rolled, deterministic), `earliestAt = now`. The effect's
+   `apply()` case is a deliberate no-op — the entire mechanism is *presence of
+   the record*, queried directly via `isInShock`, reusing the existing
+   lapse-on-window-close logic for cleanup. **No new `Resident`/`WorldState`
+   field** — exactly the "reuse the DelayedEffect record itself as the
+   marker" approach the brief asked to try first, and it worked without
+   needing a fallback field.
+2. **Delayed `FIND_JOB` after job loss** (`ConsequenceEngine.kt`). Replaced
+   the instant `JOB_LOST` → `seedGoal(FIND_JOB)` call with a `GOAL_SEED`
+   `DelayedEffect` (`note = GoalType.FIND_JOB.name`), 3–10 days
+   (`FIND_JOB_SEED_MIN_DAYS`/`MAX_DAYS`), gated on `STILL_UNEMPLOYED` —
+   literally the same mechanism `LifecycleSystem.studentReturns` already uses
+   for its own (much longer) `GOAL_SEED`, per the brief's instruction to reuse
+   it exactly. If the resident is rehired before the window opens, the
+   condition fails and the seed silently never fires. `DelayedEffectSystem
+   .conditionHolds` additionally gates *every* `GOAL_SEED` effect on
+   `!isInShock(...)`, so this composes with item 1 for free — no double
+   suppression logic needed in two places.
+   `GoalSystem.generateFromCircumstance`'s general `FIND_JOB` branch (not
+   specifically post-job-loss) is untouched, per the brief's own scoping.
+3. **Decision-time activity bias** (`DecisionSystem.candidateActions`). A
+   bounded `personalityFit` multiplier — the exact term every existing
+   personality trait already scales — applied only while `isInShock` is true:
+   `×1.15` for SLEEP/VISIT_FRIEND/SOCIALISE_PUBLIC/RELAX_HOME, `×0.75` for
+   WORK_ON_GOAL/EXERCISE. No new decision-override branch; reuses the
+   existing multiplicative scoring shape verbatim.
+
+**Explicitly skipped, and why:** newspaper story follow-up (task 3).
+`NewspaperGenerator.generate()` is a pure, synchronous engine function
+(`WorldState` + an in-memory event buffer, called from
+`SimulationCoordinator.tick()`) with no database handle. Published
+issues/stories go straight to Room via `WorldRepository.persistTickResult`
+— a layer the engine never touches — and `WorldState` keeps no bounded
+in-memory record of past issues either. "Detect a `causeIds`-linked
+predecessor story already covered in an earlier issue" therefore cannot be
+answered cheaply from where the brief wanted the check to live; it would
+need new infrastructure (a capped in-memory recently-covered-event-ids list
+threaded onto `WorldState`, or an async DB round-trip inside a currently
+pure/deterministic function) — not a light-touch phrasing change. Per this
+session's explicit "skip and say so rather than force it" instruction, this
+piece was not attempted. See `docs/simulation-rules.md`'s Newspaper section
+for the smallest honest follow-up design if this gets picked up later.
+
+**Also explicitly not attempted**, per the brief's own scope list: a
+universal event "phase" state machine across all ~70 `EventType`s, and
+scripted day-by-day narrative beats — the existing event-driven system
+already produces that shape from real separate events over real days once
+shock/delay make ambition formation stop instantaneous, which was the actual
+ask.
+
+**Files touched:** `core/model/WorldEvent.kt` (new `SHOCK_PERIOD` type),
+`core/simulation/DelayedEffectSystem.kt` (no-op apply case + shock gate on
+`GOAL_SEED` conditions), `core/simulation/EconomySystem.kt`
+(`scheduleShock`/`isInShock`, wired into `closeBusiness`),
+`core/simulation/LifecycleSystem.kt` (`die`'s bereavement loop),
+`core/simulation/ConsequenceEngine.kt` (`JOB_LOST` rule table),
+`core/simulation/DecisionSystem.kt` (activity scoring nudge). No changes to
+`NewspaperGenerator.kt`, `GoalSystem.generateFromCircumstance`, or
+`NeedsSystem.traumaRecoveryDamping()`. **No Android emulator/device exists in
+this environment — everything above is written and compile-reviewed blind,
+never seen running on device**, consistent with this repo's standing
+constraint (no `./gradlew`/`git` run by the assistant this session).
+
 ### 2026-07-10 — Building sheet redesign: "opening the front door", not a database record
 
 Rewrote `BuildingSheetContent` (and added private helpers) in `feature/town/TownSheets.kt`
@@ -95,6 +182,88 @@ signature against source), never seen running on device.**
 - **"Nearby businesses" is a cheap tile-distance proxy**, not a real "same street"/neighbourhood
   concept the simulation models — flagged as an approximation in case a future pass wants a
   more semantically real notion of adjacency (e.g. shared road tile).
+
+### 2026-07-10 — Event depth pass: cause payload, compact resident cards, severity tiers (EventSheetContent only)
+
+Extended the existing causality/consequence architecture (`ConsequenceEngine`, `DelayedEffectSystem`,
+`causeIds` chains, `Memory`, `NewspaperGenerator`) rather than building a parallel system — confirmed
+by reading `ConsequenceEngine.kt`, `DelayedEffectSystem.kt` and `TickContext.emit()` in full first, per
+the brief. Scoped strictly to `EventSheetContent` (and new private helpers) in `feature/town/
+TownSheets.kt`, plus targeted emit-site additions in `core/simulation/*.kt`; `BuildingSheetContent` and
+everything else in `TownSheets.kt` untouched (that function was mid-redesign by a concurrent session —
+see the entry above). **No Android emulator/device exists in this environment — written and
+compile-reviewed blind, never seen running on device.**
+
+**Built:**
+1. **Immediate/underlying cause payload** — added to 3 of the ~70 `EventType`s (the brief's own
+   "3-4 highest-value" scoping), never a placeholder string:
+   - `EconomySystem.closeBusiness`: `immediate_cause` = the existing `why` string (already
+     descriptive). New `underlyingClosureCause()` sets `underlying_cause` only when a recent
+     `WEATHER_DAMAGE` event hit this exact building, an active `RIVAL` relationship involves the
+     owner, or the national `FUEL_PRICES_RISE` pressure is active — else omitted entirely.
+   - `CrimeSystem` (shoplifting/burglary/mugging): these already traced a real `causeIds` link via
+     the pre-existing `mostRecentDesperationCause` helper (`JOB_LOST`/`DEBT_CRISIS`/`LOSS` memory).
+     New `desperationCausePayload()` just surfaces that same traced event as a payload phrase —
+     no new lookups invented.
+   - `HealthSystem.checkMortality`/`LifecycleSystem.die`: new `diagnosisEventFor()` traces the fatal
+     condition back to its actual `ILLNESS_DIAGNOSED` event when one exists and passes it as
+     `causeIds`; `die()` only adds `underlying_cause` text when a real `causeIds` link was passed —
+     genuine old-age deaths correctly get neither.
+   - Marriage/engagement considered and skipped: driven by `Relationship` stat thresholds
+     (affection/trust), not a traceable prior event — nothing honest to add.
+   - Documented in `docs/simulation-rules.md` under "Events, causes, importance".
+2. **Compact resident cards** — the old plain-text "• Name [☆ Favourite]" bullet row in "People
+   involved" replaced with `EventResidentCard`: avatar (`PixelAvatar`/`SpriteProvider`/`poseFor`,
+   the exact reuse pattern `PeopleScreen.PersonRow`/`FamilyTreeScreen` already use), name, age,
+   occupation, mood, and a short role label. Tapping still opens the resident's profile via the
+   same `viewModel.openResident` call the old row used. Required threading a new `sprites:
+   SpriteProvider` parameter onto `EventSheetContent`'s signature and its one call site in
+   `TownScreen.kt` (`sprites` was already in scope there) — the minimal plumbing edit needed to
+   satisfy the brief's explicit "reuse PixelAvatar" instruction.
+3. **Role labels** — `roleLabel()` derives a role only from data the event actually carries:
+   `EventUi.involvedResidentIds` is source-then-targets (`WorldRepository.toUi`), so index 0 is the
+   real source/initiator when one exists. A handful of event types get an unambiguous label for
+   that source (Owner for business events, Employee for job events, Suspected for crime events,
+   Deceased for `PERSON_DIED`); every target, and every other event type, reads as the honest
+   generic "Involved" — inventing "Witness"/"a specific employee's name" would need data
+   (`EventUi` carries no per-person role, no employee-identity field) this UI layer doesn't have.
+4. **Location** — checked `Building.kt`/`WorldGenerator.kt` for a street/address concept beyond
+   the name. Confirmed: homes are hand-authored with the street baked directly into `Building.name`
+   ("8 Rowan Street" — see `WorldGenerator.slots()`), so that name already reads as "name, street"
+   with nothing to add. Business buildings ("Bell's Bakery") sit on an unnamed "High Street" only in
+   a source *comment*, never as stored data — no separate street field exists anywhere in the
+   simulation layer for them (the concurrent `BuildingSheetContent` session-log entry above
+   independently confirms the same gap: "Nearby businesses" there is a tile-distance proxy, not a
+   real street concept). **Honestly not built for businesses** — kept the plain building-name
+   display rather than inventing a "High Street" suffix.
+5. **Severity tiers** — `severityTierLabel()`, a small pure bucketing function (Minor/Moderate/
+   Major/Critical/Historic), shown via a `SeverityTierBadge` next to the event type label.
+   "Historic" reuses `ImportanceScorer.HISTORY_THRESHOLD` (30.0) exactly — the same bar the History
+   timeline itself gates on — rather than a new number; the other four bands split `severity`'s
+   0..1 range evenly (severity, not importance, drives them — importance already factors in
+   reach/causal-boost and would double-count that here).
+6. **Memory reinforcement, light touch** — confirmed `Memory`'s decay (`lastRecalledAt`/
+   `decayPerYear` in `core/model/Goal.kt`, applied one-directionally in `TickContext.addMemory`) has
+   no resurfacing path anywhere in the engine — a real resurfacing mechanic would be a genuinely
+   large feature, correctly out of scope per the brief. Built the smallest honest slice instead:
+   `priorMemoryEcho()` is a pure read-time text lookup over `ResidentUi.memories` (already on the
+   snapshot), surfaced inside the existing "More detail" expansion when a resident involved in the
+   event has a prior memory whose description names the same building. No simulation state
+   changes, no new mechanic — just showing an existing fact the engine already recorded.
+
+**Honestly NOT built / skipped, and why:**
+- **Cascading multi-step event chains as a new mechanic** — `ConsequenceEngine`/`DelayedEffectSystem`
+  already do this (chains cap at depth 10, 24 rule applications/tick); building a second system
+  would fragment causality logic across two places. Not attempted, per the brief.
+- **Multi-day "shock period" / phased event unfolding** — a separate, larger simulation-timing
+  feature the user has flagged separately. Not attempted.
+- **Newspaper issue-by-issue story continuation** — separate large feature. Not attempted.
+- **A real memory-resurfacing simulation mechanic** (memory intensity actually reviving over years,
+  `lastRecalledAt` being bumped by re-encounter) — confirmed genuinely absent, confirmed genuinely
+  large; only the read-time text echo above was built.
+- **Cause payload for the other ~66 EventTypes** — deliberately scoped to the 3 highest-value
+  families named in the brief (business closure, crime, death); marriage/engagement considered and
+  explicitly skipped (see above) rather than padded out with weaker, less-real causal text.
 
 ### 2026-07-10 — Town screen: ambient life pass, sheet default height, "Today's story", Chronicle categories
 

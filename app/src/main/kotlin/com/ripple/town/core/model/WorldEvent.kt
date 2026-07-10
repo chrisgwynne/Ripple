@@ -157,7 +157,18 @@ enum class DelayedEffectType {
     /** Target business demand shifts. */
     DEMAND_SHIFT,
     /** Target resident receives a mood lift (community support, good news). */
-    MOOD_LIFT
+    MOOD_LIFT,
+    /**
+     * Marks a bounded "in shock" window after sudden personal loss (job loss, business
+     * closure, bereavement) — see `docs/simulation-rules.md` "Shock period after major
+     * personal loss". Unlike every other type here, this one does nothing when it fires:
+     * its entire purpose is to *exist* as a queryable record while `earliestAt..latestAt`
+     * contains "now". `EconomySystem.isInShock`/`DelayedEffectSystem.conditionHolds` read the
+     * presence of an un-applied, un-cancelled effect of this type directly rather than waiting for
+     * [DelayedEffectSystem] to probabilistically fire it — see that object's `apply()` for
+     * the no-op case. The existing lapse-on-window-close logic still cleans it up for free.
+     */
+    SHOCK_PERIOD
 }
 
 enum class EffectCondition {

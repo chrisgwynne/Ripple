@@ -40,6 +40,14 @@ object ConsequenceEngine {
 
     const val MAX_CHAIN_DEPTH = 10
 
+    /** "Thinking about it" window before a job-loss-specific FIND_JOB ambition actually forms
+     *  — see docs/simulation-rules.md "Delayed ambition formation". Deliberately much shorter
+     *  than LifecycleSystem.studentReturns' multi-year GOAL_SEED window: this is a much smaller
+     *  life event. Gated on STILL_UNEMPLOYED, so a resident rehired in the meantime (by
+     *  EconomySystem.hireSomeone picking them up directly, say) simply never gets the seed. */
+    const val FIND_JOB_SEED_MIN_DAYS = 3.0
+    const val FIND_JOB_SEED_MAX_DAYS = 10.0
+
     private fun delayed(
         ctx: TickContext,
         source: WorldEvent,
@@ -78,7 +86,16 @@ object ConsequenceEngine {
                 r.needs.stress += 16.0
                 r.needs.purpose -= 14.0
                 r.needs.financialSecurity -= 18.0
-                GoalSystem.seedGoal(ctx, r, GoalType.FIND_JOB, "The bills won't wait.", e.id)
+                // Not seeded instantly — see "considers looking for work" below. Losing a job
+                // is a shock first; deciding "I need another job" takes a few days of sitting
+                // with it (docs/simulation-rules.md "Shock period after major personal loss").
+            },
+            ConsequenceRule(EventType.JOB_LOST, "considers looking for work") { ctx, e ->
+                val r = e.sourceResidentId?.let { ctx.state.resident(it) } ?: return@ConsequenceRule
+                delayed(ctx, e, DelayedEffectType.GOAL_SEED,
+                    1.0, FIND_JOB_SEED_MIN_DAYS, FIND_JOB_SEED_MAX_DAYS,
+                    targetResidentId = r.id, condition = EffectCondition.STILL_UNEMPLOYED,
+                    note = GoalType.FIND_JOB.name)
             },
             ConsequenceRule(EventType.JOB_LOST, "partner pressure", probability = 0.8) { ctx, e ->
                 val r = e.sourceResidentId?.let { ctx.state.resident(it) } ?: return@ConsequenceRule

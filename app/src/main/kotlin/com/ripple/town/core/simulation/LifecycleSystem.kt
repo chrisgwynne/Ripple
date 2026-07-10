@@ -216,6 +216,11 @@ object LifecycleSystem {
             m.needs.social -= 10.0
             ctx.beginActivity(m, Activity.MOURNING, 12 * 60, "Grieving for ${r.firstName}")
             ctx.addMemory(m, MemoryType.LOSS, "We lost ${r.firstName}.", 80.0, death.id, listOf(r.id))
+            // Close family/partner (not every warm acquaintance) get the same bounded shock
+            // window as job loss/business closure — see EconomySystem.scheduleShock.
+            if (m.id == partner?.id || m.id in r.childIds || m.id == r.motherId || m.id == r.fatherId) {
+                EconomySystem.scheduleShock(ctx, m, death.id)
+            }
         }
 
         // Generational play: surviving children inherit the deceased's most significant

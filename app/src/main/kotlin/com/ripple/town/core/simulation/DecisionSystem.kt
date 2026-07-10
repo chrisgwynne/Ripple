@@ -46,6 +46,15 @@ enum class ActionKind {
 
 object DecisionSystem {
 
+    /** Bounded shock-period multipliers on `personalityFit` — see EconomySystem.isInShock and
+     *  docs/simulation-rules.md "Shock period after major personal loss". Applied the same way
+     *  every existing personality trait already scales personalityFit; never zeroes an action
+     *  out, never overrides `chooseBest`'s ranking on its own. +15% for low-key
+     *  actions (sleep, visiting/socialising, relaxing at home), -25% for effortful/ambitious
+     *  ones (working on a goal, exercise) while a resident is in shock. */
+    const val SHOCK_LOW_KEY_BOOST = 1.15
+    const val SHOCK_EFFORTFUL_DAMPEN = 0.75
+
     /** Evaluate residents whose current activity has finished and choose their next action. */
     fun update(ctx: TickContext) {
         for (r in ctx.state.residentsOrdered()) {
@@ -87,6 +96,14 @@ object DecisionSystem {
         val home = r.homeBuildingId
         val employment = state.employmentOf(r)
         val poor = r.wealth < 60.0
+        // Shock period after sudden personal loss (job loss, business closure, bereavement —
+        // see EconomySystem.scheduleShock/docs/simulation-rules.md). A small, bounded
+        // personalityFit-style multiplier, applied the same way p.* traits already scale
+        // personalityFit below: low-key actions (SLEEP, VISIT_FRIEND, SOCIALISE_PUBLIC,
+        // RELAX_HOME) read slightly more appealing, effortful/ambitious ones (WORK_ON_GOAL,
+        // EXERCISE) read slightly less. Never zeroes an action out or overrides the ranking on
+        // its own — it nudges the same personalityFit term every other trait already leans on.
+        val inShock = EconomySystem.isInShock(state, r, now)
 
         fun pressure(v: Double) = ((100.0 - v) / 100.0).coerceIn(0.0, 1.0)
 
@@ -99,7 +116,7 @@ object DecisionSystem {
                 durationMinutes = if (night) (7 * 60L) else 90L,
                 reason = if (night) "It's late and the day is done" else "Running on empty",
                 needPressure = (sleepy + if (night) 0.7 else 0.0).coerceIn(0.05, 1.6),
-                personalityFit = 1.0, expectedReward = 1.2, confidence = 1.0,
+                personalityFit = 1.0 * (if (inShock) SHOCK_LOW_KEY_BOOST else 1.0), expectedReward = 1.2, confidence = 1.0,
                 socialInfluence = 1.0, opportunity = 1.0,
                 risk = 0.0, cost = 0.0, effort = 0.02, moralResistance = 0.0
             )
@@ -209,7 +226,7 @@ object DecisionSystem {
                         ActionKind.VISIT_FRIEND, friendHome, friend.id, Activity.VISITING, 90L,
                         "Calling on ${friend.firstName}",
                         needPressure = lonely * 1.2,
-                        personalityFit = 0.5 + p.sociability * 0.8,
+                        personalityFit = (0.5 + p.sociability * 0.8) * (if (inShock) SHOCK_LOW_KEY_BOOST else 1.0),
                         expectedReward = 0.8 + (state.relationship(r.id, friend.id)?.warmth() ?: 0.0) / 100.0,
                         confidence = 0.9, socialInfluence = 1.1, opportunity = 1.0,
                         risk = 0.02, cost = 0.02, effort = 0.15, moralResistance = 0.0
@@ -222,7 +239,7 @@ object DecisionSystem {
                     ActionKind.SOCIALISE_PUBLIC, spot.id, null, Activity.SOCIALISING, 80L,
                     "Some company at ${spot.name}",
                     needPressure = lonely,
-                    personalityFit = 0.4 + p.sociability * 0.9,
+                    personalityFit = (0.4 + p.sociability * 0.9) * (if (inShock) SHOCK_LOW_KEY_BOOST else 1.0),
                     expectedReward = 0.9, confidence = 0.9, socialInfluence = 1.15, opportunity = 1.0,
                     risk = 0.02, cost = if (spot.type == BuildingType.PARK) 0.0 else 0.1,
                     effort = 0.12, moralResistance = 0.0
@@ -254,7 +271,8 @@ object DecisionSystem {
                 ActionKind.EXERCISE, park.id, null, Activity.EXERCISING, 60L,
                 "A run around the park",
                 needPressure = 0.25 + (n.stress / 100.0) * 0.5,
-                personalityFit = 0.3 + p.discipline * 0.5 + (r.skill(SkillType.FITNESS) / 200.0),
+                personalityFit = (0.3 + p.discipline * 0.5 + (r.skill(SkillType.FITNESS) / 200.0)) *
+                    (if (inShock) SHOCK_EFFORTFUL_DAMPEN else 1.0),
                 expectedReward = 0.8, confidence = 0.95, socialInfluence = 1.0, opportunity = 1.0,
                 risk = 0.02, cost = 0.0, effort = 0.3, moralResistance = 0.0
             )
@@ -268,7 +286,8 @@ object DecisionSystem {
                 Activity.LEARNING, 80L,
                 goalReason(activeGoal.type),
                 needPressure = 0.4 + pressure(n.purpose) * 0.8,
-                personalityFit = 0.4 + p.ambition * 0.7 + p.discipline * 0.2,
+                personalityFit = (0.4 + p.ambition * 0.7 + p.discipline * 0.2) *
+                    (if (inShock) SHOCK_EFFORTFUL_DAMPEN else 1.0),
                 expectedReward = 1.0 - activeGoal.risk * 0.3,
                 confidence = 0.7 + activeGoal.progress * 0.3,
                 socialInfluence = 1.0, opportunity = 1.0,
@@ -282,7 +301,7 @@ object DecisionSystem {
                 ActionKind.RELAX_HOME, home, null, Activity.RELAXING, 60L,
                 "A quiet hour at home",
                 needPressure = 0.3 + (n.stress / 100.0) * 0.6,
-                personalityFit = 0.6 + (1.0 - p.sociability) * 0.3,
+                personalityFit = (0.6 + (1.0 - p.sociability) * 0.3) * (if (inShock) SHOCK_LOW_KEY_BOOST else 1.0),
                 expectedReward = 0.75, confidence = 1.0, socialInfluence = 1.0, opportunity = 1.0,
                 risk = 0.0, cost = 0.0, effort = 0.02, moralResistance = 0.0
             )

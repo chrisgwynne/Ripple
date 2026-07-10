@@ -4,11 +4,15 @@ import com.ripple.town.core.model.Building
 import com.ripple.town.core.model.BuildingType
 import com.ripple.town.core.model.Business
 import com.ripple.town.core.model.BusinessType
+import com.ripple.town.core.model.DelayedEffect
+import com.ripple.town.core.model.DelayedEffectType
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.EventVisibility
 import com.ripple.town.core.model.MemoryType
+import com.ripple.town.core.model.Resident
 import com.ripple.town.core.model.SimTime
 import com.ripple.town.core.model.Weather
+import com.ripple.town.core.model.WorldState
 
 /**
  * Businesses earn from footfall, pay wages daily, and can struggle, shrink or
@@ -214,6 +218,7 @@ object EconomySystem {
                 severity = 0.55, causeIds = listOf(closure.id)
             )
             ctx.addMemory(worker, MemoryType.LOSS, "The day ${biz.name} closed.", 55.0, jobLost.id)
+            scheduleShock(ctx, worker, jobLost.id)
             ConsequenceEngine.onEvent(ctx, jobLost)
         }
         // Owner takes a financial and emotional hit.
@@ -224,9 +229,48 @@ object EconomySystem {
             owner.reputation -= 6.0
             if (biz.balance < 0) owner.debt += -biz.balance
             ctx.addMemory(owner, MemoryType.LOSS, "Losing ${biz.name} broke something in me.", 80.0, closure.id)
+            scheduleShock(ctx, owner, closure.id)
         }
         ConsequenceEngine.onEvent(ctx, closure)
     }
+
+    /**
+     * Schedules a bounded "in shock" window after sudden personal loss (job loss, business
+     * closure — bereavement is scheduled the same way from `LifecycleSystem.die`). A raw
+     * [DelayedEffect] of type [DelayedEffectType.SHOCK_PERIOD], deliberately never fired
+     * meaningfully by [DelayedEffectSystem] (see that type's doc) — its presence in
+     * `ctx.state.delayedEffects` for the window is the entire mechanism, read back via
+     * [isInShock]. `earliestAt = now` so the window is "active" from the moment of loss, not
+     * some days later; `latestAt` is the deterministic 3-7 day shock length, rolled once here
+     * via `ctx.rng` so replays with the same seed always produce the same window. Composes
+     * with `GoalSystem`'s job-loss `FIND_JOB` delay (task 2) and `DecisionSystem`'s low-key
+     * activity nudge (task 1b) purely by both reading [isInShock] — no shared state beyond
+     * this one record.
+     */
+    fun scheduleShock(ctx: TickContext, r: Resident, sourceEventId: Long) {
+        val days = ctx.rng.nextDouble(SHOCK_MIN_DAYS, SHOCK_MAX_DAYS)
+        ctx.state.delayedEffects += DelayedEffect(
+            id = ctx.state.nextEffectId++,
+            sourceEventId = sourceEventId,
+            targetResidentId = r.id,
+            type = DelayedEffectType.SHOCK_PERIOD,
+            strength = 1.0,
+            earliestAt = ctx.now,
+            latestAt = ctx.now + (days * SimTime.MINUTES_PER_DAY).toLong()
+        )
+    }
+
+    /** True while [r] has a live (un-applied, un-cancelled, in-window) shock record from
+     *  [scheduleShock]. Cheap: bounded per-resident scan of `delayedEffects`, same cost shape
+     *  as `DelayedEffectSystem`'s own per-tick filter. */
+    fun isInShock(state: WorldState, r: Resident, now: Long): Boolean =
+        state.delayedEffects.any {
+            it.type == DelayedEffectType.SHOCK_PERIOD && it.targetResidentId == r.id &&
+                !it.applied && !it.cancelled && now in it.earliestAt..it.latestAt
+        }
+
+    const val SHOCK_MIN_DAYS = 3.0
+    const val SHOCK_MAX_DAYS = 7.0
 
     /**
      * A real, traceable underlying reason for a closure, when one is genuinely on record —
@@ -257,16 +301,15 @@ object EconomySystem {
         return null
     }
 
-    /** The most recent event of a given type, from this tick or the recent-events window.
-     *  Mirrors `CrimeSystem.mostRecentEventOfType` — same bounded lookback, same "never invents
-     *  a cause" discipline, kept local since `EconomySystem` has no crime-shaped context to share it with. */
-    private fun mostRecentEventOfType(ctx: TickContext, type: EventType, residentId: Long?, businessId: Long?): com.ripple.town.core.model.WorldEvent? {
-        ctx.newEvents.lastOrNull {
-            it.type == type && (businessId == null || it.businessId == businessId)
-        }?.let { return it }
+    /** The most recent event of a given type at a specific building, from this tick or the
+     *  recent-events window. Mirrors `CrimeSystem.mostRecentEventOfType` — same bounded
+     *  lookback, same "never invents a cause" discipline, kept local since `EconomySystem`
+     *  has no crime-shaped context to share it with. */
+    private fun mostRecentBuildingEventOfType(ctx: TickContext, type: EventType, buildingId: Long): com.ripple.town.core.model.WorldEvent? {
+        ctx.newEvents.lastOrNull { it.type == type && it.buildingId == buildingId }?.let { return it }
         return ctx.state.recentEventIds.asReversed()
             .mapNotNull { ctx.eventIndex.get(it) }
-            .firstOrNull { it.type == type && (businessId == null || it.businessId == businessId) }
+            .firstOrNull { it.type == type && it.buildingId == buildingId }
     }
 
     private fun expandBusiness(ctx: TickContext, biz: Business) {

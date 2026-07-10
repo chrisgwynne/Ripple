@@ -1061,6 +1061,43 @@ later event that cites it as a cause**. Events ≥ 30 importance appear in the
 History timeline. Cause chains are read straight from the log — only known
 history, never futures.
 
+### Immediate vs underlying cause payload (added 2026-07-10)
+
+Event depth pass, deliberately scoped to the highest-value emit sites rather
+than all ~70 `EventType`s: `WorldEvent.payload` now carries `immediate_cause`
+and (only when genuinely derivable) `underlying_cause` string keys for three
+event families. **Never a placeholder** — `underlying_cause` is simply
+omitted from the payload map when nothing real is on record, rather than
+filled with invented text, matching the "never invents a cause" discipline
+`CrimeSystem.mostRecentDesperationCause`/`mostRecentEventOfType` already
+established this session.
+
+- **Business closure** (`EconomySystem.closeBusiness`): `immediate_cause` is
+  the existing `why` string (already the `daysInTrouble`-based reason,
+  genuinely descriptive on its own — no change needed there).
+  `underlying_cause` is set by the new `underlyingClosureCause` helper, which
+  checks, in order: a recent `WEATHER_DAMAGE` event at this exact building; an
+  active `RIVAL`-kind relationship the owner is party to; the national
+  `FUEL_PRICES_RISE` pressure being active. Returns nothing if none apply.
+- **Desperation-driven crime** (`CrimeSystem`: shoplifting, burglary,
+  mugging): these already traced a real `causeIds` link via
+  `mostRecentDesperationCause` (a recent `JOB_LOST`/`DEBT_CRISIS` event, or a
+  `LOSS`-type memory). The new `desperationCausePayload` helper turns that
+  same traced event into a short `underlying_cause` phrase in the payload —
+  no new lookups, just surfacing what was already being traced.
+- **Death** (`LifecycleSystem.die` / `HealthSystem.checkMortality`):
+  `immediate_cause` mirrors the existing `cause` string (a condition label,
+  or "old age"/"a sudden decline"). `HealthSystem` now looks up the specific
+  `ILLNESS_DIAGNOSED` event for the fatal condition (`diagnosisEventFor`) and
+  passes it through as `causeIds`; `LifecycleSystem.die` only adds an
+  `underlying_cause` phrase when a real `causeIds` link was actually passed —
+  genuine old-age deaths have no such event and correctly carry neither.
+
+Marriage/engagement were considered but skipped: they're driven purely by
+`Relationship` stat thresholds (affection/trust), which don't reduce to a
+short causal phrase the way a traced prior event does — adding one would
+mean inventing text not genuinely derived from state.
+
 **Confirmed (2026-07-10), not a gap:** routine social contact never
 over-notifies. `InteractionSystem`'s pleasant-exchange branch — which is the
 bulk of what `InteractionSystem.update` actually runs, capped at 8 pairs/tick
@@ -1100,6 +1137,55 @@ and optional decay. Each tick, due effects fire with
 `p ≈ strength × 8 / windowTicks` (max 6 per tick); lapsed windows cancel
 silently. Chains cap at depth 10 and 24 rule applications per tick.
 
+### Shock period after major personal loss (added 2026-07-10)
+
+Extends the existing `DelayedEffect`/`GOAL_SEED` machinery rather than adding
+a parallel state machine — no new `Resident`/`WorldState` field. Scoped to
+three specific triggers: business closure for the owner, job loss for a
+laid-off employee (both via `EconomySystem.closeBusiness`), and bereavement
+for a deceased resident's partner/children/parents (via `LifecycleSystem
+.die`'s existing bereavement loop — not every warm acquaintance, just close
+family).
+
+**Marker mechanism.** `EconomySystem.scheduleShock(ctx, resident,
+sourceEventId)` records one `DelayedEffect` of a new type,
+`DelayedEffectType.SHOCK_PERIOD`, with `earliestAt = now` and
+`latestAt = now + [3, 7)` in-game days (`EconomySystem.SHOCK_MIN_DAYS`/
+`SHOCK_MAX_DAYS`, rolled once per trigger via `ctx.rng` — deterministic under
+replay). Unlike every other `DelayedEffectType`, `SHOCK_PERIOD` does nothing
+when `DelayedEffectSystem.apply()` eventually reaches it — it is a no-op
+case. The entire mechanism is the record's *presence*: `EconomySystem
+.isInShock(state, resident, now)` scans `state.delayedEffects` for an
+un-applied, un-cancelled `SHOCK_PERIOD` effect whose window contains `now`.
+The existing "lapsed windows cancel silently" logic cleans the marker up for
+free once the window closes — no separate expiry code needed.
+
+**Effect (a) — suppresses new ambitions.** `DelayedEffectSystem
+.conditionHolds` gates every `GOAL_SEED`-type effect on `!isInShock(...)` in
+addition to its normal `EffectCondition` — a resident in shock simply keeps
+any pending `GOAL_SEED` dormant (same "stays dormant until window closes"
+behaviour as any other unmet condition) rather than forming a new ambition
+mid-shock. Scoped to `GOAL_SEED` only; other pending consequences (stress
+rises, crime temptation, relationship pressure) are untouched.
+
+**Effect (b) — biases activity choice.** `DecisionSystem.candidateActions`
+reads `isInShock` once per resident per decision and applies a small, bounded
+multiplier on `personalityFit` — the exact same term every existing
+personality trait already scales — for specific actions: `×1.15`
+(`SHOCK_LOW_KEY_BOOST`) for `SLEEP`, `VISIT_FRIEND`, `SOCIALISE_PUBLIC`,
+`RELAX_HOME`; `×0.75` (`SHOCK_EFFORTFUL_DAMPEN`) for `WORK_ON_GOAL` and
+`EXERCISE`. It never zeroes an action out and never overrides
+`chooseBest`'s ranking on its own — a resident with high enough need pressure
+can still choose the dampened action, same as any other utility trade-off in
+this system.
+
+**Composes with, does not duplicate:** `NeedsSystem.traumaRecoveryDamping()`
+already slows stress/purpose recovery *deltas* for ~14 days after a severe
+memory — untouched here. Shock is a shorter (3–7 day), separate window that
+governs *ambition formation* and *activity choice*, not need-recovery speed;
+the two run independently and both apply during their overlapping early days,
+which is the intended "days matter" texture.
+
 ## Memories
 
 Created for emotionally significant moments (arguments, kindness, loss,
@@ -1120,6 +1206,32 @@ Other goals: find job, find partner, pay off debt, get healthy, leave for
 education (teens actually leave town at 18), move home, run for office,
 learn skill. Goals abandon under despair (stress > 90, 5 %/day).
 
+**Delayed ambition formation after job loss (added 2026-07-10).** Confirmed
+before changing anything: `FIND_JOB` had two seed paths, and the one that
+actually fired first was instant. `ConsequenceEngine`'s `JOB_LOST` rule table
+called `GoalSystem.seedGoal(..., FIND_JOB, ...)` directly inside its
+"immediate strain" rule — same tick as the job loss, before
+`GoalSystem.generateFromCircumstance`'s general low-financial-security
+`FIND_JOB` branch (untouched, out of scope — see below) would even run.
+That instant rule was replaced with a "considers looking for work" rule that
+schedules a `GOAL_SEED` `DelayedEffect` (`note = GoalType.FIND_JOB.name`,
+reusing the exact mechanism `LifecycleSystem.studentReturns` already uses for
+its multi-year returning-student seed) with a much shorter window —
+`ConsequenceEngine.FIND_JOB_SEED_MIN_DAYS`/`MAX_DAYS` = 3–10 days — gated on
+`EffectCondition.STILL_UNEMPLOYED`. If the resident is rehired before the
+window opens (e.g. `EconomySystem.hireSomeone` picks them up directly), the
+condition fails and the seed never fires — no dangling goal, no code needed
+to cancel it explicitly. This composes with the shock-period suppression
+above: even once the window opens, `GOAL_SEED` stays gated behind
+`!isInShock`, so a very recently laid-off resident doesn't decide on a new
+job hunt mid-shock even if 3 days have already passed.
+
+`GoalSystem.generateFromCircumstance`'s own `FIND_JOB` branch (general
+`financialSecurity < 45` + unemployed, not specifically post-job-loss —
+e.g. a resident whose wealth eroded slowly, or a new arrival) is deliberately
+untouched — scoping the delay to the job-loss trigger only, per the
+narrower brief, rather than changing the general path's behaviour too.
+
 ## Interventions
 
 Wallet of **3 nudges**; 1 regenerates per 12 observed in-game hours; a given
@@ -1138,6 +1250,29 @@ Input: the week's PUBLIC events only. Sections: front-page headline (most
 important event, with deterministic template variation), secondary stories,
 births, deaths, weddings, trade notices, constable's column, weather, public
 notices. Old issues stay in the archive forever.
+
+**Story follow-up across issues — investigated 2026-07-10, skipped.**
+Checked what's actually reachable from `NewspaperGenerator.generate(state,
+periodEvents, rng)` before writing anything: it is a pure engine function,
+called from `SimulationCoordinator.tick()` with only `WorldState` and an
+in-memory event buffer — it has no database handle. Published issues/stories
+(`NewspaperIssue`/`NewspaperStory`, defined in `core/model/Goal.kt`) are
+written straight to Room (`NewspaperDao`, via `WorldRepository
+.persistTickResult`), a layer the engine never touches, and `WorldState`
+itself keeps no bounded in-memory history of past issues either (only
+`issuesPublished`/`lastNewspaperAt` counters). So "check whether a candidate
+event's `causeIds` point back to an event already covered in a previous
+issue" cannot be answered cheaply from inside the engine as it stands today —
+it would need either a new bounded in-memory "recently-covered event ids"
+list threaded through `WorldState`/`SimulationCoordinator`, or an async DB
+round-trip injected into what is currently a pure, synchronous, deterministic
+function. Both are real new infrastructure, not a light-touch phrasing
+change, so — per this session's explicit scope — this piece was skipped
+rather than forced. If picked up later, the smallest honest version is
+probably a capped `WorldState.recentlyPublishedCauseEventIds: MutableList
+<Long>` (mirroring `recentEventIds`'s existing bounded-window pattern)
+populated when each issue is generated, letting `headlineFor`/`bodyFor`
+check membership without any DB access.
 
 ## Detail levels & promotion
 

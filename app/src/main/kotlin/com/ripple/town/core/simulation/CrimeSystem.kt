@@ -536,14 +536,6 @@ object CrimeSystem {
     // ============================================================
 
     /**
-     * The most recent `JOB_LOST`/`DEBT_CRISIS` event for this resident, if one is still within
-     * reach of `WorldState.recentEventIds` (the same bounded sliding window — 60 ids — the live
-     * ticker already maintains) or the resident's own `LOSS` memories (job-loss specifically
-     * leaves one, see `EconomySystem.closeBusiness`). Used to give a desperation-driven crime a
-     * genuine causal link back to whatever actually created the desperation; returns null (never
-     * invents a cause) if nothing plausible is still on record.
-     */
-    /**
      * Cause payload (added 2026-07-10, see docs/simulation-rules.md "Events, causes,
      * importance"): "immediate" is always the plain fact of the theft itself — the crime's own
      * description already says that, so the payload only ever adds "underlying_cause", and only
@@ -559,6 +551,14 @@ object CrimeSystem {
             else -> "circumstances that had been building for a while"
         })
 
+    /**
+     * The most recent `JOB_LOST`/`DEBT_CRISIS` event for this resident, if one is still within
+     * reach of `WorldState.recentEventIds` (the same bounded sliding window — 60 ids — the live
+     * ticker already maintains) or the resident's own `LOSS` memories (job-loss specifically
+     * leaves one, see `EconomySystem.closeBusiness`). Used to give a desperation-driven crime a
+     * genuine causal link back to whatever actually created the desperation; returns null (never
+     * invents a cause) if nothing plausible is still on record.
+     */
     private fun mostRecentDesperationCause(ctx: TickContext, r: Resident): WorldEvent? {
         val fromRecent = ctx.state.recentEventIds.asReversed()
             .mapNotNull { ctx.eventIndex.get(it) }
