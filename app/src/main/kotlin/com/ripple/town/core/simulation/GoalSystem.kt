@@ -69,12 +69,15 @@ object GoalSystem {
             seedGoal(ctx, r, GoalType.FIND_JOB, "Money is tight and there's no wage coming in.")
         }
 
-        // Need income + craft skill + a vacant building + (idea seed or good memory) -> start a business
+        // Unemployed + craft skill + a vacant building + (idea seed or good memory) -> start a business.
+        // Per design (docs/simulation-rules.md#goals): "unemployed + carpentry > 55 + vacant granary +
+        // idea seed + ambition" — gated on employment status, not on a financial-security threshold
+        // (a resident can be unemployed with a comfortable cushion and still be the one who opens the shop).
         val vacant = state.buildings.values.firstOrNull { it.type == BuildingType.VACANT && it.abandoned }
-        if (vacant != null && stage == LifeStage.ADULT &&
+        if (vacant != null && stage == LifeStage.ADULT && state.employmentOf(r) == null &&
             (r.skill(SkillType.CARPENTRY) > 55 || r.skill(SkillType.COOKING) > 60 || r.skill(SkillType.BUSINESS) > 55) &&
             (r.ideaSeeds.isNotEmpty() || r.memories.any { it.type == MemoryType.INSPIRATION }) &&
-            r.personality.ambition > 0.45 && n.financialSecurity < 60
+            r.personality.ambition > 0.45
         ) {
             seedGoal(
                 ctx, r, GoalType.START_BUSINESS,

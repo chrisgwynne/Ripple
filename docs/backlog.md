@@ -108,6 +108,10 @@ rather than scope-creeping into this pass):
   exported Room schema-v1 JSON the test reads was never generated or
   committed (`copyRoomSchemas` shows `NO-SOURCE`).
 
+*(Update: all three addressed in a later follow-up pass — see the
+"Engineering debt to pay alongside" section below for root causes and
+fixes.)*
+
 *(Update: this work was pushed, then merged into `main` and the feature
 branch deleted — see the entry below. `main` is now the repo's only branch.)*
 
@@ -282,12 +286,31 @@ Development order from the brief (status noted inline):
    windows × door × chimney × sign × awning × garden × fence × condition
    overlay…), environmental props, resident appearance variation
    (body/hair/clothing/occupation cues), consistent icons, palette/type
-   system. *Not started — this is the large one. Buildings/residents are
-   currently flat procedural rectangles (`core/ui/SpriteProvider.kt`); the
-   brief wants real distinguishable modular pixel art. This needs either a
-   genuine asset pipeline or a much richer procedural generator, and ideally
-   visual iteration against a real device/emulator — this environment has
-   neither.*
+   system. *First slice done 2026-07-10 (built blind, no emulator to verify
+   — see risk note below); most of the phase is still open.* Done:
+   distinguishing silhouette elements added to `drawBuilding()` in
+   `core/ui/SpriteProvider.kt` for BAKERY (striped awning + delivery
+   crates), CLINIC (red cross on the sign band), PUB (hanging sign on a
+   bracket + outdoor table), SCHOOL (flagpole + fenced-yard hint), GROCER
+   (produce crate/stall by the door), and FACTORY (loading-bay hatch marking
+   added alongside the pre-existing chimney). `Building.condition` (0-100,
+   already drove real simulation consequences but was invisible) is now
+   wired through: `SpriteProvider.building()` takes a new `condition`
+   parameter (`TownRenderer.kt` passes `b.condition`), and non-abandoned
+   buildings below condition 40 get a small worn-wall patch, below 20 a
+   roof-damage patch, layered underneath the existing (more severe)
+   `abandoned` full-boarding treatment. Cache key now folds in a 5-bucket
+   condition range so wear states don't collide with a fresh building's
+   cached bitmap. *Still open: most other building types (HOUSE, COTTAGE,
+   TERRACE, TOWN_HALL, CAFE, BOOKSHOP, TAILOR, HARDWARE, WORKSHOP, VACANT)
+   still have no unique silhouette, only colour — they're the majority of
+   `BuildingType`. Resident appearance variation, environmental props
+   (fences/gardens outside PARK/CEMETERY), and animation states are all
+   completely untouched. This needs either a genuine asset pipeline or a
+   much richer procedural generator, and real visual iteration against a
+   device/emulator to catch pixel-math mistakes — this environment has
+   neither, so this slice was written by reasoning through coordinates by
+   hand and needs a sighted pass before being trusted.*
 3. **Life animation** — resident movement/behaviour states (idle, walk,
    talk, work, eat, sit, sleep, argue, hug, celebrate, mourn, ill, injured,
    carry, wait, run — brief wants 2-4 frames each), town rhythm (shops
@@ -416,9 +439,37 @@ rather than duplicating it wholesale into this doc.
 - No gradle wrapper was checked in (`./gradlew` from the README didn't
   actually work) — now added. First real local test run surfaced three
   pre-existing failures, confirmed unrelated to Phase 2 simulation work via
-  code-path analysis and flagged as background tasks: `WorldGeneratorTest`
-  "scenario seeds are planted" (two seeded buildings overlap in the default
-  map layout), `GoalAndEconomyTest` "goals form from combined circumstances
-  not randomness" (Ash Thistle forms `FIND_JOB` instead of the expected
-  `START_BUSINESS`), and `MigrationTest` "schema v1 matches..." (the
-  exported Room schema-v1 JSON the test reads was never generated/committed).
+  code-path analysis and flagged as background tasks; **all three now fixed
+  and verified** (2026-07-10, see session log):
+  - `WorldGeneratorTest` "scenario seeds are planted" — root cause was a
+    hand-authored coordinate mistake in `WorldGenerator.slots()`: "The Old
+    Lantern" (x4,y11,4×3) and "Ashcombe School" (x2,y12,5×4) overlapped at
+    x4-6,y12-13. Seed-independent (the street plan isn't procedurally
+    placed), so it affected every seed identically. Moved the school's
+    footprint to y15 and its door to y19 to match. Also added a fail-fast
+    overlap/river check in `buildBuildings` so any future hand-edit to
+    `slots()` throws immediately instead of silently corrupting the map.
+  - `GoalAndEconomyTest` "goals form from combined circumstances not
+    randomness" — `GoalSystem`'s `START_BUSINESS` condition required
+    `financialSecurity < 60`, which isn't part of the documented rule
+    (`docs/simulation-rules.md#goals`: "unemployed + carpentry > 55 +
+    vacant granary + idea seed + ambition"). Ash Thistle's seeded debt
+    (250) computes a `financialSecurity` of 80 after the `Needs` model's
+    `coerceIn(20.0, 80.0)` floor, failing that extra gate. Replaced the
+    threshold with `state.employmentOf(r) == null`, matching the
+    already-documented "unemployed" condition and the same pattern
+    `FIND_JOB` already uses.
+  - `MigrationTest` "schema v1 matches..." — the schema file and
+    `room { schemaDirectory(...) }` config were fine; the actual bug was in
+    *where* the schema needed to live for Robolectric to see it. Traced via
+    `app/build/intermediates/unit_test_config_directory/.../test_config.properties`
+    (`android_merged_assets=...\mergeDebugAssets`): Robolectric's
+    `isIncludeAndroidResources` reads assets from the **debug variant's own
+    merged assets output**, not from any test-only source set — the
+    `apk-for-local-test.ap_` resource archive it also reads contains no
+    `assets/` entries at all for local unit tests, and there's no
+    `mergeDebugUnitTestAssets`-equivalent task. Moved the schema wiring from
+    `sourceSets.getByName("test").assets.srcDir(...)` to
+    `sourceSets.getByName("debug").assets.srcDir(...)` in
+    `app/build.gradle.kts` — confirmed fixed via an isolated
+    `--tests MigrationTest` run before re-verifying against the other two.

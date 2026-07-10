@@ -53,8 +53,12 @@ android {
     }
 
     sourceSets {
-        // Exported Room schemas are available to (Robolectric) migration tests.
-        getByName("test").assets.srcDir("$projectDir/schemas")
+        // Exported Room schemas need to reach MigrationTest (a local/Robolectric
+        // unit test, not an instrumented one). Robolectric's `isIncludeAndroidResources`
+        // reads assets from the *debug variant's own* merged assets output
+        // (see generateDebugUnitTestConfig's android_merged_assets), not from any
+        // test-only source set — so this has to live on "debug", not "test".
+        getByName("debug").assets.srcDir("$projectDir/schemas")
     }
 
     packaging {

@@ -120,7 +120,7 @@ class WorldGenerator(private val seed: Long, private val townName: String = "Ash
         Slot("Ashcombe Clinic", BuildingType.CLINIC, 24, 11, 4, 3, 26, 10, noise = 10.0, capacity = 10),
         Slot("The Old Granary", BuildingType.VACANT, 30, 11, 4, 3, 32, 10, noise = 0.0, value = 18_000.0),
         // School west of centre
-        Slot("Ashcombe School", BuildingType.SCHOOL, 2, 12, 5, 4, 4, 16, noise = 24.0, capacity = 30, value = 90_000.0),
+        Slot("Ashcombe School", BuildingType.SCHOOL, 2, 15, 5, 4, 4, 19, noise = 24.0, capacity = 30, value = 90_000.0),
         // Factory close to the north-side Rowan Street homes — deliberately noisy
         Slot("Ashcombe Joinery Works", BuildingType.FACTORY, 36, 16, 5, 4, 35, 18, noise = 62.0, capacity = 12, value = 70_000.0),
         // Park & cemetery
@@ -143,7 +143,23 @@ class WorldGenerator(private val seed: Long, private val townName: String = "Ash
     )
 
     private fun buildBuildings(state: WorldState) {
+        // The street plan is hand-authored (see class doc), not procedurally
+        // placed, so there is no runtime collision solver to lean on. Guard
+        // it anyway: fail fast if two footprints ever overlap, or a footprint
+        // is ever authored onto the seeded river, instead of silently
+        // producing a corrupt map for whichever seed happens to expose it.
+        val claimed = mutableSetOf<Pair<Int, Int>>()
         for (slot in slots()) {
+            for (x in slot.x until slot.x + slot.w) {
+                for (y in slot.y until slot.y + slot.h) {
+                    check(claimed.add(x to y)) {
+                        "Building slot '${slot.name}' overlaps another building's footprint at ($x, $y)"
+                    }
+                    check(!(x >= MAP_W - 2)) {
+                        "Building slot '${slot.name}' overlaps the seeded east-edge river at ($x, $y)"
+                    }
+                }
+            }
             val id = state.nextBuildingId++
             state.buildings[id] = Building(
                 id = id,

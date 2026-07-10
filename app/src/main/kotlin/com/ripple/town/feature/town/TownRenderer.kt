@@ -165,7 +165,7 @@ fun TownRenderer(
 
             // Buildings, painter's order by bottom edge.
             for (b in world.buildings.sortedBy { it.y + it.h }) {
-                val bmp = sprites.building(b.type, b.upgradeLevel, b.abandoned, b.id)
+                val bmp = sprites.building(b.type, b.upgradeLevel, b.abandoned, b.id, b.condition)
                 val topY = b.y * TILE_PX - (bmp.height - b.h * TILE_PX)
                 canvas.drawImageRect(
                     bmp,

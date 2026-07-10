@@ -15,7 +15,7 @@ import com.ripple.town.core.model.SpriteConfig
  */
 interface SpriteProvider {
     fun resident(config: SpriteConfig, pose: Pose, frame: Int): ImageBitmap
-    fun building(type: BuildingType, level: Int, abandoned: Boolean, seed: Long): ImageBitmap
+    fun building(type: BuildingType, level: Int, abandoned: Boolean, seed: Long, condition: Double = 100.0): ImageBitmap
 }
 
 enum class Pose { STAND, WALK, SIT, SLEEP, WORK, TALK, ILL, ARGUE, CELEBRATE, MOURN }
@@ -126,13 +126,14 @@ class ProceduralSpriteProvider : SpriteProvider {
         return bmp
     }
 
-    override fun building(type: BuildingType, level: Int, abandoned: Boolean, seed: Long): ImageBitmap {
+    override fun building(type: BuildingType, level: Int, abandoned: Boolean, seed: Long, condition: Double): ImageBitmap {
+        val conditionBucket = (condition / 20.0).toInt().coerceIn(0, 4)
         val key = (type.ordinal.toLong() shl 16) xor (level.toLong() shl 8) xor
-            (if (abandoned) 1L shl 7 else 0L) xor (seed and 0x7F)
-        return buildingCache.getOrPut(key) { drawBuilding(type, level, abandoned, seed) }
+            (if (abandoned) 1L shl 7 else 0L) xor (conditionBucket.toLong() shl 4) xor (seed and 0x7F)
+        return buildingCache.getOrPut(key) { drawBuilding(type, level, abandoned, seed, condition) }
     }
 
-    private fun drawBuilding(type: BuildingType, level: Int, abandoned: Boolean, seed: Long): ImageBitmap {
+    private fun drawBuilding(type: BuildingType, level: Int, abandoned: Boolean, seed: Long, condition: Double): ImageBitmap {
         val (tw, th) = footprintOf(type)
         val w = tw * TILE_PX
         val bodyH = th * TILE_PX
@@ -144,6 +145,11 @@ class ProceduralSpriteProvider : SpriteProvider {
         fun rect(x0: Int, y0: Int, ww: Int, hh: Int, c: Color) {
             paint.color = c
             canvas.drawRect(Rect(x0.toFloat(), y0.toFloat(), (x0 + ww).toFloat(), (y0 + hh).toFloat()), paint)
+        }
+        fun px(x: Int, y: Int, c: Color) {
+            if (x < 0 || y < 0 || x >= w || y >= h) return
+            paint.color = c
+            canvas.drawRect(Rect(x.toFloat(), y.toFloat(), x + 1f, y + 1f), paint)
         }
 
         if (type == BuildingType.PARK) {
@@ -196,11 +202,92 @@ class ProceduralSpriteProvider : SpriteProvider {
         // Factory chimney
         if (type == BuildingType.FACTORY) {
             rect(w - 8, 0, 4, roofH + 2, Color(0xFF7A6A57))
+            // Loading-bay marking: a wide low door-side hatch with hazard trim.
+            rect(2, h - 4, 6, 4, Color(0xFF6E6A5F))
+            rect(2, h - 4, 6, 1, Color(0xFFD9A648))
         }
+
+        // Per-type distinguishing silhouette elements (small, additive, self-contained).
+        if (!abandoned) {
+            when (type) {
+                BuildingType.BAKERY -> {
+                    // Striped awning above the sign band.
+                    var ax = 2
+                    var stripe = 0
+                    while (ax < w - 4) {
+                        rect(ax, roofH - 2, 2, 2, if (stripe % 2 == 0) Color(0xFFB2593F) else Color(0xFFF6E7B2))
+                        ax += 2
+                        stripe++
+                    }
+                    // Delivery crates by the door.
+                    rect(w / 2 - doorW / 2 - 4, h - 4, 3, 4, Color(0xFF8A6F52))
+                    rect(w / 2 + doorW / 2 + 1, h - 4, 3, 4, Color(0xFF8A6F52))
+                    px(w / 2 - doorW / 2 - 3, h - 3, Color(0xFFD9A648))
+                    px(w / 2 + doorW / 2 + 2, h - 3, Color(0xFFD9A648))
+                }
+                BuildingType.CLINIC -> {
+                    // Red cross mark centred on the sign band.
+                    val cx = w / 2
+                    val cy = roofH + 2
+                    rect(cx - 1, cy - 2, 2, 4, Color(0xFFFFFFFF))
+                    rect(cx - 2, cy - 1, 4, 2, Color(0xFFFFFFFF))
+                    px(cx, cy - 1, Color(0xFFB2593F)); px(cx - 1, cy, Color(0xFFB2593F))
+                    px(cx, cy, Color(0xFFB2593F)); px(cx + 1, cy, Color(0xFFB2593F))
+                    px(cx, cy + 1, Color(0xFFB2593F))
+                }
+                BuildingType.PUB -> {
+                    // Hanging sign on a bracket sticking out from the wall.
+                    val bx = w - 6
+                    rect(bx, roofH, 1, 3, trim)
+                    rect(bx - 3, roofH + 3, 4, 3, Color(0xFF55713F))
+                    px(bx - 3, roofH + 3, Color(0xFFD9A648))
+                    // Outdoor table near the door.
+                    rect(3, h - 3, 3, 1, Color(0xFF6B5F4F))
+                    px(3, h - 2, Color(0xFF6B5F4F)); px(5, h - 2, Color(0xFF6B5F4F))
+                }
+                BuildingType.SCHOOL -> {
+                    // Flagpole with a small pennant.
+                    val fx = w - 4
+                    rect(fx, roofH - 6, 1, 6, Color(0xFF8A7B63))
+                    rect(fx + 1, roofH - 6, 3, 2, Color(0xFFB2593F))
+                    // Fenced-yard hint along the base.
+                    var fenceX = 2
+                    while (fenceX < w / 2 - doorW) {
+                        rect(fenceX, h - 2, 1, 2, Color(0xFFD9CBB5))
+                        fenceX += 3
+                    }
+                }
+                BuildingType.GROCER -> {
+                    // Produce crate/stall hint by the door.
+                    rect(w / 2 - doorW / 2 - 4, h - 3, 3, 3, Color(0xFF7C9B62))
+                    px(w / 2 - doorW / 2 - 3, h - 2, Color(0xFFB2593F))
+                    px(w / 2 - doorW / 2 - 4, h - 2, Color(0xFFD9A648))
+                    rect(w / 2 + doorW / 2 + 1, h - 3, 3, 3, Color(0xFF7C9B62))
+                    px(w / 2 + doorW / 2 + 2, h - 2, Color(0xFFB2593F))
+                }
+                else -> {}
+            }
+        }
+
         // Upgrade badge: an extension strip per level
         repeat(level.coerceAtMost(2)) { i ->
             rect(2 + i * 3, roofH - 3, 2, 3, roof.darken(0.75f))
         }
+
+        // Condition-based wear cues for non-abandoned buildings (below the abandoned
+        // full-boarding treatment in severity — abandoned always overrides visually).
+        if (!abandoned) {
+            if (condition < 40.0) {
+                // Worn patch: a duller wall-shade rectangle, low on the facade.
+                rect(w - 6, h - 5, 4, 3, wallShade.darken(0.8f))
+            }
+            if (condition < 20.0) {
+                // More visible damage: a roof patch, distinct from abandoned boarding.
+                rect(3, roofH - 2, 4, 2, roof.darken(0.6f))
+                px(4, roofH - 1, Color(0xFF3A362E))
+            }
+        }
+
         // Abandoned: boarded door + cracked window
         if (abandoned) {
             rect(w / 2 - doorW / 2, h - 6, doorW, 2, Color(0xFF8A7B63))
