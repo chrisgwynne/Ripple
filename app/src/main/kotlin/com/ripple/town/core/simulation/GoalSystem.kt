@@ -220,8 +220,17 @@ object GoalSystem {
             name = name,
             type = BusinessType.WORKSHOP,
             ownerId = r.id,
-            balance = STARTUP_CAPITAL * 0.6,
-            demand = 35.0,
+            // Was STARTUP_CAPITAL * 0.6 (240) against ~75/day overhead+owner-salary once staffed
+            // (~3.2 days runway) and a below-reputation starting demand of 35 — the calibration
+            // audit (docs/backlog.md, 2026-07-11 "Economy calibration audit" entry) found this
+            // pairing was the strongest supported driver of a 66.7% one-year business closure
+            // rate, consistent across 10 independently-seeded towns. Full STARTUP_CAPITAL as
+            // opening balance (~5.3 days runway) and demand at parity with starting reputation
+            // (no double penalty for being new) directly target the two candidates that audit
+            // flagged, without touching CLOSURE_DAYS or any wage/living-cost constant it found
+            // were NOT structurally broken.
+            balance = STARTUP_CAPITAL,
+            demand = 45.0,
             reputation = 45.0,
             employeeCapacity = 2,
             openedAt = ctx.now

@@ -4,6 +4,34 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-11 — Economy calibration remediation: startup capital/demand fix, re-measured
+
+Direct follow-up to the same-day "Economy calibration audit" entry below, acting on its
+strongest-supported finding rather than leaving it as a passive report. Changed
+`GoalSystem.openBusiness`: a newly-opened business's starting `balance` moved from
+`STARTUP_CAPITAL * 0.6` (240.0, ~3.4 days runway for a WORKSHOP once staffed) to the full
+`STARTUP_CAPITAL` (400.0, ~5.3 days runway), and starting `demand` moved from 35.0 to 45.0 —
+parity with starting `reputation`, removing the double penalty of being both undercapitalised
+and artificially low-demand at once. `CLOSURE_DAYS`, wage constants, and `LIVING_COST_PER_DAY`
+were left untouched — the audit found those were NOT structurally broken.
+
+Re-ran the exact same `EconomyCalibrationReport` test (10 seeds x 1 simulated year,
+deterministic) after the change: one-year pooled business closure rate moved from **66.7% to
+60.0%** — a real, reproducible improvement (not a guess dressed up as a result), but a partial
+one, not a full fix. Honestly flagged in the report's own diagnosis text (now updated to
+describe the current constants rather than the pre-fix ones) and in a new "REMEDIATION NOTE"
+section: expected average daily revenue at demand=45 comfortably clears a WORKSHOP's ~70/day
+overhead+wage cost on paper, yet closures remain common at 60% — pointing at variance
+(`hourlyFootfall`'s `.toInt()` truncation of a sub-1.0 expected hourly customer count, plus a
+reputation/demand death-spiral a business can fall into from a single bad early stretch) and/or
+pressure later in a business's life (rivalry, price drift, national overhead multipliers) as
+real remaining contributors, not just the opening-day window this pass targeted. Next
+diagnostic step (not yet built): track age-at-closure in the calibration harness to see whether
+remaining closures still skew young (more startup-window tuning) or spread across a business's
+whole lifetime (a different, later-life mechanism) — a genuine measurement question, not
+something to guess at by changing more constants blindly.
+
+
 ### 2026-07-11 — Cross-system pressure bridges
 
 Closes the Simulation Reality Review finding: *"The genuinely mature individual systems

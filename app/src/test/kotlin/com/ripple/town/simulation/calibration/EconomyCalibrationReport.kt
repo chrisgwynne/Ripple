@@ -183,18 +183,17 @@ class EconomyCalibrationReport {
             |
             |3) HYPOTHESIS: new businesses opening via GoalSystem.START_BUSINESS don't start with
             |   enough balance to survive a normal bad patch.
-            |   Actual constants: GoalSystem.STARTUP_CAPITAL = 400.0, and a new WORKSHOP opens with
-            |   `balance = STARTUP_CAPITAL * 0.6` = 240.0 (see GoalSystem.kt line ~223).
-            |   Compare to EconomySystem.overheads(WORKSHOP) = 30.0/day in pure overhead, BEFORE any
-            |   wages — the moment a workshop hires even one employee at salaryFor(WORKSHOP) = 40.0/day,
-            |   daily fixed costs alone are 70.0/day against a 240.0 starting balance. That's ~3.4 days
-            |   of runway if revenue is zero, and revenue is never guaranteed daily (hourlyFootfall is
-            |   a random draw around `demand`, and a brand-new business opens at demand=35.0 — well
-            |   below the town average). EXPANSION_BALANCE (${EconomySystem.EXPANSION_BALANCE}) — the bar for a
-            |   business to be considered "prosperous" — is 37.5x the actual starting balance.
-            |   VERDICT: SUPPORTED, AND THE STRONGEST CANDIDATE FOUND. A new business's starting
-            |   capital is a small fraction of one bad week's overhead once staffed, with no margin
-            |   built in for the low-demand ramp-up every new business starts in.
+            |   UPDATED 2026-07-11: this was originally SUPPORTED at balance = STARTUP_CAPITAL * 0.6
+            |   (240.0) against ~70/day overhead+wages once staffed (~3.4 days runway) and a
+            |   below-reputation starting demand of 35.0. Retuned in response to that finding — new
+            |   businesses now open at `balance = GoalSystem.STARTUP_CAPITAL` (${com.ripple.town.core.simulation.GoalSystem.STARTUP_CAPITAL}, ~5.3 days
+            |   runway for a WORKSHOP) and `demand` at parity with starting `reputation` (45.0, no
+            |   double penalty for being new). Re-measured after the fix: one-year pooled closure
+            |   rate moved from 66.7% to ${"%.1f".format(closureRatePct)}% (this run) — a real, reproducible improvement,
+            |   not a full fix. See the note below the summary for what's still open.
+            |   VERDICT: WAS SUPPORTED; PARTIALLY ADDRESSED. Startup undercapitalisation was A real
+            |   contributor, and fixing it measurably helped, but the closure rate is still elevated
+            |   — something beyond the opening-day window is also driving closures.
             |
             |4) HYPOTHESIS: it's actually fine and the "overtuned" read was anecdotal pattern-matching
             |   on a small number of observed closures, not a real structural problem.
@@ -220,6 +219,20 @@ class EconomyCalibrationReport {
         println("found directly in the constants rather than assumed, is undercapitalised business")
         println("startup (STARTUP_CAPITAL * 0.6 = 240 balance vs. overhead+wages of ~70/day once staffed,")
         println("and a low starting `demand` of 35 that only slowly drifts toward reputation).")
+        println()
+        println("REMEDIATION NOTE (2026-07-11): the startup-capital/demand fix in GoalSystem.openBusiness")
+        println("was applied and re-measured (this run) — closure rate moved from 66.7% to " +
+            "%.1f%%.".format(closureRatePct))
+        println("A real improvement, not the whole story: back-of-envelope, expected daily revenue at")
+        println("demand=45 (~14 open hours x ~1 customer/hr x baseSpend) comfortably exceeds a WORKSHOP's")
+        println("~70/day overhead+wage cost on AVERAGE, yet closures are still common — meaning variance")
+        println("(the hourly footfall draw truncates fractional customers to 0 via `.toInt()`, and a")
+        println("reputation/demand death-spiral can start from a single bad early week) and/or pressure")
+        println("elsewhere in a business's life (rivalry, price drift, national overhead multipliers),")
+        println("not just the opening-day window, are still real contributors. Next diagnostic step,")
+        println("not yet built: track age-at-closure to see whether the remaining closures still skew")
+        println("toward young businesses (further startup-window tuning) or spread across a business's")
+        println("whole lifetime (a different, later-life mechanism).")
         println("=".repeat(100))
     }
 }
