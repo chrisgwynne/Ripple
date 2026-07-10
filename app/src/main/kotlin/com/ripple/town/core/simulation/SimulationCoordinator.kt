@@ -77,13 +77,15 @@ class SimulationCoordinator(
         // 9b. Private events may leak into public rumour.
         RumourSystem.update(ctx)
         // 10-12. Daily passes: health, lifecycle (births/deaths/election), goals, building
-        // repairs, seasonal events (harvest fair / winter market / river floods).
+        // repairs, seasonal events (harvest fair / winter market / river floods), local
+        // politics (petitions over noise / rent).
         if (newDay) {
             HealthSystem.updateDaily(ctx)
             LifecycleSystem.updateDaily(ctx)
             GoalSystem.updateDaily(ctx)
             BuildingLifecycleSystem.updateDaily(ctx)
             SeasonalEventSystem.updateDaily(ctx)
+            PetitionSystem.updateDaily(ctx)
         }
         // 13. Intervention influence regenerates through observation.
         InterventionEngine.regenerate(state, SimTime.MINUTES_PER_TICK)

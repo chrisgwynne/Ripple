@@ -42,6 +42,8 @@ object ImportanceScorer {
             EventType.SECRET_REVEALED -> 24.0
             EventType.RUMOUR_SPREAD -> 16.0
             EventType.BUILDING_REPAIRED -> 10.0
+            EventType.PETITION_STARTED -> 20.0
+            EventType.PETITION_RESOLVED -> 28.0
             else -> 8.0
         }
         val severityFactor = 0.6 + severity * 0.8

@@ -60,7 +60,7 @@ fun ResidentSheetContent(
 
     Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            PixelAvatar(r.sprite, sprites, size = 54.dp, pose = poseFor(r.activity))
+            PixelAvatar(r.sprite, sprites, size = 54.dp, pose = poseFor(r.activity), lifeStage = r.lifeStage, occupation = r.occupation)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(r.name, style = MaterialTheme.typography.headlineSmall)

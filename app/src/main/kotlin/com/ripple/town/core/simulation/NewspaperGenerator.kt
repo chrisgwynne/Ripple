@@ -96,7 +96,8 @@ object NewspaperGenerator {
         EventType.CRIME_COMMITTED, EventType.CRIME_REPORTED -> StoryCategory.CRIME
         EventType.ILLNESS_DIAGNOSED, EventType.ILLNESS_RECOVERED -> StoryCategory.HEALTH
         EventType.WEATHER_DAMAGE -> StoryCategory.WEATHER
-        EventType.ELECTION_WON, EventType.ELECTION_CALLED -> StoryCategory.TOWN_NEWS
+        EventType.ELECTION_WON, EventType.ELECTION_CALLED,
+        EventType.PETITION_STARTED, EventType.PETITION_RESOLVED -> StoryCategory.TOWN_NEWS
         EventType.MEETING, EventType.FRIENDSHIP_FORMED, EventType.COMMUNITY_EVENT,
         EventType.RUMOUR_SPREAD, EventType.BUILDING_REPAIRED -> StoryCategory.HUMAN_INTEREST
         else -> StoryCategory.TOWN_NEWS
@@ -143,6 +144,17 @@ object NewspaperGenerator {
             EventType.RUMOUR_SPREAD -> rng.pick(listOf(
                 "Talk of the town", "What the town is saying", "Whispers and word-of-mouth"
             ))
+            EventType.PETITION_STARTED -> rng.pick(listOf(
+                "Residents rally behind new petition", "A cause takes root", "Voices raised at the town hall"
+            ))
+            EventType.PETITION_RESOLVED -> {
+                val succeeded = e.payload["outcome"] == "succeeded"
+                if (succeeded) rng.pick(listOf(
+                    "Petition wins the day", "People power pays off", "Council bows to public pressure"
+                )) else rng.pick(listOf(
+                    "Petition falls short", "Campaign fizzles out", "Not enough names on the dotted line"
+                ))
+            }
             else -> e.type.label
         }
     }

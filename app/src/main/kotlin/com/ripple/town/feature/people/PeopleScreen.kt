@@ -104,7 +104,7 @@ fun PeopleScreen(
                     modifier = Modifier.fillMaxWidth().clickable { onOpenResident(followed.id) }
                 ) {
                     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        PixelAvatar(followed.sprite, sprites, size = 52.dp, pose = poseFor(followed.activity))
+                        PixelAvatar(followed.sprite, sprites, size = 52.dp, pose = poseFor(followed.activity), lifeStage = followed.lifeStage, occupation = followed.occupation)
                         Spacer(Modifier.width(12.dp))
                         Column {
                             Text(followed.name, style = MaterialTheme.typography.titleMedium)
@@ -167,7 +167,7 @@ private fun PersonRow(
         Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        PixelAvatar(r.sprite, sprites, size = 40.dp)
+        PixelAvatar(r.sprite, sprites, size = 40.dp, lifeStage = r.lifeStage, occupation = r.occupation)
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(r.name, style = MaterialTheme.typography.titleSmall)

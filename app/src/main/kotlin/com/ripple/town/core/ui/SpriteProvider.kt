@@ -6,6 +6,7 @@ import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Canvas as ComposeCanvas
 import androidx.compose.ui.geometry.Rect
 import com.ripple.town.core.model.BuildingType
+import com.ripple.town.core.model.LifeStage
 import com.ripple.town.core.model.SpriteConfig
 
 /**
@@ -14,7 +15,13 @@ import com.ripple.town.core.model.SpriteConfig
  * later without touching the town renderer.
  */
 interface SpriteProvider {
-    fun resident(config: SpriteConfig, pose: Pose, frame: Int): ImageBitmap
+    fun resident(
+        config: SpriteConfig,
+        pose: Pose,
+        frame: Int,
+        lifeStage: LifeStage = LifeStage.ADULT,
+        occupation: String = ""
+    ): ImageBitmap
     fun building(type: BuildingType, level: Int, abandoned: Boolean, seed: Long, condition: Double = 100.0): ImageBitmap
 }
 
@@ -49,12 +56,33 @@ class ProceduralSpriteProvider : SpriteProvider {
         Color(0xFF5C4934), Color(0xFF44506B), Color(0xFF6B5F4F), Color(0xFF3F5749), Color(0xFF74563F)
     )
 
-    override fun resident(config: SpriteConfig, pose: Pose, frame: Int): ImageBitmap {
-        val key = (config.hashCode().toLong() shl 20) xor (pose.ordinal.toLong() shl 4) xor (frame % 2).toLong()
-        return residentCache.getOrPut(key) { drawResident(config, pose, frame % 2) }
+    override fun resident(
+        config: SpriteConfig,
+        pose: Pose,
+        frame: Int,
+        lifeStage: LifeStage,
+        occupation: String
+    ): ImageBitmap {
+        val cue = occupationCueOf(occupation)
+        val key = (config.hashCode().toLong() shl 20) xor (pose.ordinal.toLong() shl 4) xor (frame % 2).toLong() xor
+            (lifeStage.ordinal.toLong() shl 24) xor (cue.ordinal.toLong() shl 28)
+        return residentCache.getOrPut(key) { drawResident(config, pose, frame % 2, lifeStage, cue) }
     }
 
-    private fun drawResident(config: SpriteConfig, pose: Pose, frame: Int): ImageBitmap {
+    /** Buckets free-text occupation strings into a small set of drawable accessory cues. */
+    private enum class OccupationCue { NONE, APRON, SATCHEL, TOOL }
+
+    private fun occupationCueOf(occupation: String): OccupationCue {
+        val o = occupation.lowercase()
+        return when {
+            "bakery" in o || "café" in o || "cafe" in o || "bar worker" in o || "grocery" in o -> OccupationCue.APRON
+            "classroom" in o || "clerk" in o || "bookseller" in o -> OccupationCue.SATCHEL
+            "workshop" in o || "joinery" in o || "shop assistant" in o || "repair" in o -> OccupationCue.TOOL
+            else -> OccupationCue.NONE
+        }
+    }
+
+    private fun drawResident(config: SpriteConfig, pose: Pose, frame: Int, lifeStage: LifeStage, cue: OccupationCue): ImageBitmap {
         val bmp = ImageBitmap(SPRITE_W, SPRITE_H)
         val canvas = ComposeCanvas(bmp)
         val paint = Paint()
@@ -74,6 +102,15 @@ class ProceduralSpriteProvider : SpriteProvider {
         val trousers = trouserColors[config.trouserColor % trouserColors.size]
         val ink = Color(0xFF2E241B)
 
+        // Life-stage proportions on the fixed 10x14 canvas. Feet stay anchored to
+        // the same ground row (y13) for every stage so characters still line up
+        // on the tile grid; children/teens instead get a shorter figure by
+        // dropping the head/body down and shrinking the legs, elders keep adult
+        // height but stoop 1px forward at the head/shoulders.
+        val vShift = when (lifeStage) { LifeStage.CHILD -> 2; LifeStage.TEEN -> 1; else -> 0 }
+        val legShrink = vShift // legs lose the same amount so feet still land on y13
+        val stoop = if (lifeStage == LifeStage.ELDER) 1 else 0
+
         if (pose == Pose.SLEEP) {
             // Lying down: a simple horizontal figure with a blanket.
             rect(1, 9, 8, 3, shirt)
@@ -83,36 +120,52 @@ class ProceduralSpriteProvider : SpriteProvider {
             return bmp
         }
 
-        // Head
-        rect(3, 1, 4, 4, skin)
+        val headY = 1 + vShift
+        val bodyY = 5 + vShift
+        val legY = 9 + vShift
+
+        // Head (elders lean 1px forward/right, a simple stoop cue)
+        rect(3 + stoop, headY, 4, 4, skin)
         // Hair styles: 0 short, 1 side-part, 2 long, 3 hat
         when (config.hairStyle % 4) {
-            0 -> rect(3, 0, 4, 2, hair)
-            1 -> { rect(3, 0, 4, 1, hair); px(3, 1, hair); px(6, 1, hair) }
-            2 -> { rect(3, 0, 4, 2, hair); rect(2, 2, 1, 4, hair); rect(7, 2, 1, 4, hair) }
-            3 -> { rect(2, 0, 6, 1, RippleColorsHat); rect(3, 1, 4, 1, RippleColorsHat) }
+            0 -> rect(3 + stoop, headY - 1, 4, 2, hair)
+            1 -> { rect(3 + stoop, headY - 1, 4, 1, hair); px(3 + stoop, headY, hair); px(6 + stoop, headY, hair) }
+            2 -> { rect(3 + stoop, headY - 1, 4, 2, hair); rect(2 + stoop, headY + 1, 1, 4, hair); rect(7 + stoop, headY + 1, 1, 4, hair) }
+            3 -> { rect(2 + stoop, headY - 1, 6, 1, RippleColorsHat); rect(3 + stoop, headY, 4, 1, RippleColorsHat) }
         }
         // Eyes
-        px(4, 3, ink); px(6, 3, ink)
+        px(4 + stoop, headY + 2, ink); px(6 + stoop, headY + 2, ink)
         // Body
-        rect(3, 5, 4, 4, shirt)
+        rect(3, bodyY, 4, 4, shirt)
         // Arms
         when (pose) {
-            Pose.CELEBRATE -> { px(2, 3, skin); px(7, 3, skin); px(2, 4, shirt); px(7, 4, shirt) }
-            Pose.WORK -> { rect(2, 6, 1, 2, skin); rect(7, 7, 1, 2, skin) }
-            Pose.ARGUE -> { rect(2, 4, 1, 2, skin); rect(7, 6, 1, 2, skin) }
-            else -> { rect(2, 5, 1, 3, shirt); rect(7, 5, 1, 3, shirt); px(2, 8, skin); px(7, 8, skin) }
+            Pose.CELEBRATE -> { px(2, bodyY - 2, skin); px(7, bodyY - 2, skin); px(2, bodyY - 1, shirt); px(7, bodyY - 1, shirt) }
+            Pose.WORK -> { rect(2, bodyY + 1, 1, 2, skin); rect(7, bodyY + 2, 1, 2, skin) }
+            Pose.ARGUE -> { rect(2, bodyY - 1, 1, 2, skin); rect(7, bodyY + 1, 1, 2, skin) }
+            else -> { rect(2, bodyY, 1, 3, shirt); rect(7, bodyY, 1, 3, shirt); px(2, bodyY + 3, skin); px(7, bodyY + 3, skin) }
+        }
+        // Occupation accessory: a small, low-cost accent that reads at a glance.
+        when (cue) {
+            OccupationCue.APRON -> rect(3, bodyY + 1, 4, 1, Color(0xFFEFE3C8)) // pale apron band across the chest
+            OccupationCue.SATCHEL -> { px(7, bodyY + 1, Color(0xFF5C4934)); px(7, bodyY + 2, Color(0xFF5C4934)) } // satchel strap/bag at the side
+            OccupationCue.TOOL -> px(2, bodyY, Color(0xFF8A6F52)) // tool accent at the shoulder/hand
+            OccupationCue.NONE -> {}
         }
         // Legs
+        val legH = (4 - legShrink).coerceAtLeast(2)
         if (pose == Pose.SIT) {
-            rect(3, 9, 4, 2, trousers)
-            rect(3, 11, 1, 1, trousers); rect(6, 11, 1, 1, trousers)
+            rect(3, legY, 4, (2 - legShrink).coerceAtLeast(1), trousers)
+            rect(3, legY + 2 - legShrink, 1, 1, trousers); rect(6, legY + 2 - legShrink, 1, 1, trousers)
         } else if (pose == Pose.WALK && frame == 1) {
-            rect(3, 9, 1, 4, trousers); rect(6, 9, 1, 3, trousers)
-            px(3, 13, ink); px(6, 12, ink)
+            rect(3, legY, 1, legH, trousers); rect(6, legY, 1, (legH - 1).coerceAtLeast(1), trousers)
+            px(3, legY + legH - 1, ink); px(6, legY + legH - 2, ink)
         } else {
-            rect(3, 9, 1, 4, trousers); rect(6, 9, 1, 4, trousers)
-            px(3, 13, ink); px(6, 13, ink)
+            rect(3, legY, 1, legH, trousers); rect(6, legY, 1, legH, trousers)
+            px(3, legY + legH - 1, ink); px(6, legY + legH - 1, ink)
+        }
+        // Elder walking-stick accent: a single low pixel beside the trailing leg.
+        if (lifeStage == LifeStage.ELDER && pose != Pose.SIT) {
+            px(1, legY + legH - 1, Color(0xFF8A7B63))
         }
         // Status marks
         when (pose) {

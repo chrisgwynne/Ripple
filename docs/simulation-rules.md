@@ -39,7 +39,8 @@ implemented in `core/simulation`.
 8. Daily at midnight: `HealthSystem.updateDaily`, `LifecycleSystem.updateDaily`
    (births, separations, elections, memory decay), `GoalSystem.updateDaily`,
    `BuildingLifecycleSystem.updateDaily`, `SeasonalEventSystem.updateDaily`
-   (harvest fair / winter market / river floods).
+   (harvest fair / winter market / river floods), `PetitionSystem.updateDaily`
+   (local politics: noise / rent petitions).
 9. Nudge regeneration.
 10. Newspaper when due (weekly, 08:00).
 11. Daily statistics; checkpoint flag every 36 ticks (6 in-game hours).
@@ -185,6 +186,63 @@ kindness → cooking), rehoused with their old household if it kept a home
 or with an in-town parent otherwise, a fresh `FIND_JOB` goal, a warm
 `RESIDENT_ARRIVED`-flavoured event, and an `ACHIEVEMENT` memory for any
 parent still in town.
+
+## Local politics: petitions
+
+Grassroots politics short of a council seat, run daily from
+`PetitionSystem.updateDaily` (resolve due petitions → gather today's
+signatures → maybe start a new one, in that order so a petition can't both
+gain its last signature and resolve on the same day it started). Two
+subjects, matching what the backlog names — council seats and campaign-driven
+elections are a separate, larger item and remain open:
+
+- **Starting.** A politically-interested (`politicalInterest >
+  0.5`), in-town adult who is personally affected can start a petition
+  (35% roll once eligible, so it doesn't fire the instant someone qualifies):
+  - **Noise** — their home sits within `NeedsSystem.NOISE_RADIUS` (6 tiles) of
+    a building with `noise > 40`, *and* their own comfort has genuinely
+    dropped (< 45) — reusing the exact proximity rule `NeedsSystem` already
+    uses for the comfort penalty, not a new one. Targets the loudest
+    qualifying building.
+  - **Rent** — their household's `monthlyRent × 1.5` exceeds their personal
+    wealth — a burden check, not a flat rent threshold, so a wealthy resident
+    in an expensive home doesn't qualify.
+  A resident can't stack a second petition while one of theirs is still
+  active. At most `MAX_ACTIVE_PETITIONS` (2) run at once town-wide, and at
+  most `MAX_NEW_PETITIONS_PER_DAY` (1) starts per day. `PETITION_STARTED`
+  fires `PUBLIC` (town politics is public business, unlike affairs/rumours) —
+  the starter is the sole initial signatory and gets a small purpose lift.
+- **Signing.** Each day, every other detailed non-child resident who is
+  *sympathetic* — for noise, living within the same radius of the target
+  building; for rent, also rent-burdened by the same `1.5×` test; either way,
+  `politicalInterest > 0.6` alone also qualifies — gets a `22%` daily roll to
+  sign, capped at `MAX_SIGNATURES_PER_PETITION_PER_DAY` (6) new names per
+  petition per day. Signing nudges purpose slightly.
+- **Resolving.** The threshold is `8 + population/12`, capped at 22 — scales
+  with the town without ever demanding an unreachable majority from a small
+  cast. A petition resolves the day it clears its threshold, or after its
+  21-day deadline, whichever comes first:
+  - **Succeeds:** a real, bounded policy effect. Noise petitions cut the
+    target building's `noise` by 18 (a mandated quiet-hours easing, not
+    silence) and give every nearby resident's comfort a one-off +6; rent
+    petitions cut the target household's `monthlyRent` by 40 and give every
+    member's financial security +8 / stress −4. The starter gets +10
+    reputation, +12 purpose and an `ACHIEVEMENT` memory; every other signatory
+    gets a small purpose lift too.
+  - **Fails:** no policy effect. The starter takes −4 reputation and +6
+    stress; signatories are otherwise unaffected.
+  Either way `PETITION_RESOLVED` fires with `causeIds` pointing back at the
+  `PETITION_STARTED` event (so the cause viewer shows the whole arc) and a
+  `payload["outcome"]` of `"succeeded"`/`"failed"`, then goes through
+  `ConsequenceEngine.onEvent` like any other event (no rules registered yet —
+  a hook for future consequence chains, same as `INTERVENTION_APPLIED`).
+
+Modelled with a new lightweight `Petition` data class
+(`core/model/WorldState.kt`) — subject, starter, target
+(building-or-household), signature list, threshold, deadline, status — held
+in a new `WorldState.petitions` list. `WorldState` checkpoints as one JSON
+blob, so this is a plain new field with a sensible default (`emptyList`);
+no schema migration involved.
 
 ## Family & generations
 

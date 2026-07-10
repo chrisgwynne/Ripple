@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.ripple.town.core.model.LifeStage
 import com.ripple.town.core.model.SpriteConfig
 
 /** Small pixel-art portrait rendered from a resident's sprite config. */
@@ -37,9 +38,11 @@ fun PixelAvatar(
     sprites: SpriteProvider,
     size: Dp = 44.dp,
     pose: Pose = Pose.STAND,
-    background: Color = MaterialTheme.colorScheme.surfaceVariant
+    background: Color = MaterialTheme.colorScheme.surfaceVariant,
+    lifeStage: LifeStage = LifeStage.ADULT,
+    occupation: String = ""
 ) {
-    val bmp = remember(config, pose) { sprites.resident(config, pose, 0) }
+    val bmp = remember(config, pose, lifeStage, occupation) { sprites.resident(config, pose, 0, lifeStage, occupation) }
     Box(
         modifier = Modifier
             .size(size)

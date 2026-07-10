@@ -5,6 +5,7 @@ import com.ripple.town.core.model.Activity
 import com.ripple.town.core.model.Building
 import com.ripple.town.core.model.BuildingType
 import com.ripple.town.core.model.DetailLevel
+import com.ripple.town.core.model.LifeStage
 import com.ripple.town.core.model.Mood
 import com.ripple.town.core.model.SimSpeed
 import com.ripple.town.core.model.SimTime
@@ -81,6 +82,7 @@ data class ResidentUi(
     val firstName: String,
     val surname: String,
     val age: Int,
+    val lifeStage: LifeStage,
     val genderLabel: String,
     val alive: Boolean,
     val inTown: Boolean,
@@ -230,6 +232,7 @@ object SnapshotBuilder {
             firstName = r.firstName,
             surname = r.surname,
             age = r.ageAt(state.time),
+            lifeStage = r.lifeStageAt(state.time),
             genderLabel = when (r.gender) {
                 com.ripple.town.core.model.Gender.FEMALE -> "Woman"
                 com.ripple.town.core.model.Gender.MALE -> "Man"

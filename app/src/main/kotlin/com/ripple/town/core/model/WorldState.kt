@@ -2,6 +2,40 @@ package com.ripple.town.core.model
 
 import kotlinx.serialization.Serializable
 
+enum class PetitionSubject {
+    /** Against a specific noisy building; succeeds by mandating a quiet-hours-style noise cut. */
+    NOISE,
+    /** For rent relief; succeeds by trimming rent (a household's, or a town-wide easing). */
+    RENT
+}
+
+enum class PetitionStatus { ACTIVE, SUCCEEDED, FAILED }
+
+/**
+ * Grassroots local politics, short of a council seat: a resident personally affected by
+ * noise or rent burden starts a petition, sympathetic townsfolk sign it daily, and it
+ * resolves — with a real, bounded policy effect — once it hits its signature threshold or
+ * its deadline lapses. See [com.ripple.town.core.simulation.PetitionSystem].
+ */
+@Serializable
+data class Petition(
+    val id: Long,
+    val subject: PetitionSubject,
+    val starterId: Long,
+    /** Building targeted for a NOISE petition, or null. */
+    val targetBuildingId: Long? = null,
+    /** Household targeted for a RENT petition, or null. */
+    val targetHouseholdId: Long? = null,
+    val startedAt: Long,                     // sim minutes
+    val deadlineAt: Long,                    // sim minutes
+    val signatureThreshold: Int,
+    val signatureIds: MutableList<Long> = mutableListOf(),
+    var status: PetitionStatus = PetitionStatus.ACTIVE,
+    val startEventId: Long = 0L
+) {
+    val signatureCount: Int get() = signatureIds.size
+}
+
 /**
  * The complete factual state of the simulated world at a moment in time.
  *
@@ -47,6 +81,11 @@ data class WorldState(
     var mayorId: Long? = null,
     /** The resident currently serving as constable; kept up by [CrimeSystem.ensureConstable]. */
     var constableResidentId: Long? = null,
+
+    // Local politics
+    /** Active/recently resolved petitions; run by `PetitionSystem`. Bounded, see its MAX_ACTIVE_PETITIONS. */
+    val petitions: MutableList<Petition> = mutableListOf(),
+    var nextPetitionId: Long = 1L,
 
     // Id counters (all state needed for deterministic continuation)
     var nextResidentId: Long = 1L,

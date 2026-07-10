@@ -189,7 +189,7 @@ fun TownRenderer(
                 eased[r.id] = next
                 val pose = poseFor(r.activity)
                 val walkFrame = if (pose == Pose.WALK) (frame + r.id).toInt() else 0
-                val bmp = sprites.resident(r.sprite, pose, walkFrame)
+                val bmp = sprites.resident(r.sprite, pose, walkFrame, r.lifeStage, r.occupation)
                 val drawX = next.x * TILE_PX + (TILE_PX - SPRITE_W) / 2f
                 val drawY = next.y * TILE_PX - SPRITE_H + 3f
                 if (r.id == followId) {

@@ -4,6 +4,47 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-10 — Phase 3: local politics — petitions (noise, rents)
+
+First Phase 3 backlog item, scoped down per the task brief: petitions only,
+council seats and campaign-driven elections deliberately left for a separate,
+larger pass. Same rigour as the Phase 2 items above (implementation +
+`docs/simulation-rules.md` section + backlog checkbox), and same
+parallel-work constraint as the seasonal-events pass below — another agent
+was working UI/rendering files in the same checkout, so this was code-only,
+reasoned through by reading, no `./gradlew` or `git` calls made.
+
+- **New `PetitionSystem`**, called daily from `SimulationCoordinator`
+  alongside the other daily-pass systems. A politically-interested
+  (`politicalInterest > 0.5`) in-town adult personally affected by a problem
+  can start a petition (35% roll once eligible): **noise** (home within
+  `NeedsSystem.NOISE_RADIUS` of a `noise > 40` building *and* comfort
+  genuinely suffering, reusing `NeedsSystem`'s own proximity rule rather than
+  inventing a new one) or **rent** (household `monthlyRent × 1.5` exceeds
+  personal wealth — a burden test, not a flat threshold). Capped at 2 active
+  petitions town-wide, 1 new start per day, no resident stacking a second
+  petition of their own. Each day, sympathetic detailed residents (same-radius
+  neighbours / fellow rent-burdened, or just generally politically engaged)
+  get a bounded daily chance to sign (22%, max 6 new signatures/petition/day).
+  A petition resolves — success or lapsed deadline (21 days) — against a
+  population-scaled threshold (`8 + pop/12`, capped 22): success applies a
+  real, bounded policy effect (noise −18 on the target building plus a
+  one-off comfort lift for nearby residents; rent −40 on the target household
+  plus financial-security/stress relief for its members) and a
+  reputation/purpose boost for the organiser; failure costs the organiser
+  reputation and stress, no policy effect. New `PETITION_STARTED`/
+  `PETITION_RESOLVED` event types, `PUBLIC` visibility (town politics is
+  public business, unlike affairs/rumours), resolution's `causeIds` pointing
+  back at the start event so the cause viewer shows the whole arc, both fed
+  through `ConsequenceEngine.onEvent`. Modelled with a new `Petition`
+  data class in `core/model/WorldState.kt` (new `WorldState.petitions` list,
+  default-safe since `WorldState` checkpoints as one JSON blob — no schema
+  migration). See `docs/simulation-rules.md#local-politics-petitions`.
+
+Not run this session (per the parallel-work constraint): `./gradlew`
+build/test and any `git` commands. Code-only, ready for the orchestrating
+session to build/test/commit.
+
 ### 2026-07-10 — Seasonal events: harvest fair, winter market, river floods
 
 Sixth Phase 2 **Simulation** backlog item, same rigour as the other five
@@ -304,13 +345,50 @@ Development order from the brief (status noted inline):
    cached bitmap. *Still open: most other building types (HOUSE, COTTAGE,
    TERRACE, TOWN_HALL, CAFE, BOOKSHOP, TAILOR, HARDWARE, WORKSHOP, VACANT)
    still have no unique silhouette, only colour — they're the majority of
-   `BuildingType`. Resident appearance variation, environmental props
-   (fences/gardens outside PARK/CEMETERY), and animation states are all
-   completely untouched. This needs either a genuine asset pipeline or a
-   much richer procedural generator, and real visual iteration against a
-   device/emulator to catch pixel-math mistakes — this environment has
-   neither, so this slice was written by reasoning through coordinates by
-   hand and needs a sighted pass before being trusted.*
+   `BuildingType`.*
+
+   **Resident appearance variation — second slice, also 2026-07-10 (blind,
+   same caveats).** `drawResident()` in `core/ui/SpriteProvider.kt` now
+   varies by `LifeStage` and a coarse occupation cue, not just skin/hair/
+   shirt/trouser colour: CHILD and TEEN are drawn shorter (head/body/legs
+   shifted down 2px/1px on the fixed 10×14 canvas, legs shrunk by the same
+   amount so feet still land on the same ground row), ELDER keeps adult
+   height but the head/shoulders lean 1px forward (a stoop) and gets a
+   1px walking-stick pixel beside the trailing leg. A small set of
+   occupation accessory cues (1-3px each) are drawn from `Resident
+   .occupation`'s free-text role string (set by `EconomySystem.roleFor()`):
+   a pale apron band across the chest for bakery/café/pub/grocery roles, a
+   satchel-strap accent for classroom/clerk/bookseller roles, a tool-accent
+   pixel at the shoulder for workshop/joinery/repair roles — matched via
+   substring on the lowercased occupation string since it's free text, not
+   an enum (deliberate choice: `roleFor()` is the single source of truth
+   for those strings across all `BusinessType`s, so keying off it is more
+   robust than trying to introduce a parallel enum). `SpriteProvider
+   .resident()` gained two new defaulted parameters (`lifeStage:
+   LifeStage = ADULT`, `occupation: String = ""`) so the one other call
+   site (`PixelAvatar` in `Components.kt`, used by resident list rows/
+   sheets) kept compiling without changes, though it's now also wired to
+   pass the real values through from `ResidentUi` for richer portraits.
+   `ResidentUi` gained a new `lifeStage: LifeStage` field (computed from
+   the existing `Resident.lifeStageAt()`), following the same "add a UI
+   field, thread it through the one construction site" pattern as
+   `BuildingUi.condition` before it. Cache key folds in `lifeStage.ordinal`
+   and a small `OccupationCue` bucket ordinal so varied sprites don't
+   collide in `residentCache`. *Still open, and this is the bigger gap:
+   no distinct clothing **sets** per the brief (still just flat shirt/
+   trouser colour swatches, no silhouette differences for e.g. a smock vs.
+   a suit), no mobility aids beyond the single elder stick pixel, no
+   pregnant/injured/carrying states, no body-type range beyond the three
+   height tiers, and only 3 of the ~12 occupation roles get a visual cue
+   (the rest — hardware/tailor/factory/school-teacher-proper/town-hall/
+   mayor/constable — are undifferentiated). Environmental props (fences/
+   gardens outside PARK/CEMETERY) and animation states are also still
+   completely untouched. All of this needs either a genuine asset pipeline
+   or a much richer procedural generator, and real visual iteration
+   against a device/emulator to catch pixel-math mistakes — this
+   environment has neither, so both slices were written by reasoning
+   through coordinates by hand and need a sighted pass before being
+   trusted.*
 3. **Life animation** — resident movement/behaviour states (idle, walk,
    talk, work, eat, sit, sleep, argue, hug, celebrate, mourn, ill, injured,
    carry, wait, run — brief wants 2-4 frames each), town rhythm (shops
@@ -402,8 +480,20 @@ rather than duplicating it wholesale into this doc.
 
 - Generational play: family reputation, inherited trauma/beliefs from
   memories, heirlooms; the death-of-followed flow grows into an "era summary".
-- Local politics: council seats, petitions (noise, rents), policy effects on
-  the economy; elections become campaigns influenced by reputation events.
+- [~] Local politics: council seats, petitions (noise, rents), policy effects
+  on the economy; elections become campaigns influenced by reputation events.
+  *Implemented (petitions only): `PetitionSystem`, run daily. Politically-
+  interested residents personally affected by noise or rent burden can start
+  a petition; sympathetic townsfolk sign it over following days; it resolves
+  — with a real, bounded policy effect (noise cut, rent cut) on success, a
+  reputation/stress dip for the organiser on failure — once it clears a
+  population-scaled signature threshold or its 21-day deadline lapses.
+  `PETITION_STARTED`/`PETITION_RESOLVED` events, `PUBLIC` visibility, causally
+  linked, through `ConsequenceEngine`. See
+  `docs/simulation-rules.md#local-politics-petitions`. Council seats,
+  campaign mechanics and reputation-driven elections (the rest of this
+  bullet) are still open — a substantially larger item, deliberately not
+  attempted here.*
 - Economy v2: prices that move, property market (residents actually buy/sell
   homes), business succession and rivalries.
 - Multiple towns: `World` already separates from `Town`; add a second map and
