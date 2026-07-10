@@ -55,9 +55,13 @@ class WorldGenerator(private val seed: Long, private val townName: String = "Ash
         buildRelationships(state, rng)
         seedScenarios(state)
 
+        // The starting followed resident is the player's own anchor into the town, not
+        // someone "discovered" — automatic world generation should never count as a
+        // discovery. See PeopleScreen's "Recently discovered" section, which already
+        // excludes the followed resident defensively, but the list itself should simply
+        // never contain them in the first place.
         state.followedResidentId = state.residents.values
             .first { it.firstName == "Mara" && it.surname == "Vale" }.id
-        state.discoveredResidentIds += state.followedResidentId!!
         return state
     }
 

@@ -452,7 +452,7 @@ fun TownScreen(
                 is TownSheet.InterventionSheet -> InterventionSheetContent(
                     world = w, residentId = current.residentId, viewModel = viewModel
                 )
-                TownSheet.TownOverviewSheet -> TownOverviewSheetContent(world = w)
+                TownSheet.TownOverviewSheet -> TownOverviewSheetContent(world = w, viewModel = viewModel)
             }
         }
     }

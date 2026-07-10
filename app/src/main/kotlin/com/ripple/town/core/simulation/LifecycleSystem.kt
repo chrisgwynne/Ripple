@@ -469,6 +469,11 @@ object LifecycleSystem {
             "${r.fullName} has come back to ${state.townName}, changed by years away studying.",
             sourceResidentId = r.id, buildingId = home, severity = 0.4
         )
+        // The parents already get a memory of this below (line ~480); the returning resident
+        // themselves did not — a genuine gap for what is, for them, the bigger personal
+        // milestone (leaving for education already gives *them* no memory either, since they're
+        // en route/away when GoalSystem.leaveForEducation fires — see that function's comment).
+        ctx.addMemory(r, MemoryType.ACHIEVEMENT, "Coming home to ${state.townName}, different than when I left.", 70.0, e.id)
         GoalSystem.seedGoal(ctx, r, GoalType.FIND_JOB, "Home again, and it's time to find my feet.", e.id)
         for (pid in listOfNotNull(r.motherId, r.fatherId)) {
             val parent = state.resident(pid) ?: continue

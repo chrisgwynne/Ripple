@@ -252,6 +252,11 @@ object EconomySystem {
     fun hire(ctx: TickContext, worker: com.ripple.town.core.model.Resident, biz: Business, role: String, causeIds: List<Long>) {
         val state = ctx.state
         if (state.employeesOf(biz.id).size >= biz.employeeCapacity) return
+        // No prior EventType.JOB_STARTED memory is recorded anywhere else in the codebase (job
+        // loss gets one via MemoryType.LOSS below in this file; this closes the matching gap for
+        // a resident's very first job — a genuine personal milestone the brief calls out by
+        // name). Captured before worker.employmentId is overwritten below.
+        val isFirstJob = worker.employmentId == null
         val id = state.nextEmploymentId++
         state.employments[id] = com.ripple.town.core.model.Employment(
             id = id, residentId = worker.id, businessId = biz.id, role = role,
@@ -265,6 +270,12 @@ object EconomySystem {
             "${worker.fullName} has started work at ${biz.name} as ${role.lowercase()}.",
             sourceResidentId = worker.id, businessId = biz.id, severity = 0.35, causeIds = causeIds
         )
+        if (isFirstJob) {
+            ctx.addMemory(
+                worker, MemoryType.ACHIEVEMENT,
+                "My first day at ${biz.name}, as ${role.lowercase()}.", 65.0, started.id
+            )
+        }
         worker.goals.filter { it.type == com.ripple.town.core.model.GoalType.FIND_JOB && it.status == com.ripple.town.core.model.GoalStatus.ACTIVE }
             .forEach { it.status = com.ripple.town.core.model.GoalStatus.COMPLETED; it.resolvedAt = ctx.now; it.progress = 1.0 }
         worker.needs.purpose += 15.0

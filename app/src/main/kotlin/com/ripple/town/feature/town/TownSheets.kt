@@ -519,8 +519,9 @@ fun InterventionSheetContent(world: WorldUi, residentId: Long, viewModel: TownVi
 // ------------------------------------------------------------- town overview
 
 @Composable
-fun TownOverviewSheetContent(world: WorldUi) {
+fun TownOverviewSheetContent(world: WorldUi, viewModel: TownViewModel? = null) {
     val stats = world.townStats
+    var tab by remember { mutableIntStateOf(0) }
     Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
         Text(world.townName, style = MaterialTheme.typography.headlineSmall)
         Text(
@@ -528,22 +529,76 @@ fun TownOverviewSheetContent(world: WorldUi) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
-        SectionTitle("At a glance")
-        Text("Population: ${stats.population}", style = MaterialTheme.typography.bodyMedium)
-        Text("In work: ${stats.employedCount}", style = MaterialTheme.typography.bodyMedium)
-        SectionTitle("Wellbeing")
-        StatBar("Wellbeing (low stress)", stats.averageWellbeing)
-        StatBar("Health", stats.averageHealth)
-        SectionTitle("Economy")
-        Text("Average savings: ${stats.averageWealth.toInt()} coins", style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "These are town-wide averages across everyone currently living here. " +
-                "Crime and environment aren't tracked by the simulation yet, so they " +
-                "aren't shown.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Spacer(Modifier.height(8.dp))
+        // The Chronicle tab is only offered when a viewModel is supplied (it needs
+        // chronicleEvents). Kept optional rather than a required param so any other/older
+        // caller of this composable doesn't break.
+        if (viewModel != null) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                FilterChip(selected = tab == 0, onClick = { tab = 0 }, label = { Text("At a glance") })
+                FilterChip(selected = tab == 1, onClick = { tab = 1 }, label = { Text("Chronicle") })
+            }
+            Spacer(Modifier.height(4.dp))
+        }
+        if (viewModel == null || tab == 0) {
+            SectionTitle("At a glance")
+            Text("Population: ${stats.population}", style = MaterialTheme.typography.bodyMedium)
+            Text("In work: ${stats.employedCount}", style = MaterialTheme.typography.bodyMedium)
+            SectionTitle("Wellbeing")
+            StatBar("Wellbeing (low stress)", stats.averageWellbeing)
+            StatBar("Health", stats.averageHealth)
+            SectionTitle("Economy")
+            Text("Average savings: ${stats.averageWealth.toInt()} coins", style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "These are town-wide averages across everyone currently living here. " +
+                    "Crime and environment aren't tracked by the simulation yet, so they " +
+                    "aren't shown.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else if (viewModel != null) {
+            TownChronicleTab(viewModel)
+        }
+    }
+}
+
+/**
+ * Town Chronicle: a continuously-growing, low-stakes running feed — distinct from the weekly
+ * newspaper (curated issues) and from History (day-grouped, importance >= HISTORY_THRESHOLD
+ * only). Reads [TownViewModel.chronicleEvents] (a StateFlow, already time-ordered newest-last
+ * from the DAO) and filters client-side to a floor well below the History bar so it captures
+ * the ambient, everyday stuff — then caps the visible scrollback so this doesn't grow unbounded
+ * on screen even though the backing StateFlow already caps at 120 events.
+ *
+ * Scoped down deliberately: no dedicated top-level screen/nav destination (this lives inside
+ * the existing Town Overview sheet, reached the same way that sheet always was — HUD tap), no
+ * chronicle-specific persistence beyond the event log WorldEvent/EventDao already is, no
+ * chronicle-specific filtering UI (category chips, search, etc.).
+ */
+@Composable
+private fun TownChronicleTab(viewModel: TownViewModel) {
+    val events by viewModel.chronicleEvents.collectAsState()
+    // Much lower than History's HISTORY_THRESHOLD (30.0) — this tab exists specifically to
+    // surface the minor/ambient events History and the newspaper both filter out.
+    val floor = 4.0
+    val entries = events.filter { it.importance >= floor }.sortedByDescending { it.time }.take(80)
+    if (entries.isEmpty()) {
+        EmptyNote("Nothing much has happened yet — check back soon.")
+        return
+    }
+    Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+        entries.forEach { e ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                Text(
+                    SimTime.formatClock(e.time),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.width(48.dp)
+                )
+                Text(e.description, style = MaterialTheme.typography.bodySmall)
+            }
+        }
     }
 }
 

@@ -73,7 +73,19 @@ fun PeopleScreen(
     val rivals = followed?.relationships
         ?.filter { it.kindLabel == "Rival" || it.resentment > 50 }
         ?.mapNotNull { w.resident(it.otherId) } ?: emptyList()
-    val discovered = w.discoveredIds.mapNotNull { w.resident(it) }
+    // "Recently discovered" should surface genuinely new faces, not people already shown
+    // elsewhere on this screen. Exclude: the followed resident (they're the player's own
+    // anchor, never "discovered" — see WorldGenerator, which no longer seeds them into
+    // discoveredResidentIds at all), the followed resident's immediate family (familyOf —
+    // partner/parents/children/siblings, who read as "already known" rather than newly
+    // met), and anyone already listed in Favourites on this same screen. The underlying
+    // list is already in discovery (append) order, so takeLast(N).reversed() below stays
+    // correct for "most recent first" once the exclusions are applied.
+    val familyIds = family.map { it.first.id }.toSet()
+    val favouriteIdSet = favourites.map { it.id }.toSet()
+    val discovered = w.discoveredIds
+        .filter { it != w.followedResidentId && it !in familyIds && it !in favouriteIdSet }
+        .mapNotNull { w.resident(it) }
 
     val searchResults = if (query.isBlank()) emptyList() else
         w.residents.filter { it.detailed && it.name.contains(query, ignoreCase = true) }.take(20)

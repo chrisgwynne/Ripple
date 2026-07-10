@@ -42,6 +42,18 @@ class TownViewModel @Inject constructor(
     val recentEvents: StateFlow<List<EventUi>> = repository.latestEvents(30)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /**
+     * Town Chronicle: a denser, lower-stakes running feed, distinct from both the weekly
+     * newspaper (curated issues) and the History timeline (importance >= HISTORY_THRESHOLD
+     * only). Pulls from the same `latestEvents` stream History/recentEvents already use — no
+     * new StateFlow plumbing beyond one more `stateIn` — but with a much bigger backing window
+     * (120 events) and a low importance floor applied client-side in [TownOverviewSheetContent],
+     * so it captures the truly minor/ambient stuff (a chance meeting, a repaired fence) that
+     * both the paper and History intentionally leave out.
+     */
+    val chronicleEvents: StateFlow<List<EventUi>> = repository.latestEvents(120)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     private val _sheet = MutableStateFlow<TownSheet?>(null)
     val sheet: StateFlow<TownSheet?> = _sheet.asStateFlow()
 

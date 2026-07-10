@@ -4,6 +4,131 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-10 — Event system audit + "Recently discovered" bug, newspaper weighting, Town Chronicle, memory gaps
+
+A brief this round asked for a ground-up "simulation event system" rebuild —
+a central `SimulationEventBus`, new `SimulationEvent` sealed types
+(`PersonMet`, `BusinessOpened`, etc.), Kotlin Flow-based reactive UI, a "Town
+Chronicle," reweighted newspaper generation, event-driven character
+memories, and event-bus-driven notifications. **Investigated first, built
+second — and the investigation found the architecture already exists.**
+`core/model/WorldEvent.kt` has a 60+-value `EventType` enum; every
+simulation system already calls `ctx.emit(...)` (`TickContext.kt`) to
+publish structured events with participants/severity/description/causeIds;
+events persist via `EventDao`; `NewspaperGenerator` already builds weekly
+issues from them; `HistoryScreen` already shows a full day-grouped timeline;
+`Memory`/`ctx.addMemory` already builds character memories tied to causing
+events (`Resident.memories`, capped at 40 — see `TickContext.addMemory`'s
+importance-weighted eviction); `FollowedResidentNotifier` already generates
+notifications from the event stream; and `WorldRepository`/`TownViewModel`/
+`MainViewModel` already expose everything via Kotlin `StateFlow` (confirmed
+via grep — no polling found anywhere in the UI layer). Renaming
+`WorldEvent`→`SimulationEvent` or building a parallel event-bus would have
+been pure churn with real regression risk for zero behavioural gain, so it
+was explicitly declined. Instead: two confirmed real bugs were fixed, and
+the few genuinely-missing pieces were added, scoped down honestly.
+
+- **Bug 1 — "Recently discovered" on the People screen, confirmed real.**
+  `WorldGenerator.generate()` was seeding
+  `state.discoveredResidentIds += state.followedResidentId!!` at world
+  creation — meaning the player's own starting character (Mara Vale) always
+  showed up in their own "recently discovered" list, because automatic town
+  generation was being counted as a discovery. Removed that line; the other
+  three write sites to `discoveredResidentIds` (`WorldRepository
+  .setPrimaryFollow`/`.toggleFavourite`, `LifecycleSystem.promoteIfNeeded`)
+  were individually read in context and confirmed legitimate (following/
+  favouriting someone not already followed, and background→detailed
+  resident promotion) — not instances of the same bug, left untouched.
+  `PeopleScreen.kt`'s "Recently discovered" section was also filtering
+  nothing: `discovered.takeLast(10).reversed()` with zero exclusions. Now
+  excludes the followed resident (defensively, even after the generator
+  fix), the followed resident's immediate family (via the existing
+  `familyOf()` helper), and anyone already shown in Favourites on the same
+  screen render, to avoid duplicate rows across sections. The section was
+  already correctly hidden when empty (`if (discovered.isNotEmpty() && ...)`
+  already wrapped both the header and the list) — no change needed there,
+  verified rather than assumed.
+- **Bug/gap 2 — newspaper story weighting.** `NewspaperGenerator.generate()`
+  picked secondary stories from `public.filter { importance > 20 }
+  .sortedByDescending { importance }.take(4)` — i.e. almost exclusively
+  major news, when most `ctx.emit()` calls across the codebase are low-
+  severity (`MEETING`, `COMMUNITY_EVENT`, `BUILDING_REPAIRED`,
+  `RUMOUR_SPREAD`, `SKILL_MILESTONE`, `PRICES_SHIFTED`, etc. — confirmed via
+  `ImportanceScorer.baseImportance`, most fall through to the `else -> 8.0`
+  base). Replaced with `bucketByImportance`/`sampleMixed`: events are
+  bucketed low (<20) / medium (20..HISTORY_THRESHOLD) / high
+  (>HISTORY_THRESHOLD) and sampled ~70/20/10 for the week's secondary
+  stories, with backfill from other tiers if one comes up short so a quiet
+  week still reads full. Sampling uses a new deterministic Fisher-Yates
+  `shuffle()` built on the engine's own `SimRandom` (never
+  `kotlin.random.Random`/`.shuffled()`, matching the file's existing
+  determinism discipline). Added headline/category coverage for the
+  previously-uncovered low-importance types that used to fall through to
+  the bare `e.type.label` (MEETING, COMMUNITY_EVENT, FRIENDSHIP_FORMED,
+  SKILL_MILESTONE, PRICES_SHIFTED, BUILDING_REPAIRED, APOLOGY, INJURY,
+  GOAL_FORMED), and replaced the fixed `NOTICES` flavour-text list with a
+  `noticeCopy()` that pulls real structured data — the actual Park/Café/
+  Grocer/Pub building and business names currently in the town — for
+  genuinely mundane items (a fox near the park, a café's new menu item,
+  market-day footfall), falling back to the old fixed list only if a
+  referenced building type doesn't exist (shouldn't happen on the hand-
+  authored map, but kept safe).
+- **New: Town Chronicle**, scoped down from a full new screen/nav
+  destination to a second tab inside the existing Town Overview sheet
+  (`TownOverviewSheetContent` in `feature/town/TownSheets.kt`, reached the
+  same way it always was — HUD tap → `TownViewModel.openTownOverview()`).
+  New `TownViewModel.chronicleEvents: StateFlow<List<EventUi>>` reuses
+  `WorldRepository.latestEvents(120)` — the same DAO query `recentEvents`
+  already uses, just a bigger window, zero new Flow plumbing. The tab
+  filters client-side to importance >= 4.0 (well below History's
+  `HISTORY_THRESHOLD` of 30.0) and caps the visible list to the 80 most
+  recent qualifying entries, newest first, each rendered as a compact
+  "HH:MM  description" row via `SimTime.formatClock`. Named "Chronicle" in
+  the UI but kept clearly distinct in code/docs from the pre-existing
+  per-resident `buildChronicle()`/"📜 Share saga" life-story feature on the
+  resident sheet — same word, different feature, flagged here so it isn't
+  confused later. **Explicitly deferred:** no dedicated top-level screen/
+  nav destination, no chronicle-specific persistence beyond the WorldEvent/
+  EventDao log that already exists, no chronicle-specific filtering UI
+  (category chips, search, date range).
+- **Memory-generation gaps closed — 2, both genuine.** Grepped every
+  `ctx.emit(EventType....)` call site against nearby `ctx.addMemory(...)`
+  calls. Most personal-milestone emissions already have one (`HOME_PURCHASED`,
+  `BUSINESS_SUCCESSION`, `ELECTION_WON`, `AFFAIR_DISCOVERED`,
+  `BUSINESS_OPENED` via `GoalSystem.startWorkshop`, `JOB_LOST` — all
+  confirmed, not just assumed, by reading the surrounding code). Two were
+  genuinely missing, matching the brief's own examples: (1) **first job** —
+  `EconomySystem.hire()` fires `JOB_STARTED` for every hire (first job and
+  every subsequent job change alike) but never recorded a memory; now
+  checks `worker.employmentId == null` *before* the hire overwrites it, and
+  if true (first job), adds a `MemoryType.ACHIEVEMENT` memory. (2)
+  **returning from education, changed** — `LifecycleSystem.studentReturns()`
+  already gave the *parents* a memory of their child coming home
+  (`"${r.firstName} came home, grown up."`) but never gave the returning
+  resident themselves one, despite them gaining real skill points from the
+  years away; added `MemoryType.ACHIEVEMENT` for `r`. Did not add memories
+  for every event type that lacks one — `Resident.memories` is capped at 40
+  with importance-weighted eviction (see `TickContext.addMemory`), and most
+  of the ~55 `EventType` values are neither personal nor milestone-shaped
+  (weather, prices, town-wide petitions the resident wasn't part of, etc.),
+  so blanket coverage would just accelerate eviction of the memories that
+  matter. No `PROMOTION`-style event exists in `EventType` — the brief's
+  "got promoted" example doesn't map onto anything currently emitted by any
+  system (hiring is a fresh `Employment`, not a promotion within one), and a
+  new event type wasn't added speculatively — flagging this as a possible
+  future addition (a `JOB_PROMOTED` type + emission site in whichever system
+  would own raises/title changes) rather than building it unprompted this
+  pass.
+- Files touched: `core/simulation/WorldGenerator.kt`,
+  `feature/people/PeopleScreen.kt`, `core/simulation/NewspaperGenerator.kt`,
+  `feature/town/TownSheets.kt`, `feature/town/TownScreen.kt`,
+  `feature/town/TownViewModel.kt`, `core/simulation/EconomySystem.kt`,
+  `core/simulation/LifecycleSystem.kt`. No `EventType` enum changes, no
+  `WorldEvent`/`ctx.emit`/`EventDao` architecture changes, no new Flow/
+  StateFlow plumbing beyond the one `chronicleEvents` StateFlow (which
+  reuses an existing repository method). No `./gradlew`/`git` commands run,
+  per this session's constraints.
+
 ### 2026-07-10 — NarrativeTextProvider/DialogueProvider (last open Phase 4 item)
 
 The last remaining open Phase 4 backlog item: "an LLM narrative layer that
