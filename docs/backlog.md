@@ -4,6 +4,61 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-10 — Phase 3: Economy v2 — property market (households buying homes)
+
+Sixth Phase 3 backlog item, closing out Economy v2's fourth and last piece —
+the property market — after rivalries, price drift and business succession.
+New `PropertyMarketSystem.updateDaily`, run daily right after
+`BusinessSuccessionSystem`, following the same bounded-`object` pattern as
+every other daily system. Another agent was working UI/Compose files in the
+same checkout, so this was code-only — no `./gradlew` or `git` calls made.
+
+Deliberately a scoped-down MVP, not a full real-estate sim: a household buys
+the home it already lives in (`Household.homeBuildingId`) once it's unowned
+(`Building.ownerId == null` — a field previously never set for homes at all,
+only ever used for business buildings via `GoalSystem.openBusiness` /
+`WorldGenerator` seeding) and the household's pooled in-town adult `wealth`
+clears the asking price (`Building.value`) plus a
+`MIN_RESERVE_AFTER_PURCHASE` (200) cushion, so a purchase never strips a
+family to nothing. Cash only, straight from resident `wealth` — no
+mortgages, loans, or instalments. The price is drawn from the household's
+wealthiest adult first, then other in-town adult members in descending
+wealth order, until covered, so it's a genuine household purchase rather
+than one person's balance going negative. Deliberately reuses the existing
+"who ends up with a home" machinery (`GoalSystem.MOVE_HOME`'s free
+relocation, `LifecycleSystem.promoteIfNeeded`/`studentReturns`,
+`ConsequenceEngine`'s marriage household-merge) rather than inventing a
+parallel vacancy-scanning mechanism of its own — this system only ever adds
+the "who bought it, and when" fact on top of homes households already ended
+up living in through those paths. No negotiation/haggling (asking price is
+exactly `Building.value`), no competing bidders (first eligible household
+each day in stable id order simply buys), no rental-to-ownership transition
+modelling beyond what already existed (an unowned home behaves identically
+day-to-day; there's no landlord/tenant concept), and no selling/resale
+(moving out via `MOVE_HOME` doesn't clear `ownerId`). New
+`EventType.HOME_PURCHASED` (`PUBLIC`) — checked `ImportanceScorer`'s and
+`NewspaperGenerator`'s `else ->` fallbacks first (8.0 base importance,
+`StoryCategory.TOWN_NEWS`, same pattern `PRICES_SHIFTED`/
+`BUSINESS_SUCCESSION` already relied on), so no further wiring was needed.
+Bounded to `MAX_HOUSEHOLDS_PER_DAY` (40) households/day; the mechanic is
+fully deterministic (pooled-wealth comparison against a fixed price), no
+`ctx.rng` roll needed for whether a sale happens, matching
+`BusinessRivalrySystem`'s precedent for a bounded daily pass that doesn't
+strictly need a dice roll to still be "the bounded daily pattern."
+
+Docs: new "Property market" section in `docs/simulation-rules.md` right
+after "Business succession" (tick-pipeline summary line also updated to
+list all three previously-undocumented recent daily systems, not just this
+one); `docs/backlog.md`'s Economy v2 bullet marked `[x]` — this closes the
+entire Economy v2 item (rivalries, prices-that-move, succession, property
+market all now implemented). Non-family succession and multi-heir disputes
+remain open but were never part of Economy v2's four originally-scoped
+pieces.
+
+Not run this session (per the parallel-work constraint): `./gradlew`
+build/test and any `git` commands. Code-only, ready for the orchestrating
+session to build/test/commit.
+
 ### 2026-07-10 — Phase 3: Economy v2 — business succession (voluntary retirement handoff)
 
 Fifth Phase 3 backlog item, closing out Economy v2's third and last
@@ -565,8 +620,89 @@ Development order from the brief (status noted inline):
    talk, work, eat, sit, sleep, argue, hug, celebrate, mourn, ill, injured,
    carry, wait, run — brief wants 2-4 frames each), town rhythm (shops
    open/close, school run, deliveries, traffic, weather, day/night).
-   *Partial groundwork exists (`TownRenderer.poseFor`, weather washes,
-   day/night tint) but nowhere near the full state list.*
+
+   **Scoped-down slice done 2026-07-10 (blind, no emulator — same risk
+   note as Phase 2 above; this pass is riskier than the session's other
+   blind changes since it's about motion/timing, not just static layout).**
+   Deliberately did **not** attempt true multi-frame walk-cycle animation
+   (real sprite-asset/frame-timing infrastructure — that's the separate,
+   larger Phase 2 Product backlog item, "Sprite atlas support... walk
+   cycles with 4 frames"). Instead extended the existing pose-derivation
+   and weather/tint machinery with small, cheap, deterministic visual
+   cues read from data already on `WorldUi`/`ResidentUi`/`BuildingUi` —
+   nothing here reads or invents new simulation state, and nothing uses
+   per-frame randomness (the animation clock + resident/building id are
+   the only inputs, so a frame is reproducible and a crowd doesn't
+   animate in lockstep).
+   - **`TownRenderer.poseFor` gained a `ResidentUi` overload** (the old
+     `poseFor(Activity)` overload is kept, still used unchanged by
+     `PixelAvatar` call sites that only had an `Activity` handy) that
+     additionally reads `ResidentUi.conditionLabels` — already computed
+     by `Resident.activeConditions()` and exposed for the health-notes
+     text in `TownSheets.kt` — to split **injured** out from generic
+     **ill**: a resident whose activity is `RESTING_ILL`/`AT_CLINIC` and
+     who has an active `HealthConditionType.INJURY` condition now maps to
+     a new `Pose.INJURED` instead of `Pose.ILL`. `SpriteProvider
+     .drawResident()` draws `INJURED` with an uneven two-leg stance (one
+     leg 1px shorter, reusing the same asymmetric-leg technique the walk
+     cycle's frame-1 already uses) plus a small bandage-patch status mark,
+     instead of the sickly-green status dot `ILL` gets. The two other
+     `poseFor` call sites (`PeopleScreen.kt`'s followed-resident card,
+     `TownSheets.kt`'s resident-sheet header) were switched from
+     `poseFor(x.activity)` to `poseFor(x)` so portraits show the same
+     injured/ill split as the town canvas, not just a generic sick icon.
+   - **Idle "breathing" cue for `Pose.STAND`.** Previously a resident with
+     no active pose-changing activity (`Activity.IDLE` and a few others)
+     rendered as a single static frame — dead-looking in a crowd next to
+     animated walkers. `TownRenderer` now derives a slow animation frame
+     for `STAND` (`(clock + residentId) / 6`, six times slower than the
+     walk-cycle's per-frame toggle) and `SpriteProvider.drawResident()`
+     nudges the arms 1px down on the second frame — a subtle sway/settle,
+     not a walk cycle. Reuses the exact same `frame % 2` cache-key/redraw
+     path `WALK` already had; no new caching logic needed.
+   - **Town rhythm — shops visibly open/close.** `BuildingUi.businessOpen`
+     (already computed per-building from `Building.business?.open`, used
+     today only in the building bottom sheet's text) was previously never
+     read by the canvas itself. `TownRenderer` now draws a flat dusk-toned
+     wash over any building where `businessOpen == false` (null for homes
+     and non-business buildings, so this only ever touches shops/pub/
+     clinic/etc. that actually trade) — a cheap per-building overlay
+     rect, drawn once per building per frame from data already iterated
+     for the sprite draw call, no extra passes over the resident/building
+     lists.
+   - Day/night tint and the four weather washes (rain/storm/fog/snow)
+     were already implemented before this session and are unchanged.
+
+   **Explicitly out of scope for this slice, from the brief's ~15-state
+   list:** *idle* (partially — the STAND sway above) and *walk* (already
+   existed) are the only two states that now have any per-frame motion at
+   all; **talk, work, eat, sit, sleep, argue, celebrate, mourn, ill**
+   already had a distinct *static* pose from before this session and were
+   not changed; **injured** is new this session but is a static pose
+   variant like the others, not an animation. **hug, carry, wait, run**
+   were not implemented at all — `hug` has no distinct simulation signal
+   from general `SOCIALISING`/`VISITING` to key off (would need either a
+   new `Activity` value or inventing state, both against this task's
+   constraint of only reading what's already exposed); `carry` likewise
+   has nothing on `ResidentUi` to indicate a resident is carrying
+   anything; `wait` has no data distinguishing it from `IDLE`; `run` would
+   need a speed/urgency signal that doesn't exist on `Activity` or
+   `ResidentUi` today (`TRAVELLING` always maps to the same `WALK` pose
+   regardless of how urgent the trip is). None of the four are safe to
+   fake with a per-frame-random cue per this task's determinism
+   constraint, so they're left untouched rather than guessed at. **Town
+   rhythm beyond shop open/close** — school run, deliveries, and traffic
+   all imply resident/vehicle movement patterns tied to schedule logic
+   that isn't surfaced on `WorldUi` today (there's no "this resident is
+   currently commuting to school" signal distinct from generic
+   `TRAVELLING`, and no delivery/vehicle concept in the model at all) —
+   not attempted.
+   *Not visually verified on a device/emulator — in particular the STAND
+   sway's timing/amount and the INJURED leg-asymmetry pixel placement are
+   exactly the kind of "how something looks/moves" details this
+   environment can't catch mistakes in by reasoning alone; flagged as
+   higher-risk than the static-layout changes elsewhere in this session
+   and worth a sighted pass before being trusted.*
 4. **Mobile information architecture** — resident bottom sheet (compact +
    expanded tabs: Life/Relationships/Memories/Skills/History, "why are they
    doing this?"), building bottom sheet, town overview overlay, event
@@ -817,7 +953,7 @@ rather than duplicating it wholesale into this doc.
   campaign mechanics and reputation-driven elections (the rest of this
   bullet) are still open — a substantially larger item, deliberately not
   attempted here.*
-- [~] Economy v2: prices that move, property market (residents actually
+- [x] Economy v2: prices that move, property market (residents actually
   buy/sell homes), business succession and rivalries.
   *Implemented (price competition + rivalries + price-drift slices):
   `BusinessRivalrySystem`, run daily. Open, same-`BusinessType` business pairs
@@ -852,10 +988,20 @@ rather than duplicating it wholesale into this doc.
   `LifecycleSystem.die`, which remains the fallback for an owner who dies
   before retiring. `Business.ownerId` transfers, a `BUSINESS_SUCCESSION`
   event fires, both parties get an `ACHIEVEMENT` memory. See
-  `docs/simulation-rules.md#business-succession`. Still open: the
-  **property market** (residents actually buying/selling homes) — the last
-  genuinely separate item under this bullet — plus non-family succession and
-  multi-heir disputes within succession itself.*
+  `docs/simulation-rules.md#business-succession`. **Property market now also
+  implemented**: new `PropertyMarketSystem`, run daily straight after
+  `BusinessSuccessionSystem` — a household buys the home it already lives in
+  (`Building.ownerId`, a field previously never set for homes at all) once
+  its pooled adult wealth clears the asking price (`Building.value`) plus a
+  `MIN_RESERVE_AFTER_PURCHASE` (200) cushion; cash only, straight from
+  resident `wealth`, no mortgages. `HOME_PURCHASED` event fires, buyer gets
+  an `ACHIEVEMENT` memory. Deliberately excludes negotiation/haggling,
+  competing bidders, mortgages/loans of any kind, and any rental-to-ownership
+  transition beyond the existing free `MOVE_HOME` path. See
+  `docs/simulation-rules.md#property-market`. This closes the Economy v2
+  backlog item in full — non-family succession and multi-heir disputes
+  within succession itself remain open but are a separate, smaller item, not
+  part of Economy v2's four originally-scoped pieces.*
 - Multiple towns: `World` already separates from `Town`; add a second map and
   slow migration between towns.
 - Counterfactual viewer ("what nearly happened"): replay a checkpoint with

@@ -41,7 +41,10 @@ implemented in `core/simulation`.
    `BuildingLifecycleSystem.updateDaily`, `SeasonalEventSystem.updateDaily`
    (harvest fair / winter market / river floods), `PetitionSystem.updateDaily`
    (local politics: noise / rent petitions), `BusinessRivalrySystem.updateDaily`
-   (same-type price/demand competition, owner rivalries).
+   (same-type price/demand competition, owner rivalries),
+   `PriceDriftSystem.updateDaily` (town-wide price inflation/deflation),
+   `BusinessSuccessionSystem.updateDaily` (voluntary owner-to-child handoff),
+   `PropertyMarketSystem.updateDaily` (households buying the home they live in).
 9. Nudge regeneration.
 10. Newspaper when due (weekly, 08:00).
 11. Daily statistics; checkpoint flag every 36 ticks (6 in-game hours).
@@ -409,6 +412,68 @@ not attempted:
   originally-scoped pieces (rivalries, prices-that-move, succession); the
   property market (residents buying/selling homes) is a related but
   separate, still-open item.
+
+## Property market
+
+Economy v2's last open slice: residents actually **buying** the home they
+live in — as distinct from the pre-existing, unchanged free-relocation path
+(`GoalSystem`'s `MOVE_HOME` goal, which walks a household into any vacant
+home with no money changing hands and no ownership recorded at all).
+`PropertyMarketSystem.updateDaily` runs daily, straight after
+`BusinessSuccessionSystem`, and closes out the Economy v2 backlog item's
+fourth and last originally-scoped piece. Deliberately a scoped-down MVP, not
+a full real-estate sim:
+
+- **What counts as "for sale."** `Building.ownerId` was previously never set
+  for homes at all (only business buildings get an owner, via
+  `GoalSystem.openBusiness` / seeded in `WorldGenerator`) — a genuinely
+  unused field this system repurposes cleanly. A home with `ownerId == null`
+  reads as "not yet owned"; buying it just records who owns it going
+  forward. There is no separate landlord/tenant model, no rental agreements,
+  and no eviction — a household can carry on living in an unowned home
+  indefinitely, exactly as before this system existed.
+- **Who can buy.** Every day, up to `MAX_HOUSEHOLDS_PER_DAY` (40) households
+  with a home and at least one living, in-town adult member are considered,
+  in stable id order. A household buys its *own* current home (the one it
+  already lives in via `Household.homeBuildingId`) if it's unowned and the
+  household's pooled adult wealth clears the asking price (`Building.value`)
+  plus a `MIN_RESERVE_AFTER_PURCHASE` (200) cushion, so a purchase never
+  strips a family down to nothing. This deliberately covers every route a
+  household can already end up with a home — an existing household buying
+  the place it's rented for years, a newly-formed household (post-marriage
+  merge, a returning student rehoused, someone coming of age and promoted
+  into their own household) eventually saving enough to buy in — without
+  inventing a second, parallel "who gets a home" mechanism alongside
+  `MOVE_HOME`/`promoteIfNeeded`/`studentReturns`.
+- **Payment.** Cash only, straight from resident `wealth` — no mortgages, no
+  loans, no instalment plans. The price is drawn from the nominal buyer (the
+  household's wealthiest adult) first, then any other in-town adult
+  household members in descending wealth order, until the full price is
+  covered — a genuine household purchase, not one person's balance going
+  arbitrarily negative while everyone else's savings sit untouched.
+- **No negotiation, no competing bidders.** The asking price is exactly
+  `Building.value` — no haggling, discounts, or bidding wars — and the first
+  eligible household found each day simply buys; there's no auction or
+  multi-household contest over the same property.
+- **Newsworthiness.** A new `HOME_PURCHASED` event (`PUBLIC`) fires on every
+  purchase and an `ACHIEVEMENT` memory is recorded for the buyer — checked
+  `ImportanceScorer.baseImportance` and `NewspaperGenerator.categoryFor`/
+  `headlineFor` first, same as `PRICES_SHIFTED`/`BUSINESS_SUCCESSION` before
+  it: both have safe `else ->` fallbacks (8.0 base importance;
+  `StoryCategory.TOWN_NEWS`; the type's own label as headline), so no
+  further scoring/newspaper wiring was needed for the new type.
+- **Still open, deliberately:** no negotiation/haggling and no competing
+  bidders (as above); no mortgages or loans of any kind, cash purchase
+  against existing `wealth` only; no rental-to-ownership *transition*
+  modelling beyond what already exists — an unowned home doesn't behave any
+  differently day-to-day than an owned one (no rent distinction, no
+  landlord), this system only ever adds the "who bought it" fact on top; no
+  selling (a household moving out via `MOVE_HOME` doesn't clear `ownerId`,
+  so a bought home stays "owned" by its buyer even if they later move
+  elsewhere — modelling resale is separate, unattempted work); no price
+  appreciation tied to ownership history. Combined with rivalries, price
+  drift and succession above, this closes out the Economy v2 backlog item in
+  full.
 
 ## Crime & suspicion
 

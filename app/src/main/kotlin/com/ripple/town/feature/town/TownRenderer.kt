@@ -175,6 +175,20 @@ fun TownRenderer(
                     dstSize = IntSize(bmp.width, bmp.height),
                     paint = paint
                 )
+                // Town rhythm, part 1: a closed shop reads as visibly "shut" — a flat
+                // dusk-toned wash over its own footprint, using data already on
+                // BuildingUi (businessOpen is null for non-businesses/homes, so this
+                // only ever touches shops/pubs/clinics etc. that actually trade).
+                if (b.businessOpen == false) {
+                    val closedWash = Paint().apply { color = Color(0x552B3350) }
+                    canvas.drawRect(
+                        Rect(
+                            (b.x * TILE_PX).toFloat(), topY.toFloat(),
+                            (b.x * TILE_PX + bmp.width).toFloat(), (topY + bmp.height).toFloat()
+                        ),
+                        closedWash
+                    )
+                }
             }
 
             // Residents (eased towards their simulated positions).
@@ -187,9 +201,16 @@ fun TownRenderer(
                     prev.y + (target.y - prev.y) * 0.18f
                 )
                 eased[r.id] = next
-                val pose = poseFor(r.activity)
-                val walkFrame = if (pose == Pose.WALK) (frame + r.id).toInt() else 0
-                val bmp = sprites.resident(r.sprite, pose, walkFrame, r.lifeStage, r.occupation)
+                val pose = poseFor(r)
+                // Idle "breathing" cue: a slow 2-frame sway on anyone standing still,
+                // driven only by the existing animation clock + resident id (no new
+                // per-frame randomness) so a crowd doesn't animate in lockstep.
+                val animFrame = when (pose) {
+                    Pose.WALK -> (frame + r.id).toInt()
+                    Pose.STAND -> ((frame + r.id) / 6).toInt() // much slower than walk
+                    else -> 0
+                }
+                val bmp = sprites.resident(r.sprite, pose, animFrame, r.lifeStage, r.occupation)
                 val drawX = next.x * TILE_PX + (TILE_PX - SPRITE_W) / 2f
                 val drawY = next.y * TILE_PX - SPRITE_H + 3f
                 if (r.id == followId) {
@@ -249,6 +270,25 @@ fun TownRenderer(
             else -> {}
         }
     }
+}
+
+/**
+ * Derives a resident's pose purely from already-known UI state (their
+ * [Activity], plus [ResidentUi.conditionLabels] for the injured/ill split).
+ * Deliberately data-driven and cheap — no per-frame randomness, safe to call
+ * every frame for every visible resident. See `poseFor(Activity)` overload
+ * below for the base activity→pose mapping this extends.
+ */
+fun poseFor(resident: ResidentUi): Pose {
+    // Injured is a distinct, already-computed condition (HealthConditionType.INJURY,
+    // surfaced via activeConditions()/conditionLabels) from generic illness. Both
+    // still route through the same resting/at-clinic activities, so this is a
+    // pose-level split (Pose.INJURED vs Pose.ILL), not a new Activity.
+    if (resident.activity == Activity.RESTING_ILL || resident.activity == Activity.AT_CLINIC) {
+        val injured = resident.conditionLabels.any { "injury" in it.lowercase() }
+        return if (injured) Pose.INJURED else Pose.ILL
+    }
+    return poseFor(resident.activity)
 }
 
 fun poseFor(activity: Activity): Pose = when (activity) {

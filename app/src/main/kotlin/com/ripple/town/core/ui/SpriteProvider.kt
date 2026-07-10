@@ -25,7 +25,7 @@ interface SpriteProvider {
     fun building(type: BuildingType, level: Int, abandoned: Boolean, seed: Long, condition: Double = 100.0): ImageBitmap
 }
 
-enum class Pose { STAND, WALK, SIT, SLEEP, WORK, TALK, ILL, ARGUE, CELEBRATE, MOURN }
+enum class Pose { STAND, WALK, SIT, SLEEP, WORK, TALK, ILL, ARGUE, CELEBRATE, MOURN, INJURED }
 
 /** Pixel dimensions of a resident sprite (before scaling). */
 const val SPRITE_W = 10
@@ -142,6 +142,14 @@ class ProceduralSpriteProvider : SpriteProvider {
             Pose.CELEBRATE -> { px(2, bodyY - 2, skin); px(7, bodyY - 2, skin); px(2, bodyY - 1, shirt); px(7, bodyY - 1, shirt) }
             Pose.WORK -> { rect(2, bodyY + 1, 1, 2, skin); rect(7, bodyY + 2, 1, 2, skin) }
             Pose.ARGUE -> { rect(2, bodyY - 1, 1, 2, skin); rect(7, bodyY + 1, 1, 2, skin) }
+            // Idle "breathing" sway: arms settle 1px lower on the second animation
+            // frame so a resident standing still doesn't read as a frozen statue,
+            // without needing real multi-frame walk-cycle infrastructure.
+            Pose.STAND -> {
+                val sway = if (frame == 1) 1 else 0
+                rect(2, bodyY + sway, 1, 3, shirt); rect(7, bodyY + sway, 1, 3, shirt)
+                px(2, bodyY + sway + 3, skin); px(7, bodyY + sway + 3, skin)
+            }
             else -> { rect(2, bodyY, 1, 3, shirt); rect(7, bodyY, 1, 3, shirt); px(2, bodyY + 3, skin); px(7, bodyY + 3, skin) }
         }
         // Occupation accessory: a small, low-cost accent that reads at a glance.
@@ -156,6 +164,10 @@ class ProceduralSpriteProvider : SpriteProvider {
         if (pose == Pose.SIT) {
             rect(3, legY, 4, (2 - legShrink).coerceAtLeast(1), trousers)
             rect(3, legY + 2 - legShrink, 1, 1, trousers); rect(6, legY + 2 - legShrink, 1, 1, trousers)
+        } else if (pose == Pose.INJURED) {
+            // Uneven stance: one leg shorter, reads as favouring an injury while resting.
+            rect(3, legY, 1, legH, trousers); rect(6, legY, 1, (legH - 1).coerceAtLeast(1), trousers)
+            px(3, legY + legH - 1, ink); px(6, legY + legH - 2, ink)
         } else if (pose == Pose.WALK && frame == 1) {
             rect(3, legY, 1, legH, trousers); rect(6, legY, 1, (legH - 1).coerceAtLeast(1), trousers)
             px(3, legY + legH - 1, ink); px(6, legY + legH - 2, ink)
@@ -170,6 +182,7 @@ class ProceduralSpriteProvider : SpriteProvider {
         // Status marks
         when (pose) {
             Pose.ILL -> { px(8, 1, Color(0xFF9BC08A)); px(9, 0, Color(0xFF9BC08A)) }
+            Pose.INJURED -> { px(6, bodyY + 1, Color(0xFFE8E0D0)); px(6, bodyY + 2, Color(0xFFB2593F)) } // small bandage patch on the arm
             Pose.TALK -> { px(8, 1, Color.White); px(9, 0, Color.White) }
             Pose.ARGUE -> { px(8, 0, Color(0xFFB2593F)); px(9, 1, Color(0xFFB2593F)) }
             Pose.MOURN -> { px(4, 4, Color(0xFF8FB6C9)) }

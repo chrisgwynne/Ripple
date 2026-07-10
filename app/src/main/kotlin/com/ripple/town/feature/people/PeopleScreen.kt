@@ -114,7 +114,7 @@ fun PeopleScreen(
                 ) {
                     Column(Modifier.padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            PixelAvatar(followed.sprite, sprites, size = 56.dp, pose = poseFor(followed.activity), lifeStage = followed.lifeStage, occupation = followed.occupation)
+                            PixelAvatar(followed.sprite, sprites, size = 56.dp, pose = poseFor(followed), lifeStage = followed.lifeStage, occupation = followed.occupation)
                             Spacer(Modifier.width(12.dp))
                             Column {
                                 Text(followed.name, style = MaterialTheme.typography.titleLarge)

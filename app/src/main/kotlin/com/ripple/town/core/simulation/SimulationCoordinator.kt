@@ -81,7 +81,8 @@ class SimulationCoordinator(
         // politics (petitions over noise / rent), business rivalries (same-type price/
         // reputation competition, owner resentment), town-wide price drift (independent,
         // slow inflation/deflation on top of rivalry-driven demand shifts), business
-        // succession (elderly owners voluntarily handing down to a working adult child).
+        // succession (elderly owners voluntarily handing down to a working adult child),
+        // property market (households buying the home they already live in, cash only).
         if (newDay) {
             HealthSystem.updateDaily(ctx)
             LifecycleSystem.updateDaily(ctx)
@@ -92,6 +93,7 @@ class SimulationCoordinator(
             BusinessRivalrySystem.updateDaily(ctx)
             PriceDriftSystem.updateDaily(ctx)
             BusinessSuccessionSystem.updateDaily(ctx)
+            PropertyMarketSystem.updateDaily(ctx)
         }
         // 13. Intervention influence regenerates through observation.
         InterventionEngine.regenerate(state, SimTime.MINUTES_PER_TICK)
