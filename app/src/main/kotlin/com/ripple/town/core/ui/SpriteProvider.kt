@@ -331,6 +331,89 @@ class ProceduralSpriteProvider : SpriteProvider {
                     rect(w / 2 + doorW / 2 + 1, h - 3, 3, 3, Color(0xFF7C9B62))
                     px(w / 2 + doorW / 2 + 2, h - 2, Color(0xFFB2593F))
                 }
+                BuildingType.HOUSE -> {
+                    // Chimney-smoke wisp: a couple of drifting soft-grey puffs above the roofline.
+                    val cx = w - 5
+                    px(cx, roofH - 3, Color(0xFFD9D3C6).copy(alpha = 0.7f))
+                    px(cx + 1, roofH - 5, Color(0xFFD9D3C6).copy(alpha = 0.5f))
+                }
+                BuildingType.COTTAGE -> {
+                    // Flower box under the front window, cottage-garden cue.
+                    val fbx = w / 2 - doorW / 2 - 5
+                    rect(fbx, h - 5, 3, 1, Color(0xFF74563F))
+                    px(fbx, h - 6, Color(0xFFC98BA4)); px(fbx + 1, h - 6, Color(0xFFD9A648))
+                    px(fbx + 2, h - 6, Color(0xFFC98BA4))
+                }
+                BuildingType.TERRACE -> {
+                    // Porch step: a low two-tone step at the door threshold.
+                    rect(w / 2 - doorW / 2 - 1, h - 1, doorW + 2, 1, Color(0xFFB9B2A2))
+                }
+                BuildingType.TOWN_HALL -> {
+                    // Grander doorway pediment above the entrance.
+                    rect(w / 2 - doorW / 2 - 1, h - 8, doorW + 2, 2, trim.darken(0.9f))
+                    // Small clock-face dot centred on the facade above the door.
+                    val ccx = w / 2
+                    val ccy = roofH + 3
+                    rect(ccx - 1, ccy - 1, 3, 3, Color(0xFFF6E7B2))
+                    px(ccx, ccy, Color(0xFF2E241B))
+                    // Flagpole with pennant, echoing SCHOOL's but taller and centred.
+                    rect(ccx, 0, 1, roofH, Color(0xFF8A7B63))
+                    rect(ccx + 1, 0, 3, 2, Color(0xFF7D8FA3))
+                }
+                BuildingType.CAFE -> {
+                    // Cup-shaped sign motif on the band, distinct register from BAKERY's stripes.
+                    val ccx = w / 2
+                    val ccy = roofH + 1
+                    rect(ccx - 1, ccy, 3, 2, Color(0xFFF6E7B2))
+                    px(ccx + 2, ccy, Color(0xFFF6E7B2))
+                    // Small outdoor table+chair, smaller than PUB's.
+                    px(w - 4, h - 2, Color(0xFF6B5F4F))
+                    px(w - 3, h - 3, Color(0xFF6B5F4F))
+                }
+                BuildingType.BOOKSHOP -> {
+                    // Stack-of-books motif in place of a window, by the door.
+                    val bx = w / 2 - doorW / 2 - 4
+                    rect(bx, h - 6, 4, 1, Color(0xFFB2593F))
+                    rect(bx, h - 5, 4, 1, Color(0xFF55713F))
+                    rect(bx, h - 4, 4, 1, Color(0xFF44506B))
+                }
+                BuildingType.TAILOR -> {
+                    // Small mannequin silhouette by the door: head dot + shoulder rect.
+                    val mx = w / 2 + doorW / 2 + 2
+                    px(mx, h - 6, Color(0xFFE0B088))
+                    rect(mx - 1, h - 5, 3, 3, Color(0xFF9B7FB0))
+                }
+                BuildingType.HARDWARE -> {
+                    // Ladder leaning against the wall.
+                    val lx = w - 4
+                    rect(lx, roofH + 2, 1, bodyH - 3, Color(0xFF8A6F52))
+                    rect(lx + 2, roofH + 2, 1, bodyH - 3, Color(0xFF8A6F52))
+                    var ly = roofH + 3
+                    while (ly < roofH + bodyH - 2) {
+                        rect(lx, ly, 3, 1, Color(0xFF8A6F52))
+                        ly += 3
+                    }
+                }
+                BuildingType.WORKSHOP -> {
+                    // Timber stack by the door, distinct from FACTORY's loading hatch.
+                    val tx = w / 2 - doorW / 2 - 4
+                    rect(tx, h - 4, 4, 1, Color(0xFF8A6F52))
+                    rect(tx, h - 3, 4, 1, Color(0xFF74563F))
+                    px(tx, h - 5, Color(0xFF8A6F52)); px(tx + 2, h - 5, Color(0xFF8A6F52))
+                }
+                BuildingType.VACANT -> {
+                    // Grimy boarded-ish window even before full `abandoned` boarding, plus
+                    // a small "to let" sign and an overgrown weed patch at the base.
+                    rect(w / 2 - doorW / 2 - 5, h - 8, 4, 3, Color(0xFF6B6B60))
+                    rect(w / 2 - doorW / 2 - 5, h - 7, 4, 1, Color(0xFF4A4A42))
+                    rect(w - 5, roofH + 2, 3, 2, Color(0xFFD9CBB5))
+                    px(w - 5, roofH + 1, Color(0xFF8A7B63))
+                    var wx2 = 2
+                    while (wx2 < w - 3) {
+                        px(wx2, h - 1, Color(0xFF55713F))
+                        wx2 += 2
+                    }
+                }
                 else -> {}
             }
         }

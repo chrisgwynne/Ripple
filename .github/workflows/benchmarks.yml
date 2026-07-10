@@ -1,0 +1,56 @@
+# Runs the JVM-only "benchmark" unit tests (SimulationTickBenchmark,
+# TownRenderingDataBenchmark) on every push/PR, alongside the rest of the
+# unit test suite.
+#
+# HONESTY NOTE (see the "Benchmarks in CI" item in docs/backlog.md): this
+# workflow file was written and reviewed for syntax in an environment with no
+# way to actually execute GitHub Actions — it has NOT been run or verified
+# end-to-end. It needs to be exercised by an actual push to confirm the
+# runner image, JDK setup, and Gradle invocation all work as expected before
+# anyone should treat a green check here as proven. It also does not run any
+# *real* androidx.benchmark macro/micro benchmarks — those need a connected
+# device/emulator, which a standard GitHub-hosted runner does not provide
+# (would require self-hosted hardware or an emulator-in-CI setup, e.g.
+# reactivecircus/android-emulator-runner, neither of which is set up here).
+# What this DOES do honestly: runs the plain System.nanoTime()-based JVM
+# timing tests described in SimulationTickBenchmark.kt and
+# TownRenderingDataBenchmark.kt as part of the normal unit test task, so their
+# ceiling assertions act as a regression tripwire on every push, and their
+# printed mean/min/max numbers land in the CI log for anyone to eyeball.
+name: Benchmarks (JVM tick + snapshot-build timing)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  benchmark-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Run tick + snapshot-build benchmark tests
+        run: >
+          ./gradlew :app:testDebugUnitTest
+          --tests "com.ripple.town.simulation.SimulationTickBenchmark"
+          --tests "com.ripple.town.simulation.TownRenderingDataBenchmark"
+          --info
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-test-report
+          path: app/build/reports/tests/testDebugUnitTest/
