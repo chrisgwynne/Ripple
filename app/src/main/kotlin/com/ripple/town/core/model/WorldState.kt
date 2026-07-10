@@ -45,6 +45,8 @@ data class WorldState(
     // Election
     var nextElectionAt: Long = 0L,
     var mayorId: Long? = null,
+    /** The resident currently serving as constable; kept up by [CrimeSystem.ensureConstable]. */
+    var constableResidentId: Long? = null,
 
     // Id counters (all state needed for deterministic continuation)
     var nextResidentId: Long = 1L,

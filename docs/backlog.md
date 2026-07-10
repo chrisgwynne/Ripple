@@ -98,6 +98,34 @@ Continued with a fourth Phase 2 **Simulation** item, same rigour as above
 Verified via the full local unit test suite: same 3 pre-existing failures
 as before, nothing new. Committed and pushed directly to `main`.
 
+### 2026-07-10 — Richer crime: motives, suspicion, a constable, false accusations
+
+A fifth Phase 2 **Simulation** item, same rigour as the rest:
+
+- [x] **Richer crime.** The old "may be reported" rule always correctly
+  penalised the true culprit — perfect information, at odds with the
+  "public understanding ≠ facts" principle already built for rumours. New
+  `CrimeSystem` keeps one adult resident appointed constable
+  (`WorldState.constableResidentId`, highest `honesty×0.6 + courage×0.4`,
+  re-appointed if the post falls vacant) and has them investigate
+  `CRIME_COMMITTED` by building a motive-weighted suspect pool (dishonesty,
+  poor finances, resentment towards the victim's business owner) that
+  always contains the true culprit but isn't guaranteed to land on them.
+  `CRIME_REPORTED` now carries only what the constable *believes*
+  (`payload["accurate"]`) — a false accusation costs the wrongly-accused
+  resident more stress/reputation than a true one would, a `HUMILIATION`
+  memory, and resentment/trust damage towards the constable, while the
+  actual culprit gets away with it (private unease only). See
+  `docs/simulation-rules.md#crime--suspicion`.
+
+Verified via the full local unit test suite: same 3 pre-existing failures
+as before, nothing new. Committed and pushed directly to `main`. (One test
+run hit the Windows gradle-daemon file-lock issue seen earlier in this
+session — `bundleDebugClassesToRuntimeJar` failing with
+`FileSystemException` because a leftover daemon still held `classes.jar`
+open; killing stray `java.exe` processes before retrying fixed it. Not a
+code issue.)
+
 **Not attempted this session:** everything else below. The remaining Phase
 2 **Product** items need Compose/UI work or external art/audio assets;
 Phase 3 and 4 are a substantially larger undertaking (generational systems,
@@ -122,7 +150,14 @@ local politics, an LLM narrative layer, etc.).
   (`LifecycleSystem.studentReturns`) — rehoused, a large skill boost plus a
   personality-matched secondary skill, fresh `FIND_JOB` goal, parent reunion
   memory. See `docs/simulation-rules.md#education--returning-students`.*
-- Richer crime: motives, suspicion, constable NPC role, false accusations.
+- [x] Richer crime: motives, suspicion, constable NPC role, false
+  accusations. *Implemented: `CrimeSystem` keeps a constable appointed
+  (`WorldState.constableResidentId`), investigates `CRIME_COMMITTED` with a
+  motive-weighted (dishonesty, poor finances, resentment towards the victim)
+  suspect pool that always contains the true culprit but isn't guaranteed to
+  land on them — `CRIME_REPORTED` carries only what the constable believes
+  (`payload["accurate"]`), with real consequences for a wrongly-accused
+  resident. See `docs/simulation-rules.md#crime--suspicion`.*
 - [~] Building lifecycle: repairs, renovation choices by owners, new
   construction on empty lots, demolition. *Repairs implemented
   (`BuildingLifecycleSystem`, `BUILDING_REPAIRED`, condition now affects home

@@ -220,17 +220,7 @@ object ConsequenceEngine {
                 for (r in ctx.state.detailedResidents()) r.needs.safety -= 4.0
             },
             ConsequenceRule(EventType.CRIME_COMMITTED, "may be reported", probability = 0.6) { ctx, e ->
-                val culprit = e.sourceResidentId?.let { ctx.state.resident(it) }
-                val reporter = ctx.state.detailedResidents()
-                    .filter { it.id != e.sourceResidentId && it.personality.honesty > 0.6 }
-                    .minByOrNull { it.id } ?: return@ConsequenceRule
-                val report = ctx.emit(
-                    EventType.CRIME_REPORTED,
-                    "The recent theft has been reported to the town constable.",
-                    sourceResidentId = reporter.id, severity = 0.3, causeIds = listOf(e.id)
-                )
-                culprit?.let { it.needs.stress += 10.0; it.reputation -= 8.0 }
-                onEvent(ctx, report)
+                CrimeSystem.investigate(ctx, e)
             }
         ))
 

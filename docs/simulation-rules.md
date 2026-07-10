@@ -194,6 +194,27 @@ Healthy businesses (> 9 000) may expand (+capacity, building extension);
 demand > 62 with spare capacity hires — preferring detailed residents with
 active `FIND_JOB` goals, promoting background residents otherwise.
 
+## Crime & suspicion
+
+Motive: poverty. `JOB_LOST` seeds a `CRIME_TEMPTATION` delayed effect
+(honesty and impulsiveness govern whether it's yielded to, `STILL_POOR`
+condition); if it fires, money goes missing from a business, recorded as a
+`HIDDEN` `CRIME_COMMITTED` — nobody in town knows yet, including whether
+anything happened at all. 60% chance it's investigated. `CrimeSystem` keeps
+one adult resident appointed **constable** (highest
+`honesty×0.6 + courage×0.4`, re-appointed if the post falls vacant) and has
+them build a suspect pool from every other detailed adult, weighted by
+*plausible motive* rather than certainty: dishonesty, poor finances
+(`financialSecurity < 35` or `debt > 500`), and resentment towards the
+victim's business owner. The true culprit is always in the pool but the
+weighted pick can land on someone else — a `CRIME_REPORTED` event carries
+only what the constable *believes* (`payload["accurate"]`), never the
+engine's ground truth, same principle as [rumours](#rumours). An accurate
+accusation costs the real culprit stress and reputation; a false one costs
+the wrongly-accused resident more of both, a `HUMILIATION` memory, and
+resentment/trust damage towards the constable — while the actual culprit
+gets away with it (a little private unease, never public).
+
 ## Events, causes, importance
 
 `WorldEvent` fields include type, severity, visibility (PUBLIC / PRIVATE /
