@@ -197,6 +197,13 @@ object InteractionSystem {
                 if (topic in OPPORTUNITY_TOPICS && rel.warmth() > 40.0 && ctx.rng.nextBoolean(OPPORTUNITY_CHANCE)) {
                     maybeSeedOpportunity(ctx, a, b, topic)
                 }
+
+                // Conversation -> belief/emotion: a small, separately-gated chance this same
+                // exchange also measurably shifts what the listener thinks, not just what they've
+                // heard about — see ConversationInfluenceSystem for the full gating (trust/respect
+                // threshold, a speaker with something worth saying, an open listener) and its own
+                // bounded per-tick cap, well under this system's MAX_INTERACTIONS_PER_TICK.
+                ConversationInfluenceSystem.maybeInfluence(ctx, a, b, topic, rel)
             }
         }
 

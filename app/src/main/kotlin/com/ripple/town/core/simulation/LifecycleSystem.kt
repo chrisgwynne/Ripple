@@ -536,11 +536,15 @@ object LifecycleSystem {
             state.nextElectionAt = ctx.now + 360L * SimTime.MINUTES_PER_DAY
             return
         }
-        val scored = candidates.map { c ->
-            c to (c.reputation + c.skill(com.ripple.town.core.model.SkillType.POLITICS) * 0.6 +
-                ctx.rng.nextDouble(0.0, 15.0))
-        }
-        val winner = scored.maxByOrNull { it.second }!!.first
+        // Real, belief-aware voter tally (VotingSystem) replaces the old single-aggregate
+        // formula (reputation + skill*0.6 + flat random noise). See VotingSystem's doc comment
+        // and docs/simulation-rules.md "Local politics: elections" for the full design writeup.
+        // Candidate selection/filtering above and everything below the winner computation is
+        // unchanged.
+        val votes = VotingSystem.tally(ctx, candidates, state.candidacies)
+        val topVoteCount = votes.values.maxOrNull() ?: 0
+        val topCandidates = candidates.filter { votes[it.id] == topVoteCount }
+        val winner = if (topCandidates.size > 1) ctx.rng.pick(topCandidates) else topCandidates.first()
         val previous = state.mayorId?.let { state.resident(it) }
         state.mayorId = winner.id
         winner.occupation = "Mayor"

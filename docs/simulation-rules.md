@@ -700,14 +700,82 @@ randomness goes through `ctx.rng`, never `Math.random()`.
 
 **Deliberately out of scope for this pass:** no policy platforms or issue
 positions for candidates to campaign on (a campaign day is a single
-undifferentiated "campaigning" action, not a choice between stances); no
-voter-level individual ballots or turnout modelling (the vote itself is
-still `LifecycleSystem.election()`'s existing aggregate scoring, unchanged);
+undifferentiated "campaigning" action, not a choice between stances);
 no councillor-specific duties or powers beyond the shared mayoral repair
 bonus (a councillor's seat is a standing/reputation outcome, not yet a
 second lever on the simulation); no recall elections, resignations, or
-scandal-driven early elections; no negative campaigning or rival
-sabotage between candidates.
+scandal-driven early elections (see "The vote itself" below for why — no
+cheap, real per-term outcome tracker exists yet to hang one off); no negative
+campaigning or rival sabotage between candidates.
+
+### The vote itself: a belief-aware tally
+
+Landed 2026-07-11, closing the Simulation Reality Review's finding that
+*"Elections are a stat calculation; no belief/opinion substrate for any
+resident to actually hold a position... A 'politician gives a speech' cannot
+currently move a single voter's mind."* `LifecycleSystem.election()`'s
+candidate selection/filtering (politically-interested in-town adults,
+`politicalInterest > 0.35`, ranked by the same
+`politicalInterest × 50 + reputation + POLITICS skill`, top 3) and everything
+after the winner is decided (mayor assignment, `nextElectionAt` reset,
+`ELECTION_WON`, memory) are **unchanged**. Only the scoring/winner step
+changed — the old single-aggregate formula
+(`reputation + skill×0.6 + flat random 0-15`) is replaced by a real per-voter
+tally in the new `core/simulation/VotingSystem.kt`.
+
+- **Candidates' implicit platform.** No new policy-position data structure —
+  a candidate's own current `Belief` positions (`BeliefSystem.positionOn`)
+  *are* their public stance. Three salient topics were chosen (not the full
+  nine-topic `BeliefTopic` set): `TRUST_IN_GOVERNMENT` (the single most
+  directly on-topic belief for a mayoral race), `ECONOMIC_OPTIMISM` (jobs and
+  money — a bread-and-butter election issue, and already the belief
+  `BeliefSystem`'s own unemployment trigger moves), and `COMMUNITY_LOYALTY`
+  (whether the town pulling together, via petitions/flood recovery, reads as
+  "this candidate is one of us"). The more personal/apolitical topics
+  (`RISK_TOLERANCE`, `INDIVIDUALISM_VS_COLLECTIVISM`, `SOCIAL_OPENNESS`,
+  `ENVIRONMENTAL_CONCERN`, `TRUST_IN_POLICE`, `INSTITUTIONAL_TRUST`) are left
+  out — a bounded, defensible subset, not full belief-taxonomy coverage.
+- **Turnout.** Every in-town `DETAILED` adult resident who isn't a candidate
+  gets one `ctx.rng.nextBoolean(turnoutChance(resident))` roll —
+  `VotingSystem.turnoutChance` starts at a `TURNOUT_BASE` of 0.20 and adds
+  `politicalInterest × 0.45` plus (rescaled -1..1 → 0..1)
+  `TRUST_IN_GOVERNMENT position × 0.20`, clamped to
+  `MIN_TURNOUT_CHANCE..MAX_TURNOUT_CHANCE` (**0.20–0.85** — never guaranteed,
+  never impossible). This is the only rng draw per voter.
+- **Choice.** For each resident who turns out, `VotingSystem.voterScoreFor`
+  computes, per candidate: belief alignment (`Σ 1.0 - |voterPosition -
+  candidatePosition|` across the three salient topics, so 0..3) **plus** a
+  relationship term (`(trust + familiarity) / 200 × RELATIONSHIP_WEIGHT (1.5)`
+  from the voter's existing `Relationship` with that candidate, if any — the
+  "family/workplace influence" the brief asked for, independent of policy)
+  **plus** a campaign term (`Candidacy.support / CAMPAIGN_SUPPORT_DIVISOR
+  (40.0)` — the same `support` `ElectionSystem.runCampaigns` already
+  accumulates, so a campaign that reached more people and built more track
+  record genuinely matters at the ballot). Entirely deterministic given the
+  voter's own state — no further rng per voter, matching the brief's "the
+  turnout roll is the only per-voter randomness."
+- **Result.** Votes are summed per candidate; highest count wins. A tie
+  (including the degenerate all-zero-turnout case) is broken via
+  `ctx.rng.pick`, the same shape `DecisionSystem.chooseBest`'s near-tie
+  handling uses elsewhere in this codebase.
+- **Bounded cost, confirmed not sampled down.** `VotingSystem.tally` does one
+  pass over `state.detailedResidents()` (already the same small, capped cast
+  `BeliefSystem`/`PersonalityDevelopmentSystem` scan daily) scoring against at
+  most 3 candidates across 3 salient topics — genuinely
+  `O(residents × 3 × 3)`, and elections themselves land roughly once every
+  720 sim days, so no further sampling cap was added; doing so would only
+  make a rare, important event's result less meaningful for no real
+  performance benefit.
+- **Scandal/policy-disappointment hook — honestly skipped.** Considered a
+  small turnout/alignment penalty for a sitting mayor whose term saw a real
+  bad outcome, but `WorldState` doesn't track anything cheap and genuine to
+  hang it off (no sustained-crime-rate figure, no "unresolved petition count
+  during this term" field, no per-term business-closure tally, no
+  `mayorSince`/term-start timestamp even to scope a window against). Adding
+  one just for this would mean inventing a fake trigger with no real
+  simulated cause behind it, which the rest of this pass deliberately avoids
+  — skipped rather than faked. A real version of this needs a cheap per-term
+  outcome tracker landed first.
 
 ## Family & generations
 
@@ -1927,9 +1995,11 @@ anyway since `PRIVATE` visibility means it never reaches the newspaper's
 (resident, topic)` — the only sanctioned way for other systems to read a
 resident's belief state; both return the neutral default (`0.0`) when the
 resident has no entry for that topic, so callers never need a null check.
-Not yet consumed by anything else in this pass — reserved for a future
-conversation-influence/election-voting system, and (per the task brief)
-`ElectionSystem` is deliberately not yet wired to read from these.
+As of 2026-07-11, `positionOn` is read by `core/simulation/VotingSystem.kt`
+(candidate "platform" + turnout trust term for the election tally — see
+"Local politics: elections" → "The vote itself: a belief-aware tally") —
+the first real consumer. `confidenceOn` and a conversation-influence use of
+`positionOn` both remain reserved for future work.
 
 ### Deliberately out of scope for this pass
 
@@ -1946,3 +2016,159 @@ conversation-influence/election-voting system, and (per the task brief)
   it.
 - `ElectionSystem`/voting is not yet belief-driven — a separate, explicitly
   future task per the brief.
+
+## Conversation influence (added 2026-07-11)
+
+`core/simulation/ConversationInfluenceSystem.kt` — the mechanical, belief-side
+consequence of a conversation `InteractionSystem` has already sampled. Prior
+to this pass, `ConversationTopic` (see "Interactions" above) flavoured
+interaction text and fed exactly one narrow mechanical hook
+(`InteractionSystem.maybeSeedOpportunity`, an `ideaSeeds` tip for
+WORK/MONEY/GOSSIP topics); everything else about a conversation's *topic* was
+cosmetic. This system adds the belief-shift side without replacing or
+duplicating anything: `IdeaDiffusionSystem` still owns transferring abstract
+`ResidentIdeaState`s; `maybeSeedOpportunity` still owns the goal-seed hook.
+
+Not a new sampling pass — `ConversationInfluenceSystem.maybeInfluence(ctx, a,
+b, topic, rel)` is called once per pair from `InteractionSystem.interact`,
+immediately after the existing opportunity-seed check, riding the exact pair
+`InteractionSystem.update` already grouped by building and sampled (the same
+shape `IdeaDiffusionSystem.update` rides for idea spread).
+
+### Bounding
+
+`TickContext.conversationInfluenceBudget` (reset to
+`ConversationInfluenceSystem.MAX_MEANINGFUL_PER_TICK = 3` on every fresh
+`TickContext`, mirroring `TickContext.consequenceBudget`'s own shape) caps
+how many conversations can mechanically land per tick — well under
+`InteractionSystem.MAX_INTERACTIONS_PER_TICK` (8), so most sampled chats stay
+flavour-only, matching "every *meaningful* conversation", not every
+conversation. The budget check is the very first thing `maybeInfluence` does,
+before any gating work.
+
+### Topic relevance
+
+Only conversations whose `ConversationTopic` maps to a `BeliefTopic` can ever
+influence anything (`relevantBeliefTopic`) — WEATHER/FAMILY/HOBBIES have no
+mapping and are filtered out immediately:
+
+- `MONEY`, `WORK` -> `ECONOMIC_OPTIMISM`
+- `LOCAL_NEWS` -> `TRUST_IN_GOVERNMENT`
+- `GOSSIP` -> `COMMUNITY_LOYALTY`
+- `HEALTH` -> `INSTITUTIONAL_TRUST`
+- `RELATIONSHIP` -> `SOCIAL_OPENNESS`
+
+### Speaker/listener selection
+
+Whichever of the pair actually has something worth saying (see below) is the
+speaker; if both do, the more sociable+curious one wins
+(`effectivePersonality().sociability + curiosity`, a stable proxy for "more
+inclined to hold forth"), with resident id as a final deterministic tiebreak
+so ties never depend on iteration order. If neither has anything worth
+saying, the call is a cheap no-op — no roll, no state touched.
+
+### Gating — all three must hold before any roll happens
+
+1. **Relationship threshold** — `rel.trust >= TRUST_THRESHOLD (55)` OR
+   `rel.respect >= RESPECT_THRESHOLD (60)`. Either is sufficient (matches
+   `InteractionSystem`'s own "any sufficiently strong dimension counts"
+   convention, e.g. `rel.warmth()`'s composite). A stranger's opinion
+   shouldn't move you; someone you respect but don't yet fully trust still
+   can.
+2. **Speaker has something worth saying** (`hasSomethingWorthSaying`) — a
+   `Belief` on the topic with `confidence >= SPEAKER_BELIEF_CONFIDENCE_BAR
+   (0.55)` — a real, settled view worth passing on — OR any
+   `ResidentIdeaState` with `advocacyStrength >= SPEAKER_ADVOCACY_BAR (60)`
+   (reusing `IdeaDiffusionSystem`'s own field read-only; never mutated or
+   transferred here — that stays `IdeaDiffusionSystem`'s job).
+3. **Listener is open** (`open` in `maybeInfluence`) — existing confidence on
+   the same topic `< LISTENER_CONFIDENCE_BAR (0.35)` OR
+   `effectivePersonality().curiosity - discipline >= LISTENER_OPENNESS_BAR
+   (0.15)` — either qualifies (an either/or gate, not a strict AND): a
+   low-confidence listener is persuadable regardless of temperament, and a
+   naturally curious/undisciplined listener stays open even on a topic
+   they've already got some opinion on.
+
+Both adult and teen life stages are eligible on both sides (children are
+excluded entirely — no belief system trigger touches them either).
+
+### Effect when gated conditions are met
+
+A single bounded roll (`ctx.rng.nextBoolean(INFLUENCE_CHANCE = 0.25)`)
+decides whether the conversation actually lands. On success, three effects
+fire together (the brief's "at least 2-3" — a fourth, goal influence, is
+deliberately not duplicated, see below):
+
+1. **Belief shift** (`applyBeliefShift`) — mirrors `BeliefSystem
+   .applyDrift`'s exact clamp shape: a raw shift of
+   `POSITION_SHIFT_MIN..POSITION_SHIFT_MAX (0.03..0.08)` toward the speaker's
+   position, scaled down by the listener's existing confidence
+   (`LISTENER_RESISTANCE_FLOOR = 0.35`, identical formula to
+   `BeliefSystem.CONFIDENCE_RESISTANCE_FLOOR` — a firm listener resists more,
+   floor 35% of raw), then clamped so the listener's new position can never
+   overshoot past the speaker's own (`minOf`/`maxOf` against
+   `speakerPosition`, on top of the usual `[-1, 1]` clamp) — a single
+   conversation nudges, it never snaps someone straight to the speaker's
+   view. Listener `confidence` ticks up a small fixed
+   `LISTENER_CONFIDENCE_BUMP (0.04)` — they've now heard a real person argue
+   for something, whether or not they're convinced. A low-severity `PRIVATE`
+   `EventType.BELIEF_SHIFTED` is emitted (reusing the existing type, not a
+   new one) with `topic`/`delta`/`reason: "conversation"` payload — verified
+   safe against the same `ImportanceScorer`/`NewspaperGenerator` `else ->`
+   fallbacks `BeliefSystem`'s own emission already relies on. A matching
+   `MemoryType.INSPIRATION` memory is added for the listener.
+2. **Trust/relationship nudge** (`applyPersuasionRelationshipBump`) — both
+   `rel.trust` and `rel.respect` tick up `PERSUASION_RELATIONSHIP_BUMP (1.5)`
+   on the same `Relationship` object `InteractionSystem.interact` already
+   reads/writes for this pair — small next to that function's own per-
+   conversation `+= 0.8 + compatibility`, but real: being persuaded, or
+   persuading someone, deepens a relationship a little.
+3. **Emotional effect** (`maybeSpawnEmotionalEffect`) — for MONEY/WORK topics
+   only, compares the speaker's effective position against the listener's
+   existing `ECONOMIC_OPTIMISM` position (`BeliefSystem.positionOn`, the
+   neutral-default-safe read helper). A gap `<= -EMOTIONAL_EFFECT_GAP (0.3)`
+   (speaker markedly more pessimistic) spawns a small `ANXIETY`
+   (`EMOTIONAL_EFFECT_INTENSITY = 18`) in the listener via
+   `EmotionSystem.spawnEmotion` verbatim; a gap `>= 0.3` (speaker markedly
+   more optimistic) spawns `HOPE` the same way. No parallel emotion
+   mechanic — this is the exact same `ActiveEmotion` system every other
+   trigger in the codebase uses.
+
+The speaker's "effective position" (`speakerPositionOn`) is their own belief
+position when they hold one at the confidence bar; if they instead qualify
+via a strongly-advocated idea (no belief entry), it's a mild fixed lean
+(`+0.4` for a `POSITIVE`-toned idea template, `-0.4` for `NEGATIVE`, `0.0`
+for `NEUTRAL`) — deliberately not fabricating a strong opinion out of an
+idea's tone alone.
+
+### Goal influence — extended, not duplicated
+
+`InteractionSystem.maybeSeedOpportunity` already covers "a warm, on-topic
+conversation nudges `ideaSeeds`" for WORK/MONEY/GOSSIP topics, gated on
+`rel.warmth() > 40` and the sharer's kindness+sociability — functionally the
+same shape a dedicated `ConversationInfluenceSystem` goal hook would add.
+Rather than build a second, parallel `ideaSeeds`-writing path, this pass
+confirms that mechanic already substantially covers the brief's "goal
+influence" bullet and leaves it untouched.
+
+### Determinism & bounds
+
+Every roll goes through `ctx.rng`; `applyBeliefShift`'s only random draw is
+the shift magnitude (`ctx.rng.nextDouble(POSITION_SHIFT_MIN,
+POSITION_SHIFT_MAX)`), so a fixed seed produces an identical influence
+timeline. `Belief.position` and `confidence` are clamped on every write, so
+no amount of repeated landed influence can push either field outside its
+documented range — verified in `ConversationInfluenceSystemTest`.
+
+### Deliberately out of scope for this pass
+
+- No new `EventType` — `BELIEF_SHIFTED` is reused verbatim rather than adding
+  a narrowly-scoped conversation-specific type, since the existing type
+  already carries a `reason` payload slot that distinguishes the source.
+- `ENVIRONMENTAL_CONCERN`/`INDIVIDUALISM_VS_COLLECTIVISM`/`SOCIAL_OPENNESS`
+  (beyond the `RELATIONSHIP` topic mapping) still have no conversation
+  trigger feeding them from any other angle — same "modelled, not yet fully
+  wired" convention as `BeliefSystem`'s own out-of-scope list.
+- `emotionalAttachment` (on `Belief`) is still not written or read by
+  anything, including this system — still reserved for a future deeper
+  persuasion-resistance mechanic.

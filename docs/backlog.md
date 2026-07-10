@@ -4,6 +4,87 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-11 — Simulation Reality Remediation, Phase B.2: conversation influence
+
+New `ConversationInfluenceSystem`, riding the exact conversation pairs `InteractionSystem`
+already samples each tick (no parallel sampling pass) — the mechanical, belief-side consequence
+of a meaningful conversation, distinct from `IdeaDiffusionSystem`'s idea-transfer (which it reads
+from, via `advocacyStrength`, but never duplicates). A speaker is picked only when they actually
+have something worth saying (a confident `Belief`, or a strongly-advocated idea); a listener only
+absorbs it when the pair's `trust`/`respect` clears a real threshold and the listener is
+genuinely open (low existing confidence on the topic, or high curiosity). Gated conversations
+nudge the listener's belief position a small, bounded amount toward the speaker's, bump the
+pair's trust/respect slightly, and can spawn a real emotion (`HOPE`/`ANXIETY`) via `EmotionSystem`
+depending on tone. Bounded to a handful of mechanically-effectful conversations per tick — well
+under `InteractionSystem`'s own per-tick cap — so most sampled chats stay flavour-only, matching
+"every MEANINGFUL conversation," not every conversation. Closes Phase B (Social influence)
+alongside the belief model, idea diffusion, and belief-aware election tally entries below.
+
+### 2026-07-11 — Simulation Reality Remediation, Phase A.7: belief-aware election tally
+
+Closes out the elections half of the Simulation Reality Review finding flagged alongside the
+belief-system work: *"Elections are a stat calculation; no belief/opinion substrate for any
+resident to actually hold a position... A 'politician gives a speech' cannot currently move a
+single voter's mind."* Owned `LifecycleSystem.kt`'s `election()` function and `ElectionSystem.kt`
+this round (the "owned by another agent" comments elsewhere on `election()` refer to an earlier
+round; that constraint had expired). `ElectionSystem.kt` itself needed **no changes** — its
+campaign layer (`Candidacy.support` accumulation, council seats, the mayoral policy bonus) already
+composed correctly with the new tally by design (see below).
+
+**`core/simulation/VotingSystem.kt`** — new file, the real per-voter tally. Extracted rather than
+kept as private helpers on `LifecycleSystem` because it's self-contained and independently
+testable.
+- **Candidates' implicit platform** — no new policy-position data structure; a candidate's own
+  current `Belief` positions (`BeliefSystem.positionOn`) *are* their public stance. Three salient
+  topics chosen (`VotingSystem.SALIENT_TOPICS`): `TRUST_IN_GOVERNMENT`, `ECONOMIC_OPTIMISM`,
+  `COMMUNITY_LOYALTY` — the clearest tie to an election among the nine `BeliefTopic`s (see the
+  file's doc comment for the per-topic reasoning); the other six are deliberately left out.
+- **Turnout** (`turnoutChance`) — one `ctx.rng.nextBoolean(...)` roll per non-candidate in-town
+  `DETAILED` adult. `TURNOUT_BASE` (0.20) + `politicalInterest × 0.45` + (rescaled)
+  `TRUST_IN_GOVERNMENT position × 0.20`, clamped to `MIN_TURNOUT_CHANCE..MAX_TURNOUT_CHANCE`
+  (**0.20–0.85**) — the only rng draw per voter.
+- **Choice** (`voterScoreFor`) — deterministic given the voter's state: belief alignment
+  (`Σ 1.0 - |voterPosition - candidatePosition|` across the 3 salient topics, 0..3) + a
+  relationship term (`(trust + familiarity) / 200 × 1.5` from the voter's existing `Relationship`
+  with that candidate, if any — family/workplace influence, independent of policy) + a campaign
+  term (`Candidacy.support / 40.0` — the same `support` `ElectionSystem.runCampaigns` already
+  accumulates, so a real campaign has a real effect at the ballot). Highest score per voter wins
+  their vote; highest vote count overall wins the election, ties broken via `ctx.rng.pick` (same
+  shape as `DecisionSystem.chooseBest`'s near-tie handling).
+- **Bounded cost, confirmed not sampled down** — one pass over `state.detailedResidents()`
+  (already the same small, capped cast `BeliefSystem` scans daily) × ≤3 candidates × 3 topics —
+  genuinely `O(residents × 3 × 3)`, and elections land roughly once every 720 sim days, so no
+  sampling cap was added on top; would only make a rare, important event's result less meaningful.
+- **Scandal/policy-disappointment hook — honestly skipped.** No cheap, real per-term outcome
+  tracker exists on `WorldState` to hang one off (no sustained-crime figure, no per-term
+  unresolved-petition/business-closure tally, no `mayorSince`/term-start timestamp even to scope a
+  window). Faking one with no genuine simulated trigger behind it would contradict the rest of
+  this pass's approach — skipped rather than invented; flagged as a prerequisite for a future pass.
+
+**`LifecycleSystem.election()`** — only the scoring/winner step changed. Candidate
+selection/filtering (unchanged: politically-interested in-town adults, `politicalInterest > 0.35`,
+ranked by `politicalInterest × 50 + reputation + POLITICS skill`, top 3) and everything after the
+winner is decided (mayor assignment, `nextElectionAt` reset, `ELECTION_WON` event, memory) are
+untouched. The old `scored`/`winner` computation (`reputation + skill×0.6 + flat random 0-15`,
+`maxByOrNull`) is replaced by `VotingSystem.tally(ctx, candidates, state.candidacies)` → tie-broken
+`maxByOrNull`/`ctx.rng.pick` on vote count.
+
+New test file `BeliefDrivenVotingTest.kt` covers: turnout chance always within
+`0.20..0.85` (both extremes and a neutral resident); a candidate whose beliefs align with the
+turned-out majority wins the clear majority of repeated trials across varied seeds, plus a direct
+`voterScoreFor` alignment check; a candidate with strong existing relationships (high
+trust/familiarity) across many voters gets a real boost even with fully neutral belief alignment on
+both sides; accumulated `Candidacy.support` gives a real, bounded edge, both at the score level and
+in the full tally; same-seed determinism (two independent states/contexts produce identical vote
+tallies); and an integration test running `LifecycleSystem.election()` end-to-end confirming a
+winner is chosen and `ElectionSystem`'s own `candidacies` bookkeeping is left untouched. Compile-
+checked only, per this session's constraints — the full gradle test suite was not run; `./gradlew`
+was not invoked. `docs/simulation-rules.md` "Local politics: elections" gained a new "The vote
+itself: a belief-aware tally" subsection with the full formula/bounds writeup, and its own
+"Deliberately out of scope" list had the now-stale "no voter-level individual ballots or turnout
+modelling" line removed. `InteractionSystem.kt` was not touched (owned by a concurrent agent this
+round).
+
 ### 2026-07-11 — Simulation Reality Remediation, Phase A.6: idea diffusion
 
 Closes out the "ideas do not exist" gap flagged by the Simulation Reality Review: *"rumours

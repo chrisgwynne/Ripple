@@ -54,6 +54,12 @@ class TickContext(
     /** Bounded number of consequence-rule applications per tick. */
     var consequenceBudget = MAX_CONSEQUENCES_PER_TICK
 
+    /** Bounded number of mechanically-effectful conversations (belief/relationship/emotion
+     *  shifts) [ConversationInfluenceSystem] may land per tick — see that object's doc comment.
+     *  Deliberately much smaller than [consequenceBudget]: most sampled conversations
+     *  `InteractionSystem` sees should stay flavour-only. */
+    var conversationInfluenceBudget = ConversationInfluenceSystem.MAX_MEANINGFUL_PER_TICK
+
     fun emit(
         type: EventType,
         description: String,
