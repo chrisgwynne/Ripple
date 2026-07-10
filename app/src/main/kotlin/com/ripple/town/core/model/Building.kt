@@ -88,6 +88,26 @@ data class Business(
     var daysInTrouble: Int = 0
 )
 
+/**
+ * Staged business distress, derived purely from a live [Business.daysInTrouble] reading against
+ * `EconomySystem.CLOSURE_DAYS` — never a persisted field (same "derive, don't duplicate"
+ * discipline the concurrent debt-state work on `Resident`/`EconomySystem` uses this session).
+ * Computed by `EconomySystem.healthStateOf`. `INSOLVENT`/actually-closed is deliberately not a
+ * member here: that's what `Business.open == false` / `Building.abandoned` already represent —
+ * no parallel bookkeeping for a state that already exists.
+ *
+ * Bands (`CLOSURE_DAYS` = 18, `STRUGGLE_NOTICE_DAYS` = 5 as of 2026-07-11):
+ * - [HEALTHY]   — `daysInTrouble == 0`, balance non-negative.
+ * - [PRESSURED] — `1..<STRUGGLE_NOTICE_DAYS` days in the red; a bad patch, not yet newsworthy.
+ * - [AT_RISK]   — `STRUGGLE_NOTICE_DAYS..<CLOSURE_DAYS/2`; the same point `BUSINESS_STRUGGLING`
+ *   already fires at, through `CLOSURE_DAYS/2`. Recovery actions (see `EconomySystem
+ *   .maybeAttemptRecovery`) become possible from here onward.
+ * - [STRUGGLING] — `CLOSURE_DAYS/2..<CLOSURE_DAYS - 2`; deep trouble, recovery still possible but
+ *   the runway is visibly shortening.
+ * - [CRITICAL]  — the final 1-2 days before `closeBusiness` actually fires.
+ */
+enum class BusinessHealthState { HEALTHY, PRESSURED, AT_RISK, STRUGGLING, CRITICAL }
+
 @Serializable
 data class Employment(
     val id: Long,

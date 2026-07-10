@@ -77,9 +77,13 @@ class PressureBridgeSystemTest {
         assertThat(biz.demand).isLessThan(demandAfterCrime)
         val dippedDemand = biz.demand
 
-        // Fast-forward the clock past the recovery window and run it too.
-        state.time += 25 * SimTime.MINUTES_PER_DAY
+        // Jump into the recovery leg's own scheduled [earliestAt, latestAt] window rather than a
+        // fixed guessed offset: recoverAfterDays is rng-sampled per bridge call (crime's is
+        // 7..14 days), so a flat "+25 days" jump can overshoot latestAt and get the effect
+        // legitimately cancelled by DelayedEffectSystem.update's own expiry check instead of
+        // applied — a test-timing bug, not a production one (found 2026-07-11, see docs/backlog.md).
         val recoveryEffect = state.delayedEffects.first { it.type == DelayedEffectType.DEMAND_SHIFT && it.strength > 0 }
+        state.time = recoveryEffect.earliestAt
         var salt2 = 0L
         while (!recoveryEffect.applied && !recoveryEffect.cancelled && salt2 < 2000) {
             DelayedEffectSystem.update(TestWorld.contextFor(state, salt = salt2))

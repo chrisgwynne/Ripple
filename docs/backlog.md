@@ -4,6 +4,165 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-11 — Fixed a test-timing bug found while integrating debt-state + business-health-state work
+
+While landing the debt-state and staged-business-health-state work below, actually ran (not
+just compile-checked) the full `PressureBridgeSystemTest` suite for the first time and found one
+real failure: `the demand dip actually lands and later recovers`. Root cause was in the TEST, not
+`PressureBridgeSystem`/`DelayedEffectSystem` production code — it fast-forwarded `state.time` by
+a fixed `+25 days` to reach the recovery leg's window, but Bridge 1's `recoverAfterDays` is
+rng-sampled per call (crime: 7..14 days), so a flat 25-day jump could land past `latestAt` and
+get the effect legitimately cancelled by `DelayedEffectSystem.update`'s own expiry check
+(`ctx.now > effect.latestAt -> cancelled = true`) instead of applied. Fixed by jumping directly
+to the already-known `recoveryEffect.earliestAt` (the effect object is already looked up by the
+test before the jump) instead of guessing a fixed offset. All 17 `PressureBridgeSystemTest`
+tests pass after the fix; confirms the underlying production bridge/delayed-effect mechanism
+itself was correct all along.
+
+### 2026-07-11 — Business health states, real recovery, and succession after closure
+
+Closes the other half of the same-day "Economy calibration audit"/
+"remediation" findings elsewhere in this log — that pass fixed the startup-
+window undercapitalisation that drove closures; this pass addresses what
+happens *around* a closure itself. Before this, `EconomySystem.closeBusiness`
+was a hard binary cliff (`open` → permanently `closed`/`abandoned`, see
+`Building.abandoned`): no visible intermediate distress state, no real
+chance to recover before the cliff, and — once a building's `abandoned`
+flag was set — nothing reliably ever un-set it again except a resident
+happening to pursue `START_BUSINESS` and randomly picking that exact vacant
+building (`GoalSystem.openBusiness`, confirmed via grep as the only
+`abandoned = false` site in the codebase before this change, and left
+completely untouched by this pass — its startup-balance/demand values were
+already retuned this session by the concurrent remediation work elsewhere
+in this log). Full write-up: `docs/simulation-rules.md` "Business health
+states, recovery and succession".
+
+**1. `BusinessHealthState` enum** (`core/model/Building.kt`) — `HEALTHY`,
+`PRESSURED`, `AT_RISK`, `STRUGGLING`, `CRITICAL`, computed live from
+`Business.daysInTrouble` by `EconomySystem.healthStateOf` (pure function, no
+new persisted field — same "derive, don't duplicate" discipline the
+concurrent debt-state work above applies to `Resident`). Bands keyed off the
+existing `STRUGGLE_NOTICE_DAYS`(5)/`CLOSURE_DAYS`(18) constants, neither of
+which changed.
+
+**2. Recovery action** (`EconomySystem.maybeAttemptRecovery`, called
+additively from `settleBusinessDay`'s existing trouble branch) — once
+`AT_RISK` or worse, a `DetailLevel.DETAILED` owner gets an independent 10%/
+day chance at each of two real, mechanically-effectful actions (never both
+the same day): a price cut (`priceLevel -= 0.08`, floored at
+`PriceDriftSystem.PRICE_LEVEL_MIN`, plus a real reputation cost) to chase
+demand, or an early layoff of the most recently hired employee (reusing
+`closeBusiness`'s own job-loss/memory/emotion/shock shape) to cut wage
+overhead before being forced to close, costing `employeeCapacity` and
+`demand`. Verified in `BusinessHealthStateTest` by sweeping seeded salts
+until each action actually fires under `ctx.rng` and checking the real
+mechanical effect (`priceLevel`/`employeeCapacity` actually move,
+bounded correctly) — not just that the code path exists.
+
+**3. Succession after closure** (`EconomySystem.maybeAttemptSuccession`,
+called as a new tail call at the end of the existing `closeBusiness` body —
+the pre-existing body itself is untouched) — a weighted roll among four
+outcomes, immediately at closure (not deferred through
+`DelayedEffectSystem`: everything needed, including the closure's own
+just-ended employee records, is already in hand): family inheritance (an
+in-town adult child, or failing that partner, of the outgoing owner — same
+family-first search `BusinessSuccessionSystem.readyHeir` uses, minus the
+"currently employed there" requirement, which doesn't apply post-closure),
+employee buyout (a former staff member, read from this closure's own
+just-ended `Employment` records), a new entrepreneur (a qualifying bystander
+resident, reusing `GoalSystem.STARTUP_CAPITAL`/`BuildingType.WORKSHOP`
+conventions via a lighter direct call rather than re-invoking
+`GoalSystem.openBusiness`, which is keyed to a specific resident's
+in-progress goal that doesn't exist here), or staying vacant (the
+pre-existing behaviour, kept as a real, still-likely outcome, not
+eliminated). Weighted by what's actually on record for the closure — decent
+reputation and a short trouble history bias toward inheritance/buyout;
+a business that limped along well past `CLOSURE_DAYS` before finally
+closing biases toward staying vacant — never a flat/uniform roll, and never
+inventing an heir/buyer that doesn't qualify. This is the mechanism that
+stops the town accumulating permanently-dead buildings over a long run.
+`BusinessHealthStateTest` verifies a real distribution across many
+independently-seeded closures (both a non-vacant and a vacant outcome
+observed, not literally every closure going either way), a direct
+inheritance scenario, and same-seed determinism.
+
+Deliberately did not touch: `GoalSystem.openBusiness`'s startup-balance/
+demand values (already retuned this session by the concurrent remediation
+pass elsewhere in this log — out of scope here), the debt-interest/wage/
+living-cost math in `dailySettlement` (the calibration audit found that
+untouched-by-design, and the concurrent debt-state work above is separately
+already changing how that same loop's *results* are read/communicated —
+this pass never touches that loop at all), `BusinessRivalrySystem`/
+`PriceDriftSystem` (read for context, not modified — their own daily
+demand/price mechanics are independent axes this work doesn't fight with),
+and `BusinessSuccessionSystem`'s voluntary-retirement path (a different
+trigger, left as-is; this is a second, closure-triggered succession path
+alongside it, not a replacement).
+
+Compile-verified via `./gradlew compileDebugKotlin
+compileDebugUnitTestKotlin` (both succeeded). New
+`app/src/test/kotlin/com/ripple/town/simulation/BusinessHealthStateTest.kt`
+(9 tests) run via `./gradlew testDebugUnitTest --tests
+"com.ripple.town.simulation.BusinessHealthStateTest"` — all 9 passed after
+one fix (an early version of the "recovery never fires for a HEALTHY/
+BACKGROUND-owner business" test called `dailySettlement` in a loop without
+re-pinning `daysInTrouble`, which let the business legitimately close via
+the pre-existing `CLOSURE_DAYS` path partway through — a test bug, not a
+production one; fixed by re-pinning state each iteration). Honesty note:
+while re-running the pre-existing `PressureBridgeSystemTest` suite to check
+for collisions, one unrelated test (`the demand dip actually lands and
+later recovers`) failed deterministically in isolation, through
+`DelayedEffectSystem`/`PressureBridgeSystem` code paths this session's work
+never touches (no `EconomySystem` involvement in that test at all) — a
+pre-existing issue in that concurrently-written, not-yet-full-suite-run test
+file (its own session-log entry elsewhere in this log already flags it as
+"compile-only verification per this session's constraints"), not something
+introduced here. Left as-is, out of this task's scope.
+
+### 2026-07-11 — Debt states: giving `Resident.debt` real semantics
+
+Direct follow-up to the same-day "Economy calibration audit" entry below. That audit measured
+resident-side debt/wealth as actually healthy in aggregate (median wealth ~5,000+, only ~3% of
+residents ever cross `EconomySystem.DEBT_CRISIS_THRESHOLD`) — but flagged the debt *model* itself
+as thin: `Resident.debt` was a single flat `Double` read against one binary crisis threshold, with
+no distinction between a small manageable overdraft and genuine insolvency, and no sense of why a
+given number is or isn't serious for a particular resident.
+
+New `core/simulation/DebtSystem.kt`: a `DebtState` enum (`NONE`, `MANAGEABLE`, `ELEVATED`,
+`STRAINED`, `CRISIS`, `INSOLVENT`) plus a pure `DebtSystem.classify(resident, household): DebtState`
+— no new persisted field, computed live every call from `debt`/`wealth`/`employmentId`/
+`childIds.size`/household `savings`, so it can't drift out of sync. `CRISIS`/`INSOLVENT` are built
+as refinements *on top of* the existing `EconomySystem.DEBT_CRISIS_THRESHOLD` (2,000.0) rather than
+a new competing number — confirmed both `CrimeSystem` and `PressureBridgeSystem`'s Bridge 4
+(partner-strain) already read that exact constant and the `"debt_crisis"` awareness marker
+directly, so retuning or replacing it would have silently detuned both. Below crisis, tiers are set
+by debt-to-wealth ratio (`MANAGEABLE <= 0.5x`, `ELEVATED <= 1.5x`), with `STRAINED` requiring at
+least one real hardship signal (no income, 2+ dependants, or thin household savings) on top of a
+high ratio — a wealthy, employed, childless resident with a large ratio stays `ELEVATED`, not
+`STRAINED`. Full boundary write-up with the exact formulas: `docs/simulation-rules.md` "Debt states
+(added 2026-07-11)".
+
+Wired into `EconomySystem.dailySettlement`: the existing debt-interest/repayment arithmetic is
+completely untouched (still exactly `r.debt *= 1.0005`, the same repayment formula, the same
+exact-zero "debts cleared" `FINANCIAL_RELIEF` path) — only bracketed by a `DebtState` snapshot
+before and after. A worsening transition into `CRISIS`/`INSOLVENT` fires the same
+`EventType.DEBT_CRISIS` as before (reused, not replaced — confirmed `ImportanceScorer`/
+`NewspaperGenerator` both fall through to a safe default for it) with a harsher description +
+severity for `INSOLVENT`; a genuine tier-improvement out of crisis-or-worse fires
+`EventType.FINANCIAL_RELIEF` with a distinct "clawed their way back" message, separate from the
+existing exact-zero relief event. This replaces the old "fires once, ever, on first crossing" logic
+with real transition-awareness — it can now fire again after a resident relapses into crisis, and
+distinguishes insolvency from an ordinary crisis in both the emitted text and severity.
+
+New `app/src/test/kotlin/com/ripple/town/simulation/DebtStateTest.kt` — 15 tests covering every
+boundary (including the brief's explicit "same debt, different wealth → different classification"
+case), the ratio + hardship-signal interaction for `STRAINED`, the crisis/insolvent means-multiple
+vs. flat-floor gate, determinism (20 repeat calls), and edge cases (zero wealth, zero debt, no
+household, negative inputs) — none throw. Compile-verified via
+`./gradlew compileDebugKotlin compileDebugUnitTestKotlin` (BUILD SUCCESSFUL) and the targeted suite
+actually run via `./gradlew testDebugUnitTest --tests "com.ripple.town.simulation.DebtStateTest"` —
+BUILD SUCCESSFUL, all 15 tests passed, real output observed this session, not assumed.
+
 ### 2026-07-11 — Economy calibration remediation: startup capital/demand fix, re-measured
 
 Direct follow-up to the same-day "Economy calibration audit" entry below, acting on its

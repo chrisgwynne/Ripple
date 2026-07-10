@@ -3,11 +3,14 @@ package com.ripple.town.core.simulation
 import com.ripple.town.core.model.Building
 import com.ripple.town.core.model.BuildingType
 import com.ripple.town.core.model.Business
+import com.ripple.town.core.model.BusinessHealthState
 import com.ripple.town.core.model.BusinessType
 import com.ripple.town.core.model.DelayedEffect
 import com.ripple.town.core.model.DelayedEffectType
+import com.ripple.town.core.model.DetailLevel
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.EventVisibility
+import com.ripple.town.core.model.LifeStage
 import com.ripple.town.core.model.MemoryType
 import com.ripple.town.core.model.Resident
 import com.ripple.town.core.model.SimTime
@@ -85,6 +88,13 @@ object EconomySystem {
             if (!r.inTown || r.detailLevel != com.ripple.town.core.model.DetailLevel.DETAILED) continue
             val stage = r.lifeStageAt(state.time)
             if (stage == com.ripple.town.core.model.LifeStage.CHILD) continue
+            // Snapshot the classified DebtState *before* today's debt arithmetic touches wealth/
+            // debt, so the transition check below compares "how serious was this yesterday" vs.
+            // "how serious is this now" — see docs/simulation-rules.md "Debt states". The
+            // underlying interest/repayment/wealth math immediately below is completely untouched
+            // from before this feature — only how the *result* is read/communicated changed.
+            val household = state.householdOf(r)
+            val stateBefore = DebtSystem.classify(r, household)
             // National-layer tax pressure (Phase 4): a bounded 0.9x-1.1x multiplier on daily
             // living costs, the one clean hook `WorldPressureMechanicMapper` maps
             // TAX_RATE_RISES/TAX_RATE_EASES pressures onto — see docs/simulation-rules.md.
@@ -107,12 +117,49 @@ object EconomySystem {
             if (r.wealth < 0) {
                 r.debt += -r.wealth
                 r.wealth = 0.0
-                if (r.debt > DEBT_CRISIS_THRESHOLD && !r.awareness.contains("debt_crisis")) {
+            }
+            // State-transition-aware crisis/relief signalling (replaces the old single flat-
+            // threshold check): reuses the exact same EventType.DEBT_CRISIS / EventType
+            // .FINANCIAL_RELIEF pair — both already safely handled with `else` fallbacks in
+            // ImportanceScorer/NewspaperGenerator, confirmed before adding this — but now fires on
+            // any tier-worsening/tier-improving transition, not just crossing the old flat
+            // DEBT_CRISIS_THRESHOLD line once. The exact-zero "debts cleared" message above is left
+            // as its own, more specific event and is not duplicated here.
+            val stateAfter = DebtSystem.classify(r, household)
+            if (stateAfter != stateBefore) {
+                if (stateAfter.ordinal > stateBefore.ordinal &&
+                    stateAfter.ordinal >= DebtState.CRISIS.ordinal &&
+                    !r.awareness.contains("debt_crisis")
+                ) {
+                    // Worsened into CRISIS/INSOLVENT territory for the first time — same
+                    // "debt_crisis" awareness marker as before, so PressureBridgeSystem's
+                    // partner-strain bridge (which reads this exact string) keeps working
+                    // unchanged.
                     r.awareness += "debt_crisis"
+                    val description = if (stateAfter == DebtState.INSOLVENT) {
+                        "${r.fullName} is insolvent — the debt has grown beyond any realistic way back."
+                    } else {
+                        "${r.fullName} is drowning in debt."
+                    }
                     val e = ctx.emit(
-                        EventType.DEBT_CRISIS,
-                        "${r.fullName} is drowning in debt.",
-                        sourceResidentId = r.id, severity = 0.5, visibility = EventVisibility.PRIVATE
+                        EventType.DEBT_CRISIS, description,
+                        sourceResidentId = r.id, severity = if (stateAfter == DebtState.INSOLVENT) 0.65 else 0.5,
+                        visibility = EventVisibility.PRIVATE
+                    )
+                    ConsequenceEngine.onEvent(ctx, e)
+                } else if (stateAfter.ordinal < stateBefore.ordinal &&
+                    stateBefore.ordinal >= DebtState.CRISIS.ordinal &&
+                    stateAfter.ordinal < DebtState.CRISIS.ordinal
+                ) {
+                    // Improved out of CRISIS/INSOLVENT into something more manageable — a genuine
+                    // tier recovery, not just "cleared to exactly zero" (that path already has its
+                    // own FINANCIAL_RELIEF event above). Clears the awareness marker so a future
+                    // worsening back into CRISIS can fire again.
+                    r.awareness.remove("debt_crisis")
+                    val e = ctx.emit(
+                        EventType.FINANCIAL_RELIEF,
+                        "${r.fullName} has clawed their way back from the brink of financial ruin.",
+                        sourceResidentId = r.id, severity = 0.35, visibility = EventVisibility.PRIVATE
                     )
                     ConsequenceEngine.onEvent(ctx, e)
                 }
@@ -160,6 +207,13 @@ object EconomySystem {
                 }
                 if (biz.daysInTrouble >= CLOSURE_DAYS) {
                     closeBusiness(ctx, biz, "after ${biz.daysInTrouble} days in the red")
+                } else {
+                    // Staged health + real recovery action (2026-07-11, see docs/simulation-
+                    // rules.md "Business health states"): additive, called after the existing
+                    // trouble-escalation checks above rather than woven into them, so the
+                    // pre-existing daysInTrouble/STRUGGLE_NOTICE_DAYS/CLOSURE_DAYS escalation
+                    // logic above is untouched.
+                    maybeAttemptRecovery(ctx, biz)
                 }
             } else {
                 biz.daysInTrouble = 0
@@ -234,6 +288,13 @@ object EconomySystem {
             scheduleShock(ctx, owner, closure.id)
         }
         ConsequenceEngine.onEvent(ctx, closure)
+        // Real succession, not permanent vacancy (2026-07-11, see docs/simulation-rules.md
+        // "Business succession after closure") — additive tail call, the entire body above is
+        // untouched. Rolls a weighted outcome now (not via DelayedEffectSystem: closeBusiness
+        // already reads everything it needs — pre-closure employees, owner's family — at the
+        // moment of closure; waiting days would mean tracking who used to work here separately,
+        // duplicating what's already on hand right now).
+        maybeAttemptSuccession(ctx, biz, closure.id)
     }
 
     /**
@@ -440,6 +501,330 @@ object EconomySystem {
         BusinessType.TOWN_HALL -> com.ripple.town.core.model.SkillType.POLITICS
         else -> com.ripple.town.core.model.SkillType.SOCIAL
     }
+
+    // ============================================================
+    // Business health states (2026-07-11) — see docs/simulation-rules.md
+    // "Business health states, recovery and succession".
+    // ============================================================
+
+    /**
+     * Pure classification of [biz]'s live distress, derived from `daysInTrouble` against the
+     * existing `STRUGGLE_NOTICE_DAYS`/`CLOSURE_DAYS` constants — no new persisted field, same
+     * "derive, don't duplicate" approach the concurrent debt-state work takes for residents. A
+     * closed business (`!biz.open`) has no meaningful health state to report here — callers
+     * should check `biz.open` themselves first, matching how `Building.abandoned` is read
+     * directly elsewhere rather than through this enum.
+     */
+    fun healthStateOf(biz: Business): BusinessHealthState {
+        val d = biz.daysInTrouble
+        return when {
+            d <= 0 -> BusinessHealthState.HEALTHY
+            d < STRUGGLE_NOTICE_DAYS -> BusinessHealthState.PRESSURED
+            d < CLOSURE_DAYS / 2 -> BusinessHealthState.AT_RISK
+            d < CLOSURE_DAYS - 2 -> BusinessHealthState.STRUGGLING
+            else -> BusinessHealthState.CRITICAL
+        }
+    }
+
+    /** Daily chance a DETAILED owner at AT_RISK-or-worse actually takes a recovery action —
+     *  bounded and low, matching every other daily system's gentle pacing (e.g.
+     *  `BusinessSuccessionSystem.SUCCESSION_CHANCE_PER_DAY`). Rolled independently for the two
+     *  action kinds below, so an owner isn't stuck picking exactly one forever. */
+    const val RECOVERY_ACTION_CHANCE_PER_DAY = 0.10
+
+    /** How much a price-cut recovery action reduces `priceLevel` by, and the floor it respects —
+     *  reuses `PriceDriftSystem.PRICE_LEVEL_MIN` rather than inventing a second bound. */
+    const val RECOVERY_PRICE_CUT = 0.08
+
+    /** A real trade-off, not a free save: cutting prices this deliberately (as opposed to
+     *  `PriceDriftSystem`'s small ambient drift) also costs some reputation — a "why's it so
+     *  cheap" wobble — recovering naturally over time via `settleBusinessDay`'s own reputation
+     *  drift once trouble passes. */
+    const val RECOVERY_PRICE_CUT_REPUTATION_COST = 3.0
+
+    /**
+     * A bounded, low-probability-per-day recovery action for a DETAILED owner whose business has
+     * reached [BusinessHealthState.AT_RISK] or worse — see docs/simulation-rules.md "Business
+     * health states". Two real mechanical options, each a genuine trade-off:
+     * - **Price cut**: `priceLevel` drops by [RECOVERY_PRICE_CUT] (floored at
+     *   `PriceDriftSystem.PRICE_LEVEL_MIN`) to chase demand — cheaper goods draw more customers
+     *   (`hourlyFootfall`'s `spendEach = baseSpend * priceLevel` directly rewards this), but at a
+     *   real cost: lower revenue per customer, and a small reputation hit for looking desperate.
+     * - **Early layoff**: the most recently hired employee is let go now, before the business is
+     *   forced to close outright — cuts daily wage overhead immediately (this business's single
+     *   biggest controllable expense per `dailySettlement`'s wages loop), at the real cost of lost
+     *   `employeeCapacity` headroom and a demand hit (fewer staff, worse service) plus the laid-
+     *   off worker's own job loss. Reuses the same `JOB_LOST`/memory/emotion/shock shape
+     *   `closeBusiness`'s worker-loss loop already establishes — one real code path for "a job
+     *   here ended", not a second parallel one.
+     * Only one action fires per business per day at most (price cut is tried first; if it
+     * doesn't fire, layoff gets an independent roll) — never both, so a single bad day doesn't
+     * get double-mitigated.
+     */
+    private fun maybeAttemptRecovery(ctx: TickContext, biz: Business) {
+        val state = ctx.state
+        if (healthStateOf(biz) < BusinessHealthState.AT_RISK) return
+        val owner = biz.ownerId?.let { state.resident(it) } ?: return
+        if (!owner.alive || !owner.inTown || owner.detailLevel != DetailLevel.DETAILED) return
+
+        if (ctx.rng.nextBoolean(RECOVERY_ACTION_CHANCE_PER_DAY)) {
+            attemptPriceCutRecovery(ctx, biz, owner)
+            return
+        }
+        if (ctx.rng.nextBoolean(RECOVERY_ACTION_CHANCE_PER_DAY)) {
+            attemptLayoffRecovery(ctx, biz, owner)
+        }
+    }
+
+    private fun attemptPriceCutRecovery(ctx: TickContext, biz: Business, owner: Resident) {
+        val before = biz.priceLevel
+        val after = (before - RECOVERY_PRICE_CUT).coerceAtLeast(PriceDriftSystem.PRICE_LEVEL_MIN)
+        if (after >= before) return // already at the floor — nothing real to do
+        biz.priceLevel = after
+        biz.reputation = (biz.reputation - RECOVERY_PRICE_CUT_REPUTATION_COST).coerceIn(5.0, 95.0)
+        owner.needs.stress += 4.0 // a deliberate, anxious call, not a free lever
+        val e = ctx.emit(
+            EventType.PRICES_SHIFTED,
+            "${biz.name} has slashed prices, trying to chase back some trade.",
+            sourceResidentId = owner.id, businessId = biz.id, buildingId = biz.buildingId,
+            severity = 0.3, visibility = EventVisibility.PUBLIC
+        )
+        ConsequenceEngine.onEvent(ctx, e)
+    }
+
+    private fun attemptLayoffRecovery(ctx: TickContext, biz: Business, owner: Resident) {
+        val state = ctx.state
+        val staff = state.employeesOf(biz.id).sortedByDescending { it.startedAt }
+        val toLayOff = staff.firstOrNull { it.residentId != owner.id } ?: return
+        val worker = state.resident(toLayOff.residentId) ?: return
+
+        toLayOff.endedAt = ctx.now
+        worker.employmentId = null
+        worker.occupation = "Unemployed"
+        biz.employeeCapacity = (biz.employeeCapacity - 1).coerceAtLeast(1)
+        biz.demand = (biz.demand - 4.0).coerceIn(5.0, 95.0)
+
+        val jobLost = ctx.emit(
+            EventType.JOB_LOST,
+            "${worker.fullName} was let go early as ${biz.name} tries to cut costs and stay open.",
+            sourceResidentId = worker.id, businessId = biz.id,
+            severity = 0.5
+        )
+        ctx.addMemory(worker, MemoryType.LOSS, "Let go from ${biz.name} before it even closed.", 50.0, jobLost.id)
+        EmotionSystem.spawnEmotion(ctx, worker, com.ripple.town.core.model.EmotionType.ANXIETY, 55.0, jobLost.id)
+        scheduleShock(ctx, worker, jobLost.id)
+        ConsequenceEngine.onEvent(ctx, jobLost)
+    }
+
+    // ============================================================
+    // Succession after closure (2026-07-11) — see docs/simulation-rules.md
+    // "Business succession after closure". A second, closure-triggered succession path
+    // alongside `BusinessSuccessionSystem`'s voluntary-retirement handoff; deliberately kept
+    // local here rather than merged into that object, since the trigger (forced closure vs. a
+    // living owner choosing to step back) and the outcome shape (four weighted possibilities
+    // including "stays vacant" vs. one guaranteed heir handoff) are genuinely different.
+    // ============================================================
+
+    /** Weight floor/ceiling knobs, not literal probabilities — see [successionWeights] for how
+     *  they combine per closure. Kept small and named so the weighting logic reads plainly. */
+    private const val BASE_VACANT_WEIGHT = 1.0
+    private const val BASE_INHERIT_WEIGHT = 0.6
+    private const val BASE_EMPLOYEE_BUYOUT_WEIGHT = 0.5
+    private const val BASE_NEW_ENTREPRENEUR_WEIGHT = 0.4
+
+    private enum class SuccessionOutcome { FAMILY_INHERITANCE, EMPLOYEE_BUYOUT, NEW_ENTREPRENEUR, STAYS_VACANT }
+
+    /**
+     * Rolls a real succession outcome immediately after [biz] closes — the mechanism that stops
+     * the town accumulating permanently-dead buildings over a long run (previously only
+     * `GoalSystem.openBusiness` ever un-abandoned a building, and only by chance if a resident
+     * happened to pursue `START_BUSINESS` and randomly picked this exact vacant building).
+     *
+     * Four weighted outcomes, plausibility-weighted from what's actually on record for this
+     * closure — never a flat/uniform roll:
+     * - **Family inheritance**: an in-town adult child or partner of the outgoing owner takes it
+     *   over — mirrors `BusinessSuccessionSystem.readyHeir`'s family-first pattern, but does not
+     *   require the heir to already be employed here (a business that just closed has no active
+     *   staff to check that against).
+     * - **Employee buyout**: someone who worked here before it closed (from this closure's own
+     *   `JOB_LOST` batch, read via `state.employeesOf` *before* those employments end, so kept as
+     *   a local snapshot passed in) buys it.
+     * - **New entrepreneur**: a fresh resident opens something new here — reuses
+     *   `GoalSystem.STARTUP_CAPITAL`/`BuildingType.WORKSHOP` conventions but is deliberately a
+     *   lighter direct call, not a re-invocation of `GoalSystem.openBusiness` itself (that
+     *   function is keyed off a specific resident's in-progress `START_BUSINESS` goal, which
+     *   doesn't exist for a bystander picking up a freshly-closed shop).
+     * - **Stays vacant**: the pre-existing permanent-abandonment behaviour — kept as a real,
+     *   still-likely outcome, not eliminated.
+     *
+     * Weighting: a business that closed quickly with decent reputation intact reads as "the
+     * trade was fine, the specific run of it wasn't" — family/employee takeover more plausible.
+     * One that limped along at CRITICAL for a long time before finally closing reads as "this
+     * spot doesn't work" — vacancy weighted higher. `daysInTrouble` at the moment of closure
+     * (already sitting at `>= CLOSURE_DAYS`) and `biz.reputation` are the two real signals used;
+     * nothing here is invented beyond what's already on the business/owner.
+     */
+    private fun maybeAttemptSuccession(ctx: TickContext, biz: Business, closureEventId: Long) {
+        val state = ctx.state
+        val building = state.building(biz.buildingId) ?: return
+        if (!building.abandoned) return // something else already reused the building this tick
+
+        // Snapshot pre-closure staff before deciding — closeBusiness already ended their
+        // employments by the time this runs, but their Employment records (and endedAt == now)
+        // are still queryable, so "worked here right up until it closed" is a real, cheap check.
+        val formerEmployeeIds = state.employments.values
+            .filter { it.businessId == biz.id && it.endedAt == ctx.now }
+            .sortedBy { it.id }
+            .map { it.residentId }
+
+        val ownerId = biz.ownerId
+        val heir = ownerId?.let { findClosureHeir(ctx, it) }
+        val buyer = formerEmployeeIds.mapNotNull { state.resident(it) }
+            .firstOrNull { it.alive && it.inTown && it.lifeStageAt(ctx.now) == LifeStage.ADULT }
+
+        val longTroubled = biz.daysInTrouble >= CLOSURE_DAYS + 10 // limped along well past the cutoff
+        val repDecent = biz.reputation >= 45.0
+
+        val weights = linkedMapOf(
+            SuccessionOutcome.FAMILY_INHERITANCE to (if (heir != null) BASE_INHERIT_WEIGHT * (if (repDecent) 1.4 else 1.0) else 0.0),
+            SuccessionOutcome.EMPLOYEE_BUYOUT to (if (buyer != null) BASE_EMPLOYEE_BUYOUT_WEIGHT * (if (repDecent) 1.3 else 1.0) else 0.0),
+            SuccessionOutcome.NEW_ENTREPRENEUR to BASE_NEW_ENTREPRENEUR_WEIGHT * (if (longTroubled) 0.5 else 1.0),
+            SuccessionOutcome.STAYS_VACANT to BASE_VACANT_WEIGHT * (if (longTroubled) 1.8 else 1.0)
+        )
+        val total = weights.values.sum()
+        if (total <= 0.0) return
+        var roll = ctx.rng.nextDouble(0.0, total)
+        var chosen = SuccessionOutcome.STAYS_VACANT
+        for ((outcome, weight) in weights) {
+            if (weight <= 0.0) continue
+            if (roll < weight) { chosen = outcome; break }
+            roll -= weight
+        }
+
+        when (chosen) {
+            SuccessionOutcome.FAMILY_INHERITANCE -> heir?.let { succeedViaInheritance(ctx, biz, building, it, closureEventId) }
+            SuccessionOutcome.EMPLOYEE_BUYOUT -> buyer?.let { succeedViaEmployeeBuyout(ctx, biz, building, it, closureEventId) }
+            SuccessionOutcome.NEW_ENTREPRENEUR -> succeedViaNewEntrepreneur(ctx, building, closureEventId)
+            SuccessionOutcome.STAYS_VACANT -> Unit // the pre-existing behaviour — genuinely do nothing
+        }
+    }
+
+    /** An in-town, alive adult child, or otherwise the in-town adult partner, of the outgoing
+     *  owner — same family-first order `BusinessSuccessionSystem.readyHeir` uses, but without
+     *  requiring prior employment at this specific business (there's no staff left to check
+     *  that against once it's already closed). */
+    private fun findClosureHeir(ctx: TickContext, ownerId: Long): Resident? {
+        val state = ctx.state
+        val owner = state.resident(ownerId) ?: return null
+        owner.childIds.mapNotNull { state.resident(it) }
+            .firstOrNull { it.alive && it.inTown && it.lifeStageAt(ctx.now) == LifeStage.ADULT }
+            ?.let { return it }
+        val partnerId = owner.partnerId ?: return null
+        val partner = state.resident(partnerId) ?: return null
+        return partner.takeIf { it.alive && it.inTown && it.lifeStageAt(ctx.now) == LifeStage.ADULT }
+    }
+
+    private fun succeedViaInheritance(ctx: TickContext, biz: Business, building: Building, heir: Resident, closureEventId: Long) {
+        reopenBusiness(ctx, biz, building, heir)
+        val e = ctx.emit(
+            EventType.BUSINESS_SUCCESSION,
+            "${heir.fullName} has reopened ${biz.name}, picking up where family left off.",
+            sourceResidentId = heir.id, businessId = biz.id, buildingId = building.id,
+            severity = 0.4, causeIds = listOf(closureEventId), visibility = EventVisibility.PUBLIC
+        )
+        ctx.addMemory(heir, MemoryType.ACHIEVEMENT, "The day I reopened ${biz.name}.", 75.0, e.id)
+        ConsequenceEngine.onEvent(ctx, e)
+    }
+
+    private fun succeedViaEmployeeBuyout(ctx: TickContext, biz: Business, building: Building, buyer: Resident, closureEventId: Long) {
+        reopenBusiness(ctx, biz, building, buyer)
+        val e = ctx.emit(
+            EventType.BUSINESS_SUCCESSION,
+            "${buyer.fullName}, who used to work there, has bought and reopened ${biz.name}.",
+            sourceResidentId = buyer.id, businessId = biz.id, buildingId = building.id,
+            severity = 0.4, causeIds = listOf(closureEventId), visibility = EventVisibility.PUBLIC
+        )
+        ctx.addMemory(buyer, MemoryType.ACHIEVEMENT, "Buying ${biz.name} myself — I always knew this trade.", 75.0, e.id)
+        ConsequenceEngine.onEvent(ctx, e)
+    }
+
+    /** Shared reopening mechanics for both family-inheritance and employee-buyout: the same
+     *  [Business] record and building are reused (name, type, history all carry over — this is a
+     *  handoff, not a fresh start), balance is reset to a modest working float so the new owner
+     *  isn't inheriting the old debt, and trouble/price distortions from the old run are cleared. */
+    private fun reopenBusiness(ctx: TickContext, biz: Business, building: Building, newOwner: Resident) {
+        biz.ownerId = newOwner.id
+        biz.open = true
+        biz.closedAt = null
+        biz.openedAt = ctx.now
+        biz.balance = biz.balance.coerceAtLeast(0.0).coerceAtMost(HANDOFF_STARTING_BALANCE) + HANDOFF_STARTING_BALANCE * 0.5
+        biz.daysInTrouble = 0
+        biz.priceLevel = 1.0
+        biz.reputation = biz.reputation.coerceIn(30.0, 60.0) // some standing carries over, but softened
+        building.abandoned = false
+        building.ownerId = newOwner.id
+        building.visibleChanges += "Reopened under new ownership"
+    }
+
+    /** A fresh resident opens something new in the shell of a business that stayed shut long
+     *  enough nobody close to it wanted it — reuses `GoalSystem.STARTUP_CAPITAL`/
+     *  `BuildingType.WORKSHOP` conventions rather than inventing new ones, but is a direct,
+     *  lighter call: no `START_BUSINESS` goal exists for a bystander picking up someone else's
+     *  old shop, so this does not (and should not) re-invoke `GoalSystem.openBusiness`. */
+    private fun succeedViaNewEntrepreneur(ctx: TickContext, building: Building, closureEventId: Long) {
+        val state = ctx.state
+        val founder = state.residentsOrdered()
+            .filter {
+                it.inTown && it.alive && it.detailLevel == DetailLevel.DETAILED &&
+                    it.employmentId == null && it.lifeStageAt(ctx.now) == LifeStage.ADULT &&
+                    it.ageAt(ctx.now) < 66 && it.wealth >= GoalSystem.STARTUP_CAPITAL &&
+                    it.personality.ambition > 0.5
+            }
+            .sortedByDescending { it.skill(com.ripple.town.core.model.SkillType.BUSINESS) }
+            .firstOrNull() ?: return
+
+        founder.wealth -= GoalSystem.STARTUP_CAPITAL
+        building.type = BuildingType.WORKSHOP
+        building.abandoned = false
+        building.ownerId = founder.id
+        building.condition = 65.0
+        building.visibleChanges += "New owner, doors open again"
+
+        val biz = Business(
+            id = state.nextBusinessId++,
+            buildingId = building.id,
+            name = "${founder.surname}'s Workshop",
+            type = BusinessType.WORKSHOP,
+            ownerId = founder.id,
+            balance = GoalSystem.STARTUP_CAPITAL,
+            demand = 45.0,
+            reputation = 45.0,
+            employeeCapacity = 2,
+            openedAt = ctx.now
+        )
+        state.businesses[biz.id] = biz
+        val emp = com.ripple.town.core.model.Employment(
+            id = state.nextEmploymentId++, residentId = founder.id, businessId = biz.id,
+            role = "Owner", dailySalary = 45.0, startedAt = ctx.now
+        )
+        state.employments[emp.id] = emp
+        founder.employmentId = emp.id
+        founder.occupation = "Owner, ${biz.name}"
+
+        val e = ctx.emit(
+            EventType.BUSINESS_OPENED,
+            "${founder.fullName} has taken over the old premises and opened ${biz.name}.",
+            sourceResidentId = founder.id, businessId = biz.id, buildingId = building.id,
+            severity = 0.4, causeIds = listOf(closureEventId), visibility = EventVisibility.PUBLIC
+        )
+        ctx.addMemory(founder, MemoryType.ACHIEVEMENT, "The day I opened ${biz.name}.", 80.0, e.id)
+        ConsequenceEngine.onEvent(ctx, e)
+    }
+
+    /** Working float a family-inheritance/employee-buyout handoff starts with, softening (not
+     *  erasing) the old run's debt — smaller than `GoalSystem.STARTUP_CAPITAL` since the
+     *  building/reputation/customer base already exist, unlike a from-scratch opening. */
+    const val HANDOFF_STARTING_BALANCE = 250.0
 
     const val LIVING_COST_PER_DAY = 9.0
     const val DEBT_CRISIS_THRESHOLD = 2_000.0

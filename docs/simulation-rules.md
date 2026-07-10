@@ -1118,6 +1118,146 @@ not attempted:
   property market (residents buying/selling homes) is a related but
   separate, still-open item.
 
+## Business health states, recovery and succession (added 2026-07-11)
+
+Closes a gap the economy calibration audit surfaced: `closeBusiness` was a
+hard binary cliff (`open` → permanently `closed`/`abandoned`), with no
+visible intermediate state, no real chance to recover before the cliff, and
+— once a building's `abandoned` flag was set — nothing that reliably ever
+un-set it again except a resident happening to pursue `START_BUSINESS` and
+randomly picking that exact vacant building (`GoalSystem.openBusiness`,
+untouched by this work). Over a long run the town accumulated permanently
+dead buildings. This section is additive on top of `EconomySystem`'s
+existing `daysInTrouble`/`STRUGGLE_NOTICE_DAYS`/`CLOSURE_DAYS` machinery —
+none of that math changed.
+
+### Health states — a derived read, not a new field
+
+`EconomySystem.healthStateOf(biz): BusinessHealthState` is a pure function
+of the existing `Business.daysInTrouble`, matching the "derive, don't
+duplicate" discipline the concurrent debt-state work applies to residents —
+no new persisted field on `Business`. Bands, keyed off the existing
+`STRUGGLE_NOTICE_DAYS` (5) and `CLOSURE_DAYS` (18) constants:
+
+| State | Condition |
+|---|---|
+| `HEALTHY` | `daysInTrouble == 0` |
+| `PRESSURED` | `0 < daysInTrouble < STRUGGLE_NOTICE_DAYS` |
+| `AT_RISK` | `STRUGGLE_NOTICE_DAYS <= daysInTrouble < CLOSURE_DAYS / 2` |
+| `STRUGGLING` | `CLOSURE_DAYS / 2 <= daysInTrouble < CLOSURE_DAYS - 2` |
+| `CRITICAL` | `CLOSURE_DAYS - 2 <= daysInTrouble < CLOSURE_DAYS` |
+
+`INSOLVENT`/"closed" is deliberately **not** a member — that's exactly what
+`Business.open == false` / `Building.abandoned == true` already represent;
+no parallel bookkeeping for a state that already exists. The enum is
+ordinal-ordered (`HEALTHY < ... < CRITICAL`) so callers can compare with
+`<`/`>=` directly, as `maybeAttemptRecovery` does.
+
+### Recovery action — a real, bounded chance to pull out of the dive
+
+Once a business reaches `AT_RISK` or worse, `EconomySystem
+.maybeAttemptRecovery` (called from `settleBusinessDay`'s existing trouble
+branch, additively, right where the pre-existing `STRUGGLE_NOTICE_DAYS`/
+`CLOSURE_DAYS` checks already live) gives the owner — **only if
+`DetailLevel.DETAILED`**, per this codebase's existing decision-making gate
+— a small daily chance to act:
+
+- **Price cut** (`RECOVERY_ACTION_CHANCE_PER_DAY` = 10%/day, tried first):
+  `priceLevel` drops by `RECOVERY_PRICE_CUT` (0.08), floored at
+  `PriceDriftSystem.PRICE_LEVEL_MIN` (reusing that bound rather than
+  inventing a second one). Real trade-off: cheaper goods draw more
+  customers (`hourlyFootfall`'s `spendEach = baseSpend * priceLevel`
+  directly rewards a lower `priceLevel`), but each sale earns less, and the
+  business takes a `RECOVERY_PRICE_CUT_REPUTATION_COST` (3.0) reputation
+  hit for looking obviously desperate. The owner's `stress` also rises a
+  little — this is a deliberate, anxious call, not a free lever.
+- **Early layoff** (independent 10%/day roll, only reached if the price cut
+  didn't fire that day): the most recently hired non-owner employee is let
+  go immediately, cutting the single biggest controllable daily expense
+  (wages) before the business is forced to close outright. Reuses the exact
+  same job-loss shape `closeBusiness`'s own worker-loss loop already
+  establishes — `JOB_LOST` event, `MemoryType.LOSS` memory, an `ANXIETY`
+  emotion, and a `scheduleShock` window — one real code path for "a job
+  here ended", not a second parallel one. Real trade-off:
+  `employeeCapacity` drops by one and `demand` takes a small hit (fewer
+  staff, worse service), on top of the laid-off worker's own hardship.
+- At most one action fires per business per day — never both — so a single
+  bad day isn't double-mitigated.
+
+This is a genuine, measurable lever, not cosmetic: `BusinessHealthStateTest`
+verifies both actions actually fire under `ctx.rng` (sweeping seeded salts
+until each fires — a bounded low-probability roll, so the test proves it
+*can* and *does* happen, not that it always does) and that `priceLevel`/
+`employeeCapacity` actually move when they do.
+
+### Succession after closure — a real, weighted distribution
+
+`EconomySystem.closeBusiness` is extended additively: after its existing
+body finishes (worker job losses, owner's financial/emotional hit, the
+`BUSINESS_CLOSED` event), a new tail call, `maybeAttemptSuccession`, rolls a
+weighted outcome **immediately** (not via `DelayedEffectSystem` — everything
+needed, including the closure's own just-ended employee records, is already
+in hand at the moment of closure; deferring would mean separately tracking
+who used to work there). Four outcomes, always including "stays vacant" as a
+real possibility, never eliminated:
+
+1. **Family inheritance** — an in-town, alive, adult child of the outgoing
+   owner, or (if no child qualifies) their in-town adult partner, takes over.
+   Mirrors `BusinessSuccessionSystem.readyHeir`'s family-first search order,
+   but does **not** require prior employment at this business (there's no
+   staff left to check that against once it's closed — that requirement is
+   specific to the voluntary-retirement path, which has a living, still-open
+   business to check employment against).
+2. **Employee buyout** — a former employee (read from this closure's own
+   just-ended `Employment` records, `endedAt == now` at this business,
+   before `closeBusiness`'s job-loss loop advances further) who is alive, in
+   town, and an adult buys it.
+3. **New entrepreneur** — a bystander resident (in town, detailed, alive,
+   unemployed, adult, under 66, `wealth >= GoalSystem.STARTUP_CAPITAL`,
+   `personality.ambition > 0.5`, highest `SkillType.BUSINESS` among
+   qualifiers wins) opens something new in the shell. Reuses
+   `GoalSystem.STARTUP_CAPITAL`/`BuildingType.WORKSHOP` conventions for
+   consistency, but is a direct, lighter call — it does **not** re-invoke
+   `GoalSystem.openBusiness`, since that function is keyed off a specific
+   resident's in-progress `START_BUSINESS` goal, which doesn't exist for a
+   bystander picking up someone else's freshly-closed shop.
+4. **Stays vacant** — the pre-existing permanent-abandonment behaviour,
+   kept as a real, still-likely outcome rather than eliminated.
+
+**Weighting** (`maybeAttemptSuccession`'s `weights` map, rolled via
+`ctx.rng.nextDouble` against the summed total): a business that closed
+quickly with decent reputation intact (`reputation >= 45`) reads as "the
+trade was fine, this specific run of it wasn't" — inheritance/buyout weights
+get a `×1.3`–`×1.4` boost. One that limped along well past `CLOSURE_DAYS`
+before finally closing (`daysInTrouble >= CLOSURE_DAYS + 10`) reads as "this
+spot doesn't work" — the vacancy weight gets `×1.8` and the new-entrepreneur
+weight is halved. Base weights (`BASE_VACANT_WEIGHT` = 1.0,
+`BASE_INHERIT_WEIGHT` = 0.6, `BASE_EMPLOYEE_BUYOUT_WEIGHT` = 0.5,
+`BASE_NEW_ENTREPRENEUR_WEIGHT` = 0.4) mean vacancy is never crowded out
+entirely, and family/employee options are only live at all when a qualifying
+person actually exists — no invented heirs or buyers.
+
+Both inheritance and employee-buyout reopen through a shared
+`reopenBusiness` helper: the same `Business`/`Building` records are reused
+(name, type, and history carry over — a handoff, not a fresh start),
+`daysInTrouble` resets to 0, `priceLevel` resets to 1.0, `reputation` is
+softened into a 30–60 band (some standing carries over, but not the exact
+number that led to closure), and the new owner starts with a modest
+`HANDOFF_STARTING_BALANCE` (250.0) working float rather than inheriting the
+old balance — smaller than `GoalSystem.STARTUP_CAPITAL` since, unlike a
+from-scratch opening, the building and customer base already exist. A new
+`BUSINESS_SUCCESSION` (inheritance/buyout) or `BUSINESS_OPENED`
+(entrepreneur) event fires, `causeIds`-linked back to the closure, with an
+`ACHIEVEMENT` memory for the new owner.
+
+`BusinessHealthStateTest` verifies this is a genuine distribution: across
+many independently-seeded closures, both a non-vacant outcome and a vacant
+outcome are observed (not literally every closure reopening, and not every
+closure staying vacant), plus a determinism check and a direct inheritance
+scenario. This is the mechanism that stops the town accumulating
+permanently-dead buildings over a long run — vacancy remains common, but is
+no longer the only possible ending for a closed business.
+
 ## Property market
 
 Economy v2's last open slice: residents actually **buying** the home they
@@ -2547,3 +2687,135 @@ occur). Verified in `TownSentimentSystemTest`: bounded range under a heavy
 repeated-trigger stress run, identical timelines from two identically-seeded
 worlds fed the same event sequence, and decay-only convergence toward
 baseline from both above and below.
+
+## Debt states (added 2026-07-11)
+
+Follow-up to the same-day "Economy calibration audit" (see the backlog session log): that audit
+measured resident-side debt/wealth as actually healthy in aggregate (median wealth ~5,000+, only
+~3% of residents ever cross `EconomySystem.DEBT_CRISIS_THRESHOLD`), but flagged the debt *model*
+itself as thin — `Resident.debt` was a single flat `Double` read against one binary threshold, with
+no distinction between a resident carrying a small manageable overdraft and one in genuine,
+unrecoverable insolvency, and no sense of *why* a given amount of debt is or isn't serious for that
+particular resident.
+
+### `DebtState` — six semantic tiers
+
+`core/simulation/DebtSystem.kt` adds a `DebtState` enum (`NONE`, `MANAGEABLE`, `ELEVATED`,
+`STRAINED`, `CRISIS`, `INSOLVENT`) and a pure classification function, `DebtSystem.classify
+(resident, household)`. Deliberately **not** a new persisted field on `Resident` — nothing is
+stored or ticked; the state is computed live from existing signals every time it's read, so it can
+never drift out of sync with the underlying `debt`/`wealth` numbers the way a cached/stale flag
+could. `Resident.debt` itself, and all of `EconomySystem.dailySettlement`'s interest/repayment
+arithmetic that mutates it, is completely untouched by this work — this only changes how the
+*result* of that arithmetic is read and communicated.
+
+**Boundaries, in the order `classify` checks them:**
+
+1. **`NONE`** — `debt <= 0.0`.
+2. **`MANAGEABLE`** (trivial case) — `0 < debt < TRIVIAL_DEBT` (50.0), regardless of wealth: a
+   coffee-money rounding error nobody should be flagged over.
+3. **Crisis/insolvent gate, checked before the ratio bands below** — `debt >
+   EconomySystem.DEBT_CRISIS_THRESHOLD` (2,000.0, the exact pre-existing flat bar, deliberately
+   reused rather than replaced — see "Why the threshold is reused" below):
+   - **`INSOLVENT`** if either `debt >= INSOLVENT_DEBT_FLOOR` (6,000.0 — three times the crisis
+     bar, "this has clearly been compounding unaddressed for a long time") **or** `debt / means >=
+     INSOLVENT_MEANS_MULTIPLE` (4.0), where `means = resident.wealth + (household?.savings ?:
+     0.0)`, coerced to be non-negative — "even every realistic penny this person and their
+     household could draw on wouldn't clear it within a plausible multiple." A resident with no
+     known household is judged on personal wealth alone (`means` degrades to `wealth`), not
+     penalised or favoured for the missing link.
+   - **`CRISIS`** otherwise — past the flat bar, not yet judged unrecoverable.
+4. **Below the crisis bar, classified by debt-to-wealth ratio** (`ratio = debt / wealth`, using
+   wealth alone as the denominator here — deliberately *not* total means: `EconomySystem
+   .dailySettlement`'s actual repayment formula (`(wealth - 100.0) * 0.05`) draws only on personal
+   wealth day to day, household savings are never directly spent on an individual's personal debt
+   anywhere in that loop, so the denominator here matches what's mechanically true):
+   - **`MANAGEABLE`** if `ratio <= MANAGEABLE_RATIO` (0.5) — debt is a fraction of what this
+     resident has.
+   - **`ELEVATED`** if `ratio <= ELEVATED_RATIO` (1.5) — noticeable, roughly comparable to their
+     wealth, not yet urgent.
+   - Above `ELEVATED_RATIO`: **`STRAINED`** only if at least one real hardship signal also holds —
+     `employmentId == null` (no income source to service the debt from), `childIds.size >=
+     DEPENDANT_STRAIN_THRESHOLD` (2 — the same wealth stretched across more dependants), or a known
+     household with `savings < LOW_SAVINGS_CUSHION` (150.0 — no cushion to fall back on).
+     Otherwise stays **`ELEVATED`** — a high ratio alone, on an employed, childless resident with
+     some household cushion, is "noticeable" not "strained." This is the concrete answer to the
+     brief's "a resident with high debt but also high wealth vs. the same debt but low wealth/no
+     income should classify differently" — the ratio itself already captures most of that, and the
+     hardship-signal gate captures the repayment-burden/income-reliability/dependants angle the
+     raw ratio alone can't.
+
+**Why `DEBT_CRISIS_THRESHOLD` is reused, not replaced.** Two other systems already read that exact
+constant as "this resident is in serious financial trouble": `CrimeSystem` (desperation gate for
+crime likelihood, `r.debt > 500.0`/`400.0` nearby but the crisis-specific checks trace back to this
+threshold via the `debt_crisis` awareness flag it sets) and `PressureBridgeSystem.
+onSustainedFinancialTrouble` (Bridge 4 — partner-relationship strain), which reads `r.debt >
+EconomySystem.DEBT_CRISIS_THRESHOLD` and the `"debt_crisis"` awareness marker directly. Retuning
+that number, or dropping it in favour of an unrelated new one, would have silently detuned both of
+those already-calibrated systems. `CRISIS`/`INSOLVENT` are built as refinements *on top of* the
+same bar, not a replacement for it.
+
+### Wired into `EconomySystem.dailySettlement`
+
+Previously: a single `if (r.debt > DEBT_CRISIS_THRESHOLD && !r.awareness.contains("debt_crisis"))`
+check fired `EventType.DEBT_CRISIS` once, ever, the first time a resident crossed the flat line, and
+nothing ever explicitly un-set it except the debt hitting exactly `0.0` (a separate, already-existing
+`EventType.FINANCIAL_RELIEF` "debts cleared" path).
+
+Now: `dailySettlement` snapshots `DebtSystem.classify(r, householdOf(r))` **before** the day's
+interest/repayment/wealth arithmetic runs, and again **after** it (the arithmetic itself is
+byte-for-byte unchanged — only bracketed by the two classification reads). It then compares tiers
+by `DebtState.ordinal` (meaningful ordering: `NONE < MANAGEABLE < ELEVATED < STRAINED < CRISIS <
+INSOLVENT`):
+
+- **Worsening into `CRISIS` or `INSOLVENT`** (ordinal increased, landed at `CRISIS.ordinal` or
+  above, and the `"debt_crisis"` awareness marker isn't already set) fires `EventType.DEBT_CRISIS`
+  — severity `0.5` for `CRISIS`, `0.65` for `INSOLVENT` (a distinct, harsher description string:
+  *"is insolvent — the debt has grown beyond any realistic way back"* vs. *"is drowning in
+  debt"*), and sets the same `"debt_crisis"` awareness marker the old code set. This is
+  deliberately the **same** `EventType.DEBT_CRISIS` used before (confirmed both
+  `ImportanceScorer.baseImportance` and `NewspaperGenerator`'s type-based `when` blocks fall
+  through to a safe `else`/default for any `EventType` they don't explicitly list, so reusing the
+  type rather than inventing a new one needed no changes there) — a real behavioural change
+  (fires on *any* worsening transition into crisis-or-worse territory, not just the very first
+  crossing) rather than a cosmetic one, but the event vocabulary downstream systems already handle
+  is untouched.
+- **Improving out of `CRISIS`/`INSOLVENT`** (ordinal decreased, was at `CRISIS.ordinal` or above,
+  now below it) fires `EventType.FINANCIAL_RELIEF` with a distinct "clawed their way back from the
+  brink" description — separate from the existing exact-zero "debts cleared" `FINANCIAL_RELIEF`
+  event, which is left untouched and can still fire independently. Clears the `"debt_crisis"`
+  awareness marker so a future re-worsening into crisis can fire `DEBT_CRISIS` again rather than
+  being silently suppressed forever by a stale marker.
+- Transitions entirely below the `CRISIS` line (e.g. `MANAGEABLE` → `ELEVATED`, `ELEVATED` →
+  `STRAINED`) are tracked by `classify` but deliberately **do not** emit an event — the brief's ask
+  was event-worthy state changes at the "genuine crisis-level" boundary, not a newspaper story
+  every time a resident's ratio nudges over 1.5. `DebtState` remains readable live by any future UI
+  or system that wants finer-grained tiers without needing an event for every one.
+
+**Downstream systems reading the reused `"debt_crisis"` marker/threshold — confirmed unaffected:**
+`PressureBridgeSystem.onSustainedFinancialTrouble` (Bridge 4) reads `r.debt <=
+EconomySystem.DEBT_CRISIS_THRESHOLD` and `r.awareness.contains("debt_crisis")` directly, not
+`DebtState` — both still set/cleared with the same meaning as before, so Bridge 4 keeps working
+unmodified. `CrimeSystem`'s desperation-cause lookup (`mostRecentDesperationCause`,
+`priorDesperationCause`) traces `EventType.DEBT_CRISIS` events from history, which still fire under
+the same type with the same "resident is in serious trouble" meaning, just on a richer trigger
+condition.
+
+### Read helper
+
+`DebtSystem.classify(resident, household)` is safe to call from anywhere — UI screens
+(`ResidentProfileScreen`, `TownSheets`) currently read `r.debt > 0`/`r.wealth` directly for their
+"in debt"/wealth-band copy; a future pass can swap those for `DebtState`-aware copy (e.g.
+distinguishing "carrying some debt" from "in real financial trouble") without touching the
+simulation layer, since classification needs no ticking or persisted state. `household` may be
+`null` (a resident with no `householdId`, or one whose household record doesn't resolve) — the
+function degrades gracefully to personal-wealth-only classification rather than throwing.
+
+### Determinism & bounds
+
+Pure function of `resident.debt`, `resident.wealth`, `resident.employmentId`,
+`resident.childIds.size`, and `household?.savings` — no `ctx.rng`, no hidden state, same output for
+the same inputs every time. Verified in `DebtStateTest`: every boundary reachable and correctly
+classified (including the "same debt, different wealth → different tier" case the brief calls out
+by name), 20-repeat-call determinism check, and edge cases (zero wealth, zero debt, no household,
+and negative wealth/debt inputs that shouldn't occur in practice but must not throw) all covered.
