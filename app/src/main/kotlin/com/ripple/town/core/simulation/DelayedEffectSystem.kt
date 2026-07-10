@@ -156,6 +156,7 @@ object DelayedEffectSystem {
             DelayedEffectType.REVELATION_CHANCE -> {
                 val r = target ?: return
                 val hidden = r.activeConditions().firstOrNull { it.hidden }
+                val affairRel = state.relationshipsOf(r.id).firstOrNull { it.kind == com.ripple.town.core.model.RelationshipKind.AFFAIR }
                 if (hidden != null) {
                     hidden.hidden = false
                     val ev = ctx.emit(
@@ -165,6 +166,12 @@ object DelayedEffectSystem {
                         causeIds = listOf(e.sourceEventId)
                     )
                     ConsequenceEngine.onEvent(ctx, ev)
+                } else if (affairRel != null && r.partnerId != null) {
+                    val spouse = state.resident(r.partnerId!!)
+                    val lover = state.resident(affairRel.other(r.id))
+                    if (spouse != null && lover != null) {
+                        InteractionSystem.discoverAffair(ctx, r, spouse, affairRel, lover, causeIds = listOf(e.sourceEventId))
+                    }
                 }
             }
             DelayedEffectType.GOAL_SEED -> {

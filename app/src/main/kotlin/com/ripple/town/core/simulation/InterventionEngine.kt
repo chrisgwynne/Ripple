@@ -122,7 +122,8 @@ object InterventionEngine {
             }
             InterventionVerb.REVEAL -> {
                 if (r == null) return null
-                val hasSecret = r.activeConditions().any { it.hidden }
+                val hasSecret = r.activeConditions().any { it.hidden } ||
+                    state.relationshipsOf(r.id).any { it.kind == com.ripple.town.core.model.RelationshipKind.AFFAIR }
                 if (!hasSecret) return null
                 state.delayedEffects += DelayedEffect(
                     id = state.nextEffectId++, sourceEventId = state.nextEventId, // links to the event emitted just after

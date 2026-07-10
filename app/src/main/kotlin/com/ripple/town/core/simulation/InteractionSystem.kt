@@ -151,14 +151,28 @@ object InteractionSystem {
     private fun maybeSpark(ctx: TickContext, a: Resident, b: Resident, rel: Relationship) {
         val now = ctx.now
         if (a.lifeStageAt(now) != LifeStage.ADULT || b.lifeStageAt(now) != LifeStage.ADULT) return
-        if (a.relationshipStatus !in AVAILABLE || b.relationshipStatus !in AVAILABLE) return
-        if (a.partnerId != null || b.partnerId != null) return
         if (isFamily(rel.kind)) return
         val ageGap = kotlin.math.abs(a.ageAt(now) - b.ageAt(now))
         if (ageGap > 15) return
-        val chance = (compatibility(a, b) * 0.25 + rel.warmth() / 400.0).coerceIn(0.0, 0.3)
+        if (a.relationshipStatus in AVAILABLE && b.relationshipStatus in AVAILABLE &&
+            a.partnerId == null && b.partnerId == null
+        ) {
+            val chance = (compatibility(a, b) * 0.25 + rel.warmth() / 400.0).coerceIn(0.0, 0.3)
+            if (ctx.rng.nextBoolean(chance)) {
+                rel.attraction += ctx.rng.nextDouble(4.0, 10.0)
+            }
+            return
+        }
+        // A committed resident in a strained partnership can still feel a rare spark —
+        // fertile ground for temptation, never a guarantee of anything by itself.
+        val vuln = maxOf(
+            if (a.partnerId != null && a.partnerId != b.id) vulnerability(ctx, a) else 0.0,
+            if (b.partnerId != null && b.partnerId != a.id) vulnerability(ctx, b) else 0.0
+        )
+        if (vuln <= 0.15) return
+        val chance = (compatibility(a, b) * 0.1 + vuln * 0.08).coerceIn(0.0, 0.05)
         if (ctx.rng.nextBoolean(chance)) {
-            rel.attraction += ctx.rng.nextDouble(4.0, 10.0)
+            rel.attraction += ctx.rng.nextDouble(2.0, 6.0)
         }
     }
 
@@ -231,6 +245,15 @@ object InteractionSystem {
                     endPartnership(ctx, a, b, rel, married = true)
                 }
             }
+            // Affairs: a secret closeness that grows outside an existing partnership.
+            if (rel.kind == RelationshipKind.AFFAIR) {
+                progressAffair(ctx, a, b, rel)
+            } else if (rel.kind !in FIXED_KINDS && !isFamily(rel.kind) &&
+                ((a.partnerId != null && a.partnerId != b.id) || (b.partnerId != null && b.partnerId != a.id))
+            ) {
+                maybeBeginAffair(ctx, a, b, rel)
+            }
+
             // Reconciliation is possible while separated
             if (a.relationshipStatus == RelationshipStatus.SEPARATED && rel.involves(b.id) &&
                 rel.resentment < 35 && rel.affection > 45 && ctx.rng.nextBoolean(0.1)
@@ -275,6 +298,93 @@ object InteractionSystem {
         }
         ctx.addMemory(a, MemoryType.LOSS, "Things ended with ${b.firstName}.", 65.0, associated = listOf(b.id))
         ctx.addMemory(b, MemoryType.LOSS, "Things ended with ${a.firstName}.", 65.0, associated = listOf(a.id))
+    }
+
+    /**
+     * A committed resident's resistance to temptation, eroded by a strained
+     * partnership and dampened by a vigilant one. The vigilance term stands in
+     * for jealousy as a *modifier* on existing dimensions (dependency,
+     * resentment) rather than a tracked value of its own — a suspicious
+     * partner makes wandering feel riskier without ever guaranteeing it stops.
+     */
+    private fun vulnerability(ctx: TickContext, r: Resident): Double {
+        val partner = r.partnerId?.let { ctx.state.resident(it) } ?: return 0.0
+        val spouseRel = ctx.state.relationship(r.id, partner.id) ?: return 0.0
+        val strain = ((100.0 - spouseRel.affection) + spouseRel.resentment) / 200.0
+        val vigilance = spouseRel.dependency / 100.0 * 0.4 + spouseRel.resentment / 100.0 * 0.3
+        return (strain - vigilance * 0.5).coerceIn(0.0, 1.0)
+    }
+
+    private fun maybeBeginAffair(ctx: TickContext, a: Resident, b: Resident, rel: Relationship) {
+        val now = ctx.now
+        if (a.lifeStageAt(now) != LifeStage.ADULT || b.lifeStageAt(now) != LifeStage.ADULT) return
+        if (rel.attraction < 30.0 || rel.affection < 35.0) return
+        val vulnA = if (a.partnerId != null && a.partnerId != b.id) vulnerability(ctx, a) else 0.0
+        val vulnB = if (b.partnerId != null && b.partnerId != a.id) vulnerability(ctx, b) else 0.0
+        if (vulnA <= 0.0 && vulnB <= 0.0) return
+        val temptation = (
+            compatibility(a, b) * 0.25 + rel.attraction / 200.0 +
+                (a.personality.impulsiveness + b.personality.impulsiveness) / 2.0 * 0.15 -
+                (a.personality.honesty + b.personality.honesty) / 2.0 * 0.2 +
+                maxOf(vulnA, vulnB) * 0.35
+            ).coerceIn(0.0, 0.06)
+        if (!ctx.rng.nextBoolean(temptation)) return
+        rel.kind = RelationshipKind.AFFAIR
+        rel.attraction += ctx.rng.nextDouble(6.0, 14.0)
+        // Hidden: nobody in town knows yet, but it stands ready as a cause once discovered.
+        val e = ctx.emit(
+            EventType.AFFAIR_BEGAN,
+            "${a.fullName} and ${b.fullName} have grown close in a way they haven't mentioned at home.",
+            sourceResidentId = a.id, targetResidentIds = listOf(b.id),
+            severity = 0.3, visibility = EventVisibility.HIDDEN
+        )
+        ctx.addMemory(a, MemoryType.ROMANCE, "What started with ${b.firstName} wasn't supposed to happen.", 55.0, e.id, listOf(b.id))
+        ctx.addMemory(b, MemoryType.ROMANCE, "What started with ${a.firstName} wasn't supposed to happen.", 55.0, e.id, listOf(a.id))
+    }
+
+    private fun progressAffair(ctx: TickContext, a: Resident, b: Resident, rel: Relationship) {
+        // It can fizzle out on its own.
+        if (rel.affection < 20.0 || ctx.rng.nextBoolean(0.02)) {
+            rel.kind = RelationshipKind.ACQUAINTANCE
+            rel.clampAll()
+            return
+        }
+        val candidates = listOfNotNull(
+            a.partnerId?.let { spouseId -> Triple(a, spouseId, b) },
+            b.partnerId?.let { spouseId -> Triple(b, spouseId, a) }
+        )
+        for ((cheater, spouseId, lover) in candidates) {
+            val spouse = ctx.state.resident(spouseId) ?: continue
+            val spouseRel = ctx.state.relationship(cheater.id, spouse.id) ?: continue
+            val vigilance = (spouseRel.dependency / 100.0 * 0.5 + spouseRel.resentment / 100.0 * 0.3).coerceIn(0.0, 0.8)
+            val exposure = (rel.sharedHistory / 100.0 * 0.4 + vigilance).coerceIn(0.0, 0.9)
+            val chance = (0.002 + exposure * 0.01).coerceIn(0.0, 0.15)
+            if (ctx.rng.nextBoolean(chance)) {
+                discoverAffair(ctx, cheater, spouse, rel, lover)
+                return
+            }
+        }
+    }
+
+    /** Also used by the Reveal intervention when it lands on an ongoing affair. */
+    fun discoverAffair(
+        ctx: TickContext, cheater: Resident, spouse: Resident, affairRel: Relationship, lover: Resident,
+        causeIds: List<Long> = emptyList()
+    ) {
+        val e = ctx.emit(
+            EventType.AFFAIR_DISCOVERED,
+            "${spouse.fullName} has learned the truth about ${cheater.fullName} and ${lover.fullName}.",
+            sourceResidentId = cheater.id, targetResidentIds = listOf(spouse.id, lover.id),
+            severity = 0.75, visibility = EventVisibility.PRIVATE, causeIds = causeIds
+        )
+        ctx.addMemory(spouse, MemoryType.BETRAYAL,
+            "Finding out about ${cheater.firstName} and ${lover.firstName} broke something.", 90.0, e.id, listOf(cheater.id, lover.id))
+        ctx.addMemory(cheater, MemoryType.HUMILIATION,
+            "Being found out with ${lover.firstName} was the worst of it.", 70.0, e.id, listOf(spouse.id, lover.id))
+        affairRel.kind = RelationshipKind.ACQUAINTANCE
+        affairRel.attraction -= 20.0
+        affairRel.clampAll()
+        ConsequenceEngine.onEvent(ctx, e)
     }
 
     /** Divorce is processed daily for separated spouses whose rift persists. */
@@ -374,6 +484,6 @@ object InteractionSystem {
     private val ROMANTIC_KINDS = setOf(RelationshipKind.PARTNER, RelationshipKind.SPOUSE)
     private val FIXED_KINDS = setOf(
         RelationshipKind.FAMILY, RelationshipKind.ESTRANGED_FAMILY, RelationshipKind.PARTNER,
-        RelationshipKind.SPOUSE, RelationshipKind.FORMER_PARTNER
+        RelationshipKind.SPOUSE, RelationshipKind.FORMER_PARTNER, RelationshipKind.AFFAIR
     )
 }

@@ -5,11 +5,15 @@ The prototype proves the foundation. Three phases follow.
 ## Phase 2 — Depth of life (make watching richer)
 
 **Simulation**
-- Affairs and their discovery (`AFFAIR_DISCOVERED` is already an event type);
-  jealousy as a relationship dimension modifier.
-- Rumour system: private events leak along high-familiarity edges with
+- [x] Affairs and their discovery (`AFFAIR_DISCOVERED` is already an event
+  type); jealousy as a relationship dimension modifier. *Implemented:
+  `RelationshipKind.AFFAIR`, vulnerability/vigilance modifiers in
+  `InteractionSystem`, natural + `Reveal`-intervention discovery, fallout via
+  `ConsequenceEngine`. See `docs/simulation-rules.md#affairs--jealousy`.*
+- [x] Rumour system: private events leak along high-familiarity edges with
   accuracy loss; the newspaper can then be *wrong* (public understanding ≠
-  facts, as designed).
+  facts, as designed). *Implemented: `RumourSystem`, `RUMOUR_SPREAD` events.
+  See `docs/simulation-rules.md#rumours`.*
 - Education/skill pipeline for children and teens; returning students
   (Kit-style leavers can come back changed).
 - Richer crime: motives, suspicion, constable NPC role, false accusations.

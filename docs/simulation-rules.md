@@ -89,6 +89,43 @@ Interactions are sampled from co-located sociable residents, max 8 per tick:
   reconciliation all follow value thresholds plus daily probability.
 - Absence > 7 days decays affection −0.15/day; shared history barely fades.
 
+## Affairs & jealousy
+
+A committed resident can still feel a rare spark outside their partnership —
+gated on *vulnerability*: `((100 − partner-relationship affection) +
+partner-relationship resentment) / 200`, reduced by that same relationship's
+*vigilance* (`dependency × 0.4 + resentment × 0.3`), which stands in for
+jealousy as a **modifier** on existing dimensions rather than a tracked value
+of its own. A troubled marriage is fertile ground; a watchful one dampens it.
+Enough attraction and affection with someone outside the partnership can begin
+a `RelationshipKind.AFFAIR` (`AFFAIR_BEGAN`, `HIDDEN` — nobody in town knows
+yet, but it stands ready as a cause). Each day the affair can fizzle
+(affection too low, or a flat 2 % chance), or be found out: discovery chance
+grows with the affair's own shared history and the deceived partner's
+vigilance. Discovery emits `AFFAIR_DISCOVERED` (`PRIVATE`), leaving `BETRAYAL`
+and `HUMILIATION` memories, and consequences: the marriage's trust/affection
+crash and resentment spikes, relationship pressure follows, and there is a
+55 % chance the partnership doesn't survive it (reuses the normal
+separation/divorce path). The `Reveal` intervention can also expose an
+ongoing affair, using the same `REVELATION_CHANCE` delayed effect already
+used for hidden health conditions.
+
+## Rumours
+
+Private events don't stay private forever. Each tick, `RumourSystem` looks at
+that tick's own `PRIVATE` events of gossip-worthy types (arguments, affairs
+discovered, break-ups, rivalries, secrets revealed…) and rolls a leak chance
+from severity plus *exposure* — how many high-familiarity (> 60) relationship
+edges surround those involved, capped at 6. A leak becomes its own new
+`PUBLIC` `RUMOUR_SPREAD` event, which is what actually reaches
+`NewspaperGenerator` — the paper only ever reads public events, so a rumour is
+the *only* way something private becomes news. 55 % of leaks are accurate
+paraphrases and keep a real cause link back to the truth; the rest are
+distorted (a wrong resident dragged in, the story downplayed or inflated) and
+carry **no** cause link at all — the cause viewer, reading only known history,
+never shows a false lineage for something that didn't really happen that way.
+Bounded to 2 leaks per tick.
+
 ## Family & generations
 
 Births to fertile couples (both 20–44, affection ≥ 55) at

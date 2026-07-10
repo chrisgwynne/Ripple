@@ -74,6 +74,8 @@ class SimulationCoordinator(
         EconomySystem.update(ctx)
         // 9. Delayed effects whose windows are open.
         DelayedEffectSystem.update(ctx)
+        // 9b. Private events may leak into public rumour.
+        RumourSystem.update(ctx)
         // 10-12. Daily passes: health, lifecycle (births/deaths/election), goals.
         if (newDay) {
             HealthSystem.updateDaily(ctx)

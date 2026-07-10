@@ -22,6 +22,7 @@ enum class EventType(val label: String) {
     RIVALRY_FORMED("Rivalry"),
     ENGAGEMENT("Engagement"),
     MARRIAGE("Marriage"),
+    AFFAIR_BEGAN("A closeness kept quiet"),
     AFFAIR_DISCOVERED("Affair discovered"),
     SEPARATION("Separation"),
     DIVORCE("Divorce"),
@@ -53,6 +54,7 @@ enum class EventType(val label: String) {
     INTERVENTION_APPLIED("A quiet nudge"),
     MEETING("Chance meeting"),
     SECRET_REVEALED("Secret revealed"),
+    RUMOUR_SPREAD("Rumour"),
     TOWN_MILESTONE("Town milestone")
 }
 

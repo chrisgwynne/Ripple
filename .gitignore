@@ -8,3 +8,5 @@
 .externalNativeBuild
 .cxx
 **/build/
+.kotlin/
+.claude/
