@@ -44,7 +44,9 @@ implemented in `core/simulation`.
    (same-type price/demand competition, owner rivalries),
    `PriceDriftSystem.updateDaily` (town-wide price inflation/deflation),
    `BusinessSuccessionSystem.updateDaily` (voluntary owner-to-child handoff),
-   `PropertyMarketSystem.updateDaily` (households buying the home they live in).
+   `PropertyMarketSystem.updateDaily` (households buying the home they live in),
+   `CuratedWorldPressureFeed.updateDaily` (Phase 4: a single curated,
+   abstract national-scale pressure, mapped through `WorldPressureMechanicMapper`).
 9. Nudge regeneration.
 10. Newspaper when due (weekly, 08:00).
 11. Daily statistics; checkpoint flag every 36 ticks (6 in-game hours).
@@ -728,6 +730,94 @@ Background residents have needs clamped to a statistical routine and skip
 decisions, interactions, health and goals. Promotion to detailed happens on:
 being followed, being hired into an on-map business, or arriving as a new
 family — promotion assigns housing when available.
+
+## Phase 4: External world pressure
+
+The first Phase 4 item — "the outside world" starting to press in on the
+town. Deliberately the smallest honest slice of the backlog's much larger
+vision (see `docs/backlog.md`'s Phase 4 section): the `NarrativeTextProvider`/
+`DialogueProvider` LLM layer, the richer "national layer" context, and
+shareable town chronicles are all separate, unattempted items. This is not a
+real-world news feed and never will be — every pressure is entirely
+fictional/abstract, consistent with the rest of Ripple's fictional town: no
+real place names, no real companies, no real politics or current events.
+
+**Naming note.** The backlog names this item `ExternalWorldEventProvider` /
+`WorldPressureMapper`, but those exact identifiers were already claimed by
+pre-existing placeholder interfaces in `core/simulation/providers/
+FutureProviders.kt` (`suspend fun pendingPressures(...)`, wired for DI in
+`di/AppModule.kt`) — a seam intentionally reserved for a *later*, real
+external/async feed (network- or LLM-backed). This task is the deliberate
+opposite of that: a small, curated, fully deterministic, `ctx.rng`-driven
+system living inside the ordinary tick pipeline, not an injected async
+dependency. To avoid a confusing same-name-different-package collision, the
+concrete types below are named `CuratedWorldPressureFeed` and
+`WorldPressureMechanicMapper` instead — same responsibilities the backlog
+item describes, distinct identifiers from the unrelated future-architecture
+placeholder.
+
+Two clearly separated responsibilities, per the backlog brief's explicit
+"strict mapping" instruction, both in `ExternalWorldEventProvider.kt`:
+
+- **`CuratedWorldPressureFeed`** — the curated feed. Run daily
+  (`updateDaily`, last in `SimulationCoordinator`'s `if (newDay)` block).
+  Deliberately scoped to **at most one active pressure at a time**, town-wide
+  — no overlapping/stacking pressures, no per-business or per-resident
+  targeting. While none is active, a small daily roll (`START_CHANCE_PER_DAY`,
+  2%) may begin one, picked via `ctx.rng.pick` from a small hand-curated list
+  of eight abstract kinds in matched rise/ease pairs: fuel prices rise/ease,
+  poor/strong national harvest, trade routes disrupted/flourishing, economic
+  confidence dips/rises. A started pressure runs for a random 14–45 in-game
+  days (`PRESSURE_MIN_DAYS`/`PRESSURE_MAX_DAYS`) before automatically
+  resolving. Both the start and the resolution fire a new, narrowly-scoped
+  `EventType.NATIONAL_PRESSURE` (`PUBLIC`, severity 0.3/0.2) — checked
+  `ImportanceScorer` and `NewspaperGenerator` first, same as every other new
+  event type this session: both have safe `else ->` fallbacks (8.0 base
+  importance; `StoryCategory.TOWN_NEWS`), so no further wiring was needed.
+  Framed as background/abstract town-wide news (a line of overheard talk, not
+  a personal event) — deliberately did not reuse `TOWN_MILESTONE`, since that
+  type's 60.0 base importance and "a real town accomplishment" flavour don't
+  fit a piece of ambient background news the town merely hears about.
+- **`WorldPressureMechanicMapper`** — the strict mechanical translation, and
+  only ever one clean hook. Reads `WorldState.externalPressure` and, if it's
+  currently `FUEL_PRICES_RISE` or `FUEL_PRICES_EASE`, returns a multiplier
+  (`FUEL_RISE_OVERHEAD_MULTIPLIER` 1.15, `FUEL_EASE_OVERHEAD_MULTIPLIER` 0.92;
+  `1.0` — no effect — otherwise) that `EconomySystem.dailySettlement`
+  composes directly into its existing per-business overhead-expense
+  calculation (`overheads(biz.type) * WorldPressureMechanicMapper.overheadMultiplier(state)`)
+  — the literal "fuel prices rise -> delivery costs rise" chain the backlog
+  names, landing on the one place in the codebase that already models a
+  business's costs. Deliberately did **not** also touch `PriceDriftSystem`'s
+  struggling-bias or `BusinessRivalrySystem`'s standing calculation in the
+  same pass — the brief explicitly asks for one clean, traceable hook rather
+  than a vague multiplier sprinkled across several systems, so touching just
+  overhead expense keeps the effect fully explainable by reading one line in
+  one system.
+
+**Deliberately out of scope for this pass**, matching the brief's explicit
+scoped-down instruction:
+
+- The other six curated kinds (harvest, trade routes, confidence — both
+  directions) are recorded and reported on but carry **no** mechanical effect
+  yet — flavour-only background news, honestly scoped as such rather than
+  wired to some unrelated system just so every kind "does something".
+- No overlapping/stacking pressures — a second pressure simply can't start
+  while one is already active, even if its daily roll would otherwise land.
+- No LLM-authored prose for the pressure descriptions — the curated
+  start/resolve lines are small, hand-written, fixed strings per kind (a
+  handful of lines each), not generated text. The genuinely generative
+  `NarrativeTextProvider`/`DialogueProvider` layer remains a separate,
+  unattempted backlog item.
+- No richer "national layer" context (taxes, broader trends) beyond this one
+  pressure slot, and no shareable chronicles export — both separate,
+  unattempted Phase 4 items.
+
+Modelled with a new `ExternalPressureKind` enum and `ExternalPressure` data
+class (`core/model/WorldState.kt`) plus a single new
+`WorldState.externalPressure: ExternalPressure?` field (`null` most of the
+time) — a plain new field with a safe default, no schema migration. All
+randomness (whether a pressure starts, which kind, how long it runs) goes
+through `ctx.rng`, never `Math.random()`.
 
 ## Offline catch-up
 

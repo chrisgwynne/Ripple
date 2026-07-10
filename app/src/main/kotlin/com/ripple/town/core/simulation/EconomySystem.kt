@@ -57,7 +57,7 @@ object EconomySystem {
         for (biz in state.businesses.values.sortedBy { it.id }) {
             if (!biz.open) continue
             val staff = state.employeesOf(biz.id).sortedBy { it.id }
-            var expenses = overheads(biz.type)
+            var expenses = overheads(biz.type) * WorldPressureMechanicMapper.overheadMultiplier(ctx.state)
             for (emp in staff) {
                 val worker = state.resident(emp.residentId) ?: continue
                 val pay = if (emp.reducedHours) emp.dailySalary * 0.6 else emp.dailySalary

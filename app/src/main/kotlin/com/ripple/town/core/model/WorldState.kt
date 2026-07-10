@@ -12,6 +12,43 @@ enum class PetitionSubject {
 enum class PetitionStatus { ACTIVE, SUCCEEDED, FAILED }
 
 /**
+ * A single curated, abstract "outside world" pressure kind. Deliberately fictional and
+ * generic — no real place names, companies or current events. Each has a matched pair
+ * (a rise and its later easing) so the mapper always knows which mechanical direction to
+ * nudge. See [com.ripple.town.core.simulation.CuratedWorldPressureFeed] and
+ * [com.ripple.town.core.simulation.WorldPressureMechanicMapper] (the concrete,
+ * deterministic Phase 4 system — named distinctly from the pre-existing
+ * `core.simulation.providers.ExternalWorldEventProvider`/`WorldPressureMapper`
+ * placeholder interfaces reserved for a later real/async feed).
+ */
+enum class ExternalPressureKind {
+    /** Delivery/overhead cost pressure rising — the one kind currently mapped to a mechanical effect. */
+    FUEL_PRICES_RISE,
+    /** The same pressure easing back off. */
+    FUEL_PRICES_EASE,
+    /** Flavour-only pressures: currently recorded and reported on, but not yet mapped to any
+     *  mechanical effect — deliberately scoped down, see `docs/simulation-rules.md`. */
+    POOR_HARVEST,
+    STRONG_HARVEST,
+    TRADE_ROUTES_DISRUPTED,
+    TRADE_FLOURISHING,
+    CONFIDENCE_DIPS,
+    CONFIDENCE_RISES
+}
+
+/**
+ * One active (or just-resolved) national-scale pressure, town-wide, at most one at a time
+ * by deliberate scoped-down design. See [com.ripple.town.core.simulation.CuratedWorldPressureFeed].
+ */
+@Serializable
+data class ExternalPressure(
+    val kind: ExternalPressureKind,
+    val startedAt: Long,          // sim minutes
+    val endsAt: Long,             // sim minutes — resolves automatically once reached
+    val startEventId: Long = 0L
+)
+
+/**
  * A candidate's standing during a live campaign window, tracked between
  * `ELECTION_CALLED` and the vote itself. See
  * [com.ripple.town.core.simulation.ElectionSystem].
@@ -112,6 +149,13 @@ data class WorldState(
     /** Active/recently resolved petitions; run by `PetitionSystem`. Bounded, see its MAX_ACTIVE_PETITIONS. */
     val petitions: MutableList<Petition> = mutableListOf(),
     var nextPetitionId: Long = 1L,
+
+    // The outside world (Phase 4)
+    /**
+     * At most one active "national" pressure at a time — a deliberate scoped-down MVP, see
+     * `com.ripple.town.core.simulation.CuratedWorldPressureFeed`. `null` most of the time.
+     */
+    var externalPressure: ExternalPressure? = null,
 
     // Id counters (all state needed for deterministic continuation)
     var nextResidentId: Long = 1L,

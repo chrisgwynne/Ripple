@@ -4,6 +4,125 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-10 — Phase 4 kicked off: external world pressure
+
+First Phase 4 backlog item — `ExternalWorldEventProvider` — implemented as a
+deliberately small, scoped-down MVP per the task brief's explicit
+instruction not to attempt the whole Phase 4 vision in one pass (this phase
+is a substantially larger, different kind of item than anything in Phase
+2/3: an outside-world layer, not another town-internal system). Another
+agent was concurrently editing UI/Compose files in the same checkout, so
+this pass stayed strictly backend/simulation — no `./gradlew` or `git`
+commands run, code-only, ready for the orchestrating session to
+build/test/commit. Also hit (and worked around) a live file-contention race
+with the concurrent agent while editing this very file — a couple of `Edit`
+calls against this document failed their conflict check mid-session because
+the file was being rewritten at the same moment; re-reading and retrying
+immediately resolved it without losing either agent's work.
+
+- Read `docs/simulation-rules.md`'s Economy/Price drift sections first, per
+  the task brief, since "fuel prices rise → delivery costs rise" is
+  explicitly economy-flavored — confirmed `EconomySystem.dailySettlement`'s
+  per-business `overheads(biz.type)` daily expense calculation is the
+  natural, already-existing landing point for a delivery-cost pressure, and
+  that `WorldState` still had no macro/world-level pressure field at all
+  (confirmed still true, as `PriceDriftSystem`'s author had already noted).
+- **Naming collision found and resolved.** The brief's exact names —
+  `ExternalWorldEventProvider` / `WorldPressureMapper` — turned out to
+  already be claimed by pre-existing placeholder interfaces in
+  `core/simulation/providers/FutureProviders.kt` (`suspend fun
+  pendingPressures(sinceRealMs: Long): List<WorldPressure>`, wired for DI in
+  `di/AppModule.kt` with `NoOp...` defaults) — a seam clearly reserved for a
+  *later*, real external/async feed (network- or LLM-backed), not this
+  task's small deterministic in-engine system. Same identifiers in a
+  different package would still compile, but silently — a real risk of an
+  accidental wrong import down the line, and it would blur exactly the kind
+  of distinction this task's own brief cares about (curated/deterministic
+  vs. a future real feed). Resolved by naming the concrete engine-internal
+  types `CuratedWorldPressureFeed` and `WorldPressureMechanicMapper`
+  instead — same responsibilities the backlog item describes, distinct
+  identifiers from the untouched future-architecture placeholder (left
+  completely alone, still wired to its `NoOp` defaults in `AppModule.kt`).
+- **`CuratedWorldPressureFeed`** (the curated feed) and
+  **`WorldPressureMechanicMapper`** (the strict mechanical mapping) — two
+  clearly separated `object`s in one new file, `ExternalWorldEventProvider.kt`
+  (kept this filename since it's the backlog item's own title), per the
+  brief's explicit "strict mapping" language keeping curation and mechanical
+  effect visibly apart even though they live in the same file. Run daily
+  (`CuratedWorldPressureFeed.updateDaily`), last in `SimulationCoordinator`'s
+  `if (newDay)` block.
+  - **Curated feed.** Eight entirely fictional, abstract pressure kinds in
+    matched rise/ease pairs (fuel prices, national harvest, trade routes,
+    economic confidence) — no real place names, companies, politics or
+    current events, consistent with the rest of Ripple's fictional town.
+    Deliberately scoped to **at most one active pressure at a time,
+    town-wide** — no overlapping/stacking pressures, no per-business or
+    per-resident targeting; explicitly called out as a deliberate scope-down
+    in both docs, matching how every other system this session has been
+    honest about what's deferred. A small daily roll
+    (`START_CHANCE_PER_DAY`, 2%) may begin one (via `ctx.rng.pick`) only
+    while none is active; a started pressure runs 14–45 in-game days before
+    auto-resolving. New, narrowly-scoped `EventType.NATIONAL_PRESSURE`
+    (`PUBLIC`) fires on both start and resolution — checked
+    `ImportanceScorer`'s and `NewspaperGenerator`'s `else ->` fallback
+    safety first, same as every other new event type this session (8.0 base
+    importance, `StoryCategory.TOWN_NEWS`), so no further scoring/newspaper
+    wiring was needed. Deliberately did not reuse `EventType.TOWN_MILESTONE`
+    even though it "might fit loosely" per the brief — its 60.0 base
+    importance and "real town accomplishment" flavour don't suit ambient
+    background news the town merely overhears, so a new type was the more
+    honest choice. Framed as background/abstract town-wide news (a line of
+    overheard talk), never personal.
+  - **Mechanical mapping — one clean hook only.** Per the brief's explicit
+    instruction to pick ONE well-justified hook rather than touching
+    multiple systems: only `FUEL_PRICES_RISE`/`FUEL_PRICES_EASE` currently
+    map to anything mechanical — a multiplier
+    (`WorldPressureMechanicMapper.overheadMultiplier`, 1.15 rise / 0.92 ease
+    / 1.0 otherwise) composed directly into `EconomySystem.dailySettlement`'s
+    existing per-business overhead expense line
+    (`overheads(biz.type) * WorldPressureMechanicMapper.overheadMultiplier(state)`)
+    — the literal "fuel prices rise → delivery costs rise" chain the
+    backlog names, landing on the one place in the codebase that already
+    models a business's costs. `PriceDriftSystem`'s struggling-bias and
+    `BusinessRivalrySystem`'s standing calculation were deliberately left
+    untouched in this pass — composing a second hook onto either would blur
+    which system actually caused a given price/rivalry change, undermining
+    the "strict mapping" / traceability constraint the brief explicitly
+    calls out. The other six curated kinds (harvest, trade routes,
+    confidence) are recorded and reported on but carry **no** mechanical
+    effect yet — honestly scoped as flavour-only rather than bolted onto an
+    unrelated system just to give every kind "something to do".
+- Modelled with a new `ExternalPressureKind` enum and `ExternalPressure`
+  data class (`core/model/WorldState.kt`) plus a single new
+  `WorldState.externalPressure: ExternalPressure?` field (`null` most of the
+  time) — a plain new field with a safe default, no schema migration. All
+  randomness (whether a pressure starts, which kind, how long it runs) goes
+  through `ctx.rng`, never `Math.random()`.
+- Docs: new "Phase 4: External world pressure" top-level section in
+  `docs/simulation-rules.md`, placed after the existing Phase 3 sections and
+  before "Offline catch-up" (the first Phase 4 content in that document);
+  tick-pipeline summary line at the top also updated.
+  `docs/backlog.md`'s Phase 4 bullet list updated: `ExternalWorldEventProvider`
+  marked `[x]` as a scoped-down MVP with `WorldPressureMapper` named
+  explicitly; `NarrativeTextProvider`/`DialogueProvider`, the national layer,
+  and shareable town chronicles all explicitly marked still open, with a
+  one-line note each on why this pass didn't (and shouldn't have) touched
+  them.
+
+Deliberately scoped out, stated explicitly per the task brief: the
+`NarrativeTextProvider`/`DialogueProvider` LLM narrative layer (this
+system's pressure descriptions are small, fixed, hand-written strings per
+kind, not generated text, and are not a substitute for that item); the
+richer "national layer" country context (taxes, broader trends) beyond this
+one pressure slot; shareable town chronicles export. Within
+`ExternalWorldEventProvider` itself: no overlapping/stacking pressures (one
+active at a time, by design); no mechanical effect for six of the eight
+curated kinds (harvest/trade routes/confidence are flavour-only for now).
+
+Not run this session (per the parallel-work constraint): `./gradlew`
+build/test and any `git` commands. Code-only, ready for the orchestrating
+session to build/test/commit.
+
 ### 2026-07-10 — Phase 3: generational play — family reputation, era summary
 
 Closes out the "Generational play" Phase 3 item's last two open pieces
@@ -1087,8 +1206,35 @@ rather than duplicating it wholesale into this doc.
 - Family tree visualisation (proper generational graph) and a relationship
   map canvas on the People screen.
 - Cause viewer as a dedicated branching timeline UI (multi-parent display).
-- Follow "moments": short vignette cards when the followed resident does
-  something notable.
+- [x] Follow "moments": short vignette cards when the followed resident does
+  something notable. *Implemented in `TownScreen.kt`, reusing the event-banner
+  stacking mechanism (`mutableStateListOf`/`LaunchedEffect`/`AnimatedVisibility`)
+  built earlier this phase rather than inventing a new animation system. A
+  "moment" is the newest event from `recentEvents` where the followed resident
+  (`WorldUi.followedResidentId`) is source or target
+  (`EventUi.involvedResidentIds`) **and** it clears the same notability bar
+  used everywhere else in the app for "this mattered"
+  (`ImportanceScorer.HISTORY_THRESHOLD`, the same constant the History
+  timeline and era-summary feature already use) — no new repository surface
+  area was needed, this is all client-side filtering over data already
+  exposed. Presentation is deliberately more prominent than the plain event
+  banner: a single Gold-toned card (vs. the banner's plain Cream), the
+  followed resident's own `PixelAvatar` (reusing `poseFor`/`SpriteProvider`,
+  the same call the resident sheet already makes), and the event's own
+  `description` text as the narrative line — no separate text-generation
+  system. Bounded to feel special rather than noisy: at most one moment card
+  on screen at a time (a single `followMoment` slot, not a list), an 8s dwell
+  time (vs. banners' 4s) before it fades out, and a 15s cooldown after
+  dismissal before the next moment can appear. Tapping the card reuses the
+  existing `viewModel.openEvent(id)` navigation the generic banner already
+  had. If the same event would also have appeared as a plain banner, it's
+  filtered out of that stack to avoid showing the same happening twice at
+  once. Deferred: no distinct "moment" sound/haptic, no queueing of
+  near-miss notable events once the cooldown/slot is occupied (they're simply
+  dropped, matching the "special, not a queue" design goal), no dedicated
+  history of past moments (they remain visible via the ordinary event log).
+  Not visually verified on a device/emulator — implemented by careful reading
+  of the existing Compose patterns in this file, pending manual review.*
 - Real local notifications (opt-in, POST_NOTIFICATIONS permission flow) for
   followed/favourite residents only, delivered on app open or via WorkManager
   summary — still no continuous background work.
@@ -1219,16 +1365,38 @@ rather than duplicating it wholesale into this doc.
 
 ## Phase 4 — The outside world (the seams come alive)
 
-- `ExternalWorldEventProvider`: curated, abstracted real-world pressure feed
-  (fuel prices rise → delivery costs rise → the chain the prototype already
-  models). Strict mapping through `WorldPressureMapper`; no real names,
-  no politics-of-the-day.
+- [x] `ExternalWorldEventProvider`: curated, abstracted real-world pressure
+  feed (fuel prices rise → delivery costs rise → the chain the prototype
+  already models). Strict mapping through `WorldPressureMapper`; no real
+  names, no politics-of-the-day. **Implemented 2026-07-10 as a deliberately
+  scoped-down MVP**, per the task brief's explicit instruction not to
+  attempt the whole vision: at most one active pressure at a time
+  (town-wide, no stacking), eight hand-curated abstract kinds in matched
+  rise/ease pairs, one clean mechanical hook only (`FUEL_PRICES_RISE`/
+  `FUEL_PRICES_EASE` nudge `EconomySystem`'s per-business overhead expense
+  via a mapper's `overheadMultiplier`) — the other six kinds are
+  flavour-only, honestly reported with no mechanical effect yet rather than
+  bolted onto an unrelated system. **Naming note:** the brief's exact names
+  turned out to already be claimed by pre-existing, unrelated placeholder
+  interfaces (`core/simulation/providers/FutureProviders.kt`, DI-wired in
+  `AppModule.kt`, reserved for a later real/async feed) — the concrete
+  engine-internal types here are named `CuratedWorldPressureFeed` and
+  `WorldPressureMechanicMapper` instead, to avoid a same-name-different-
+  package collision; the placeholder interfaces are untouched. See
+  `docs/simulation-rules.md#phase-4-external-world-pressure`.
 - `NarrativeTextProvider` / `DialogueProvider`: an LLM narrative layer that
   writes flavour prose and dialogue *from* facts, never creating facts —
   enforced by the existing engine-only-mutates rule and validated against the
-  event log.
+  event log. **Still open** — explicitly not attempted this session; the new
+  `CuratedWorldPressureFeed` above uses small, fixed, hand-written strings
+  per pressure kind, not generated text, and is not a substitute for this
+  item.
 - National layer: lightweight country context (taxes, trends) as pressures.
-- Shareable town chronicles: export a family's saga as text/images.
+  **Still open** — `CuratedWorldPressureFeed`'s single pressure slot is a
+  narrow first slice of "outside world" texture, not the richer national
+  context (taxes, broader economic trends) this item describes.
+- Shareable town chronicles: export a family's saga as text/images. **Still
+  open** — not attempted this session.
 
 ## Engineering debt to pay alongside
 

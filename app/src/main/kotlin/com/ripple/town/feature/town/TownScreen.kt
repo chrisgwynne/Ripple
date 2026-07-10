@@ -52,6 +52,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import com.ripple.town.core.model.SimSpeed
 import com.ripple.town.core.model.TimeOfDay
 import com.ripple.town.core.model.Weather
+import com.ripple.town.core.simulation.ImportanceScorer
+import com.ripple.town.core.ui.PixelAvatar
 import com.ripple.town.core.ui.RippleColors
 import com.ripple.town.core.ui.SpriteProvider
 import com.ripple.town.data.EventUi
@@ -94,6 +96,31 @@ fun TownScreen(
         if (eventBanners.none { it.id == latest.id }) {
             eventBanners.add(0, latest)
             while (eventBanners.size > 2) eventBanners.removeAt(eventBanners.lastIndex)
+        }
+    }
+
+    // Follow moments: the core promise of the app ("watch their world continue
+    // without you") surfaced as a single, more prominent vignette card — distinct
+    // from the generic event-banner ticker above, which shows ANY town event.
+    // A "moment" is an event where the *followed* resident is source or target
+    // AND it clears the same notability bar used everywhere else in the app for
+    // "this mattered" (ImportanceScorer.HISTORY_THRESHOLD — see EraSummary/history
+    // timeline). At most one card at a time, with a cooldown so two moments can't
+    // fire back-to-back — both enforced by only ever tracking a single
+    // `followMoment` slot and only replacing it once the previous one has cleared.
+    var followMoment by remember { mutableStateOf<EventUi?>(null) }
+    var followMomentCooldownUntil by remember { mutableStateOf(0L) }
+    LaunchedEffect(recentEvents, world?.followedResidentId) {
+        val followedId = world?.followedResidentId ?: return@LaunchedEffect
+        val latest = recentEvents.firstOrNull() ?: return@LaunchedEffect
+        if (followMoment?.id == latest.id) return@LaunchedEffect
+        val now = System.currentTimeMillis()
+        if (followMoment == null &&
+            now >= followMomentCooldownUntil &&
+            latest.importance >= ImportanceScorer.HISTORY_THRESHOLD &&
+            followedId in latest.involvedResidentIds
+        ) {
+            followMoment = latest
         }
     }
 
@@ -182,9 +209,76 @@ fun TownScreen(
                 Spacer(Modifier.weight(1f))
                 HudChip("✨ ${w.nudges}/${w.maxNudges}")
             }
+            // Follow moment: a single, more prominent vignette card for something
+            // notable the followed resident just did/experienced. Longer dwell time
+            // than the plain banners below — these are meant to feel special, not
+            // like ticker noise — and clears the cooldown window on dismiss so the
+            // next moment can't immediately replace it.
+            followMoment?.let { moment ->
+                key(moment.id) {
+                    var visible by remember { mutableStateOf(true) }
+                    val followedResident = w.resident(w.followedResidentId)
+                    LaunchedEffect(moment.id) {
+                        delay(8_000)
+                        visible = false
+                        delay(300)
+                        followMoment = null
+                        followMomentCooldownUntil = System.currentTimeMillis() + 15_000
+                    }
+                    AnimatedVisibility(
+                        visible = visible,
+                        enter = fadeIn() + slideInVertically(initialOffsetY = { -it / 2 }),
+                        exit = fadeOut() + slideOutVertically(targetOffsetY = { -it / 2 })
+                    ) {
+                        Column {
+                            Spacer(Modifier.height(8.dp))
+                            Surface(
+                                shape = RoundedCornerShape(14.dp),
+                                color = RippleColors.Gold.copy(alpha = 0.95f),
+                                shadowElevation = 4.dp,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { viewModel.openEvent(moment.id) }
+                            ) {
+                                Row(
+                                    Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (followedResident != null) {
+                                        PixelAvatar(
+                                            followedResident.sprite, sprites, size = 40.dp,
+                                            pose = poseFor(followedResident),
+                                            lifeStage = followedResident.lifeStage,
+                                            occupation = followedResident.occupation,
+                                            background = RippleColors.Cream
+                                        )
+                                        Spacer(Modifier.width(10.dp))
+                                    }
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            "A moment worth watching",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = RippleColors.Ink.copy(alpha = 0.65f)
+                                        )
+                                        Text(
+                                            moment.description,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = RippleColors.Ink,
+                                            maxLines = 3,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             // Live event banners: newest first, max 2, each fades/slides in and
-            // auto-dismisses independently a few seconds after it appears.
-            eventBanners.forEach { banner ->
+            // auto-dismisses independently a few seconds after it appears. Skips
+            // whichever event is currently showing as the (more prominent) follow
+            // moment card above, so the same happening isn't shown twice at once.
+            eventBanners.filter { it.id != followMoment?.id }.forEach { banner ->
                 key(banner.id) {
                     var visible by remember { mutableStateOf(true) }
                     LaunchedEffect(banner.id) {

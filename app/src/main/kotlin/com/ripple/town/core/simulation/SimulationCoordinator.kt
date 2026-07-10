@@ -83,7 +83,10 @@ class SimulationCoordinator(
         // reputation competition, owner resentment), town-wide price drift (independent,
         // slow inflation/deflation on top of rivalry-driven demand shifts), business
         // succession (elderly owners voluntarily handing down to a working adult child),
-        // property market (households buying the home they already live in, cash only).
+        // property market (households buying the home they already live in, cash only),
+        // external world pressure (Phase 4: a single curated, abstract national-scale
+        // pressure that may start or resolve, mapped through WorldPressureMechanicMapper to a
+        // small nudge on EconomySystem's overhead expenses).
         if (newDay) {
             HealthSystem.updateDaily(ctx)
             LifecycleSystem.updateDaily(ctx)
@@ -96,6 +99,7 @@ class SimulationCoordinator(
             PriceDriftSystem.updateDaily(ctx)
             BusinessSuccessionSystem.updateDaily(ctx)
             PropertyMarketSystem.updateDaily(ctx)
+            CuratedWorldPressureFeed.updateDaily(ctx)
         }
         // 13. Intervention influence regenerates through observation.
         InterventionEngine.regenerate(state, SimTime.MINUTES_PER_TICK)

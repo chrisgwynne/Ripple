@@ -60,7 +60,10 @@ enum class EventType(val label: String) {
     PETITION_RESOLVED("Petition resolved"),
     PRICES_SHIFTED("Prices shifting"),
     BUSINESS_SUCCESSION("Business handed down"),
-    HOME_PURCHASED("Home purchased")
+    HOME_PURCHASED("Home purchased"),
+    /** A curated, abstract national-scale pressure starting or resolving. See
+     *  `ExternalWorldEventProvider`. Deliberately background/town-wide news, not personal. */
+    NATIONAL_PRESSURE("National pressure")
 }
 
 enum class EventVisibility {
