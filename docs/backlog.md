@@ -2,6 +2,84 @@
 
 The prototype proves the foundation. Three phases follow.
 
+## Session log
+
+### 2026-07-10 — Phase 2 simulation: affairs, rumours, building repairs
+
+No `./gradlew` wrapper was checked in, so the README's build instructions
+didn't actually work and the test suite had apparently never been run
+locally. Added the wrapper (Gradle 9.4.1) and got a real build/test loop
+going (JDK 21 via the Android Studio bundled JBR, Android SDK), then worked
+three Phase 2 **Simulation** backlog items end to end — implementation, a
+`docs/simulation-rules.md` section, and a full local `testDebugUnitTest`
+pass after each:
+
+- **Affairs and their discovery.** New `RelationshipKind.AFFAIR`. A
+  committed resident can drift into one when their existing partnership is
+  *vulnerable* (low affection / high resentment) and not too closely
+  watched — *vigilance* is a modifier on the existing `dependency` and
+  `resentment` dimensions rather than a new tracked "jealousy" value, so it
+  composes with everything already there. Affairs begin `HIDDEN`
+  (`AFFAIR_BEGAN`), surface naturally (chance grows with the affair's own
+  shared history and the deceived partner's vigilance) or via the `Reveal`
+  intervention (now also checks for an ongoing affair, not just hidden
+  health conditions), and discovery (`AFFAIR_DISCOVERED`) crashes
+  trust/affection, spikes resentment, and has a 55% chance of ending the
+  partnership via the existing separation/divorce path. See
+  `docs/simulation-rules.md#affairs--jealousy`.
+- **Rumour system.** New `RumourSystem`, run every tick. Gossip-worthy
+  `PRIVATE` events (arguments, affairs discovered, break-ups, rivalries,
+  secrets revealed…) can leak into a new `PUBLIC` `RUMOUR_SPREAD` event,
+  which is the *only* way something private reaches `NewspaperGenerator` —
+  the paper only ever reads public events. Leak chance comes from severity
+  plus how many high-familiarity relationship edges surround those
+  involved. ~55% of leaks are accurate paraphrases with a real cause link
+  back to the truth; the rest are distorted (wrong resident dragged in,
+  story downplayed or inflated) and carry **no** cause link, so the cause
+  viewer never shows a false lineage for something that didn't really
+  happen that way. See `docs/simulation-rules.md#rumours`.
+- **Building lifecycle — repairs.** `Building.condition`, `.value` and
+  `.visibleChanges` already existed and storm damage already lowered
+  condition, but nothing ever raised it back up. New
+  `BuildingLifecycleSystem` runs daily: any non-abandoned building below
+  condition 55 looks for a payer (the trading business, or the wealthiest
+  resident actually living there for homes) and, if they can afford
+  `(100 − condition) × 9`, has a 15%/day chance of getting it fixed —
+  condition rises 25–45, `BUILDING_REPAIRED` fires, and "Storm damage"
+  clears from `visibleChanges`. Homes below condition 40 now also chip at
+  residents' comfort, the same way persistent noise does, so this isn't
+  purely cosmetic. Renovation choices, new construction and demolition are
+  still open (see backlog item below). See
+  `docs/simulation-rules.md#building-lifecycle`.
+
+Also fixed a stale assertion in `CatchUpAndNewspaperTest` — it expected 120
+in-game minutes for a 2-hour catch-up, but the documented 1s-real =
+1min-game pacing makes the correct value 7200; the test's own comment had
+simply confused hours and minutes.
+
+**Discovered and flagged, not fixed** (confirmed pre-existing and unrelated
+to the above via code-path analysis — none of them touch the systems
+changed this session — and each spun off as a separate background task
+rather than scope-creeping into this pass):
+- `WorldGeneratorTest` "scenario seeds are planted" — two seeded buildings
+  overlap in the default map layout (`WorldGenerator`'s placement logic).
+- `GoalAndEconomyTest` "goals form from combined circumstances not
+  randomness" — the seeded resident Ash Thistle forms `FIND_JOB` instead of
+  the expected `START_BUSINESS` (`GoalSystem` condition logic or the seed
+  data has drifted).
+- `MigrationTest` "schema v1 matches..." — `FileNotFoundException`; the
+  exported Room schema-v1 JSON the test reads was never generated or
+  committed (`copyRoomSchemas` shows `NO-SOURCE`).
+
+All work is committed on `claude/ripple-android-prototype-a0gsi8` (not
+pushed): gradle wrapper + `.gitignore` cleanup, the three feature commits,
+and the test fix.
+
+**Not attempted this session:** everything else below. The remaining Phase
+2 **Product** items need Compose/UI work or external art/audio assets;
+Phase 3 and 4 are a substantially larger undertaking (generational systems,
+local politics, an LLM narrative layer, etc.).
+
 ## Phase 2 — Depth of life (make watching richer)
 
 **Simulation**
