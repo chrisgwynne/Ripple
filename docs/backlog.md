@@ -17,8 +17,13 @@ The prototype proves the foundation. Three phases follow.
 - Education/skill pipeline for children and teens; returning students
   (Kit-style leavers can come back changed).
 - Richer crime: motives, suspicion, constable NPC role, false accusations.
-- Building lifecycle: repairs, renovation choices by owners, new construction
-  on empty lots, demolition.
+- [~] Building lifecycle: repairs, renovation choices by owners, new
+  construction on empty lots, demolition. *Repairs implemented
+  (`BuildingLifecycleSystem`, `BUILDING_REPAIRED`, condition now affects home
+  comfort) — see `docs/simulation-rules.md#building-lifecycle`. Renovation
+  choices, new construction and demolition still open; the latter two need
+  map/tile placement work, which is riskier while the building-overlap bug
+  below is unresolved.*
 - Seasonal events: harvest fair, winter market, floods by the river tiles.
 
 **Product**
@@ -74,3 +79,12 @@ The prototype proves the foundation. Three phases follow.
   grow.
 - Schema v2 migration + migration tests (baseline harness already in place).
 - Baseline profile + R8 tuning for release builds.
+- No gradle wrapper was checked in (`./gradlew` from the README didn't
+  actually work) — now added. First real local test run surfaced three
+  pre-existing failures, confirmed unrelated to Phase 2 simulation work via
+  code-path analysis and flagged as background tasks: `WorldGeneratorTest`
+  "scenario seeds are planted" (two seeded buildings overlap in the default
+  map layout), `GoalAndEconomyTest` "goals form from combined circumstances
+  not randomness" (Ash Thistle forms `FIND_JOB` instead of the expected
+  `START_BUSINESS`), and `MigrationTest` "schema v1 matches..." (the
+  exported Room schema-v1 JSON the test reads was never generated/committed).

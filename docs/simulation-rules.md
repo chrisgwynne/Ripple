@@ -126,6 +126,20 @@ carry **no** cause link at all — the cause viewer, reading only known history,
 never shows a false lineage for something that didn't really happen that way.
 Bounded to 2 leaks per tick.
 
+## Building lifecycle
+
+Storm damage (30 % of storms, condition −6..−18, floor 5) is the only thing
+that currently lowers a building's `condition`; `BuildingLifecycleSystem` is
+what brings it back. Daily, any non-abandoned building below condition 55
+looks for a payer — the business trading there (from its balance) or, for
+homes, the wealthiest resident actually living there (personal wealth, must
+be > 200) — at a cost of `(100 − condition) × 9`. If the payer can afford it,
+there's a 15 %/day chance they get round to it: condition rises 25–45,
+"Storm damage" clears from `visibleChanges`, and a `BUILDING_REPAIRED` event
+is emitted. Bounded to 3 repairs per day. A home below condition 40 also
+chips at its residents' comfort, the same way persistent noise does — repairs
+aren't just cosmetic.
+
 ## Family & generations
 
 Births to fertile couples (both 20–44, affection ≥ 55) at

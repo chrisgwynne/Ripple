@@ -76,11 +76,12 @@ class SimulationCoordinator(
         DelayedEffectSystem.update(ctx)
         // 9b. Private events may leak into public rumour.
         RumourSystem.update(ctx)
-        // 10-12. Daily passes: health, lifecycle (births/deaths/election), goals.
+        // 10-12. Daily passes: health, lifecycle (births/deaths/election), goals, building repairs.
         if (newDay) {
             HealthSystem.updateDaily(ctx)
             LifecycleSystem.updateDaily(ctx)
             GoalSystem.updateDaily(ctx)
+            BuildingLifecycleSystem.updateDaily(ctx)
         }
         // 13. Intervention influence regenerates through observation.
         InterventionEngine.regenerate(state, SimTime.MINUTES_PER_TICK)

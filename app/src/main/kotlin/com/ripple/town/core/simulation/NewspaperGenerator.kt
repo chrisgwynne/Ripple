@@ -98,7 +98,7 @@ object NewspaperGenerator {
         EventType.WEATHER_DAMAGE -> StoryCategory.WEATHER
         EventType.ELECTION_WON, EventType.ELECTION_CALLED -> StoryCategory.TOWN_NEWS
         EventType.MEETING, EventType.FRIENDSHIP_FORMED, EventType.COMMUNITY_EVENT,
-        EventType.RUMOUR_SPREAD -> StoryCategory.HUMAN_INTEREST
+        EventType.RUMOUR_SPREAD, EventType.BUILDING_REPAIRED -> StoryCategory.HUMAN_INTEREST
         else -> StoryCategory.TOWN_NEWS
     }
 
