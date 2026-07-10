@@ -97,7 +97,8 @@ object NewspaperGenerator {
         EventType.ILLNESS_DIAGNOSED, EventType.ILLNESS_RECOVERED -> StoryCategory.HEALTH
         EventType.WEATHER_DAMAGE -> StoryCategory.WEATHER
         EventType.ELECTION_WON, EventType.ELECTION_CALLED -> StoryCategory.TOWN_NEWS
-        EventType.MEETING, EventType.FRIENDSHIP_FORMED, EventType.COMMUNITY_EVENT -> StoryCategory.HUMAN_INTEREST
+        EventType.MEETING, EventType.FRIENDSHIP_FORMED, EventType.COMMUNITY_EVENT,
+        EventType.RUMOUR_SPREAD, EventType.BUILDING_REPAIRED -> StoryCategory.HUMAN_INTEREST
         else -> StoryCategory.TOWN_NEWS
     }
 
@@ -139,6 +140,9 @@ object NewspaperGenerator {
             EventType.PERSON_BORN -> "A new resident, pocket-sized"
             EventType.CRIME_REPORTED, EventType.CRIME_COMMITTED -> "Unease on the high street"
             EventType.BUSINESS_STRUGGLING -> "Hard times for a local trader"
+            EventType.RUMOUR_SPREAD -> rng.pick(listOf(
+                "Talk of the town", "What the town is saying", "Whispers and word-of-mouth"
+            ))
             else -> e.type.label
         }
     }

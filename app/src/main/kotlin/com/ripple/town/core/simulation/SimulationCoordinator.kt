@@ -74,11 +74,14 @@ class SimulationCoordinator(
         EconomySystem.update(ctx)
         // 9. Delayed effects whose windows are open.
         DelayedEffectSystem.update(ctx)
-        // 10-12. Daily passes: health, lifecycle (births/deaths/election), goals.
+        // 9b. Private events may leak into public rumour.
+        RumourSystem.update(ctx)
+        // 10-12. Daily passes: health, lifecycle (births/deaths/election), goals, building repairs.
         if (newDay) {
             HealthSystem.updateDaily(ctx)
             LifecycleSystem.updateDaily(ctx)
             GoalSystem.updateDaily(ctx)
+            BuildingLifecycleSystem.updateDaily(ctx)
         }
         // 13. Intervention influence regenerates through observation.
         InterventionEngine.regenerate(state, SimTime.MINUTES_PER_TICK)

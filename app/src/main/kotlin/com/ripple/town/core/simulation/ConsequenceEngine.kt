@@ -284,6 +284,34 @@ object ConsequenceEngine {
             }
         ))
 
+        put(EventType.AFFAIR_DISCOVERED, listOf(
+            ConsequenceRule(EventType.AFFAIR_DISCOVERED, "trust shatters") { ctx, e ->
+                val cheater = e.sourceResidentId?.let { ctx.state.resident(it) } ?: return@ConsequenceRule
+                val spouse = e.targetResidentIds.getOrNull(0)?.let { ctx.state.resident(it) } ?: return@ConsequenceRule
+                val rel = ctx.state.relationship(cheater.id, spouse.id) ?: return@ConsequenceRule
+                rel.trust -= 45.0
+                rel.affection -= 35.0
+                rel.resentment += 40.0
+                rel.clampAll()
+                cheater.needs.stress += 20.0
+                cheater.reputation -= 15.0
+                spouse.needs.stress += 25.0
+                delayed(ctx, e, DelayedEffectType.RELATIONSHIP_PRESSURE, 0.9, 0.5, 6.0,
+                    targetResidentId = spouse.id, secondaryResidentId = cheater.id,
+                    condition = EffectCondition.BOTH_ALIVE, note = "The betrayal is still raw")
+            },
+            ConsequenceRule(EventType.AFFAIR_DISCOVERED, "the marriage may not survive", probability = 0.55) { ctx, e ->
+                val cheater = e.sourceResidentId?.let { ctx.state.resident(it) } ?: return@ConsequenceRule
+                val spouse = e.targetResidentIds.getOrNull(0)?.let { ctx.state.resident(it) } ?: return@ConsequenceRule
+                if (!cheater.inTown || !spouse.inTown) return@ConsequenceRule
+                val rel = ctx.state.relationship(cheater.id, spouse.id) ?: return@ConsequenceRule
+                if (rel.kind != com.ripple.town.core.model.RelationshipKind.SPOUSE &&
+                    rel.kind != com.ripple.town.core.model.RelationshipKind.PARTNER
+                ) return@ConsequenceRule
+                InteractionSystem.endPartnership(ctx, cheater, spouse, rel, married = rel.kind == com.ripple.town.core.model.RelationshipKind.SPOUSE)
+            }
+        ))
+
         put(EventType.SECRET_REVEALED, listOf(
             ConsequenceRule(EventType.SECRET_REVEALED, "trust shaken") { ctx, e ->
                 val about = e.sourceResidentId ?: return@ConsequenceRule

@@ -10,6 +10,7 @@ enum class RelationshipKind(val label: String) {
     RIVAL("Rival"),
     PARTNER("Partner"),
     SPOUSE("Spouse"),
+    AFFAIR("Secret affair"),
     FORMER_PARTNER("Former partner"),
     FAMILY("Family"),
     ESTRANGED_FAMILY("Estranged family")

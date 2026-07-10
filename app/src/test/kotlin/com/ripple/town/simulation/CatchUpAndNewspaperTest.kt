@@ -29,10 +29,10 @@ class CatchUpAndNewspaperTest {
     fun `short absences advance the exact elapsed time`() {
         val coordinator = TestWorld.newCoordinator()
         val start = coordinator.state.time
-        // 2 real hours at 1x = 2 in-game hours = 12 ticks.
+        // At 1x, 1 real second = 1 in-game minute, so 2 real hours = 7200 in-game minutes.
         val summary = coordinator.catchUp(2L * 60 * 60 * 1000)
         assertThat(summary.capped).isFalse()
-        assertThat(coordinator.state.time - start).isEqualTo(2 * SimTime.MINUTES_PER_HOUR)
+        assertThat(coordinator.state.time - start).isEqualTo(2L * 60 * SimTime.MINUTES_PER_HOUR)
     }
 
     @Test

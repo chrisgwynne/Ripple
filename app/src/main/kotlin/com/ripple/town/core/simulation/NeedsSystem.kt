@@ -80,6 +80,8 @@ object NeedsSystem {
                     .filter { it.id != home.id && it.noise > 40 }
                     .any { it.centre().manhattan(home.centre()) <= NOISE_RADIUS }
                 if (noisy) n.comfort -= 0.25
+                // A home falling into disrepair chips at comfort too.
+                if (home.condition < 40.0) n.comfort -= 0.15
             }
 
             // Financial security tracks wealth vs debt slowly
