@@ -182,6 +182,58 @@ resident and gated on the receiver being an adult, so this cannot spam
 goals — it's a rare nudge on top of goal generation's own existing gates
 (ambition, skill, a vacant building), not a parallel goal-formation path.
 
+### Personality-shaped relationship thresholds (added 2026-07-11)
+
+Before this date, every relationship-kind transition in `InteractionSystem` compared the pair's
+dimensions against flat, universal constants — identical for every resident regardless of
+empathy, patience, impulsiveness, or honesty. Fixed with `RelationshipInterpretationSystem`, a
+pure-function threshold layer `InteractionSystem` calls into at the exact points the flat
+constants used to sit: the surrounding transition logic (which dimensions are compared, what
+happens on transition, event emission) is untouched — only the threshold *values* are now a
+function of the two residents involved.
+
+**Formula.** For a resentment-side threshold (the value resentment must exceed to trigger a
+negative transition):
+
+```
+effective = BASE + (empathy + patience - 1.0) * SPREAD - (impulsiveness + (1.0 - honesty) - 1.0) * SPREAD
+```
+
+clamped to `[BASE - 18, BASE + 18]` (`MAX_SWING`), `SPREAD = 12.0`. Both bracketed terms are
+centred on `1.0` (both traits at their `0.5` birth-default midpoint), so an average resident
+reproduces the original flat constant exactly. Higher empathy+patience (forgiveness-adjacent)
+raises the threshold — harder to trigger, more resentment tolerated. Higher impulsiveness and
+lower honesty (per the existing honesty↔trust-in-others mapping, see "Personality drift from
+lived experience" above) lower it — an impulsive, less-trusting resident gives up sooner. An
+affection-side threshold (the floor affection must drop below) uses the same two terms with the
+sign flipped: a more tolerant resident's floor sits *lower*, since affection has to fall further
+before it reads as unsalvageable. Every function reads `Resident.effectivePersonality()` (birth
+baseline + lifetime drift) on both residents — a resident's *current* tolerance, not who they
+were at birth.
+
+**Whose threshold governs.** `Relationship` stores one shared `kind` per unordered pair, not a
+per-direction record — and curdling only takes one party giving up. The **less tolerant of the
+two residents' effective thresholds governs**: `min` of the two resentment thresholds (whichever
+is easier to cross), `max` of the two affection floors (whichever a falling affection value
+crosses first).
+
+**Covered transitions**, each with resentment/affection sides computed independently:
+
+- `RelationshipKind.RIVAL` formation (base 55 resentment / 30 affection floor)
+- `PARTNER` → break-up (base 60 / 30)
+- `SPOUSE` → separation (base 72 / 25)
+- `SPOUSE` (separated) → divorce, resentment-only (base 60)
+
+Friend/close-friend formation (`warmth() > 32/55`) remains a flat threshold for now — not yet
+extended, flagged as a follow-up rather than silently left universal.
+
+**Bounded & deterministic.** No new `ctx.rng` calls: personality is already the deterministic
+source of variation (birth Gaussian + `PersonalityDevelopmentSystem` drift), so no additional
+randomness is needed here. Every threshold clamps to within `±18` of its original flat value —
+the most tolerant possible pair still eventually curdles under enough sustained friction, and
+the least tolerant possible pair still needs some real friction first; this is a bounded
+reinterpretation of the existing design, not an unbounded rewrite.
+
 ## Affairs & jealousy
 
 A committed resident can still feel a rare spark outside their partnership —
@@ -1242,6 +1294,64 @@ and optional formed beliefs ("The clinic caught it in time"). Intensity and
 accuracy decay yearly; memories below importance 40 evaporate once faded;
 a resident keeps at most 40, discarding the least important. Memories feed
 goal generation (e.g. inspiration memories enable `START_BUSINESS`).
+
+### Memory recall (added 2026-07-11)
+
+Memory stops being write-only. `MemoryRecallSystem.updateDaily` — the last daily system in the
+pipeline, after `EmotionSystem`/`PersonalityDevelopmentSystem` — checks each detailed resident's
+*current* context against their own eligible memories (`importance >= MIN_RESURFACE_IMPORTANCE`,
+40.0, matching `PersonalityDevelopmentSystem`'s own significance bar) for a match, on three
+cheap, practical triggers (a fourth — "similar event type recurring" — was considered but
+dropped: without a per-memory `EventType` field the only honest way to check it is chasing
+`memory.eventId` through the event index every day for every resident, which is neither cheap
+nor bounded the way the other three are):
+
+1. **Same location** — the resident's `currentBuildingId` names a building whose name appears in
+   a memory's `description`. `Memory` carries no direct building reference, so this reuses the
+   exact text-matching proxy `TownSheets.priorMemoryEcho` already uses at the UI layer, just
+   applied at the simulation layer instead of only at display time.
+2. **Same person** — the resident is now co-located with someone listed in a memory's
+   `associatedResidentIds` (checked via `WorldState.residentsIn`).
+3. **Emotional-state echo** — the resident currently has an `ActiveEmotion` whose type matches
+   the nearest emotional flavour of an old memory's `MemoryType` (`echoEmotionFor`, e.g.
+   `LOSS`→`GRIEF`, `BETRAYAL`/`ARGUMENT`→`ANGER`, `ACHIEVEMENT`→`PRIDE`). The cheapest, most
+   mechanical of the three — no location or company lookup needed.
+
+**Bounded-vs-duplicate design choice.** A resurfacing does **not** create a new `Memory` row. It
+updates the *original* memory in place: `lastRecalledAt` is bumped to now (a field that existed
+on `Memory` since it was first introduced but, before this system, was only ever set once at
+creation and never read or updated again), and `importance`/`emotionalIntensity` each get a
+small, capped bump (`IMPORTANCE_BUMP` 1.5, `INTENSITY_BUMP` 1.0, clamped at 100). This was chosen
+over spawning a new "echo" memory for three reasons: it needs no schema change (the field for
+"this got recalled" already existed, unused); it respects `TickContext.addMemory`'s existing
+40-memory cap for free — recalling a memory can never by itself grow the list; and it matches
+this session's established tone (`PersonalityDevelopmentSystem`, `EmotionSystem`) of a small
+bounded modifier on existing state rather than a new parallel entity type. A resurfaced memory is
+still exactly the memory it was, just freshened and a little more vivid — closer to what recall
+actually is than an ever-growing log of separate recollection events would be.
+
+Each resurfacing spawns a real emotion via `EmotionSystem.spawnEmotion`, at
+`RESURFACE_INTENSITY_FACTOR` (0.4) of the *original* memory's `emotionalIntensity` — an echo, not
+a re-living — and emits a low-severity (0.08), `PRIVATE` `EventType.MEMORY_RECALLED` event for
+the cause chain (never newsworthy — `NewspaperGenerator` only ever reads `PUBLIC` events).
+Bounded frequency: a per-(resident, memory) cooldown reuses the exact `Resident.awareness`
+string-ledger convention `PersonalityDevelopmentSystem.onCooldown`/`markCooldown` established
+(own `memory_recall_cooldown:` namespace prefix), `SAME_MEMORY_COOLDOWN_DAYS` = 14 — so a memory
+that still matches a trigger every day doesn't resurface every day, but can resurface again later.
+
+**Childhood-to-adulthood influence.** `MemoryRecallSystem.childhoodInfluenceModifier(resident,
+situation)` returns a small, bounded `0.9..1.1` multiplier (exactly `1.0` — no effect — when
+there's no matching memory) reflecting how a significant `LOSS`/`FEAR`/`HARDSHIP_SHARED` memory
+formed while the resident was a `CHILD`/`TEEN` (checked against their real `bornAt` via
+`lifeStageAt(memory.createdAt)`) quietly shades their adult decisions in a similar situation —
+never a hard-coded "destiny" flag, always keyed off real recorded data. Two cases are wired into
+real call sites (`GoalSystem.generateFromCircumstance`): a childhood memory of a family business
+failing (`ChildhoodSituation.BUSINESS_FAILURE`) raises the ambition bar the `START_BUSINESS`
+branch requires (0.45 → ~0.405, a resident needs to be a touch more driven before taking the same
+leap their family once failed at); a childhood memory of family financial hardship
+(`ChildhoodSituation.FINANCIAL_HARDSHIP`) raises the `FIND_JOB` branch's financial-security
+trigger threshold (45.0 → 49.5, so money troubles read as urgent a little sooner). The hook is
+general enough for more call sites later — only these two are actually plumbed in this pass.
 
 ## Goals
 

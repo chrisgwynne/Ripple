@@ -378,13 +378,20 @@ object InteractionSystem {
                 ConsequenceEngine.onEvent(ctx, e)
             }
 
-            // Break-ups and separations under sustained resentment
-            if (rel.kind == RelationshipKind.PARTNER && rel.resentment > 60 && rel.affection < 30) {
+            // Break-ups and separations under sustained resentment — thresholds are
+            // personality-shaped per pair, see RelationshipInterpretationSystem.
+            if (rel.kind == RelationshipKind.PARTNER &&
+                rel.resentment > RelationshipInterpretationSystem.partnerBreakupResentmentThresholdFor(a, b) &&
+                rel.affection < RelationshipInterpretationSystem.partnerBreakupAffectionFloorFor(a, b)
+            ) {
                 if (ctx.rng.nextBoolean(0.3)) {
                     endPartnership(ctx, a, b, rel, married = false)
                 }
             }
-            if (rel.kind == RelationshipKind.SPOUSE && rel.resentment > 72 && rel.affection < 25) {
+            if (rel.kind == RelationshipKind.SPOUSE &&
+                rel.resentment > RelationshipInterpretationSystem.spouseSeparationResentmentThresholdFor(a, b) &&
+                rel.affection < RelationshipInterpretationSystem.spouseSeparationAffectionFloorFor(a, b)
+            ) {
                 if (ctx.rng.nextBoolean(0.18)) {
                     endPartnership(ctx, a, b, rel, married = true)
                 }
@@ -539,7 +546,8 @@ object InteractionSystem {
             val b = state.resident(rel.bId) ?: continue
             if (a.relationshipStatus == RelationshipStatus.SEPARATED &&
                 b.relationshipStatus == RelationshipStatus.SEPARATED &&
-                rel.resentment > 60 && ctx.rng.nextBoolean(0.05)
+                rel.resentment > RelationshipInterpretationSystem.divorceResentmentThresholdFor(a, b) &&
+                ctx.rng.nextBoolean(0.05)
             ) {
                 rel.kind = RelationshipKind.FORMER_PARTNER
                 a.relationshipStatus = RelationshipStatus.DIVORCED; a.partnerId = null
@@ -562,7 +570,8 @@ object InteractionSystem {
         if (rel.kind in FIXED_KINDS) return
         val warmth = rel.warmth()
         val newKind = when {
-            rel.resentment > 55 && rel.affection < 30 -> RelationshipKind.RIVAL
+            rel.resentment > RelationshipInterpretationSystem.rivalResentmentThresholdFor(a, b) &&
+                rel.affection < RelationshipInterpretationSystem.rivalAffectionFloorFor(a, b) -> RelationshipKind.RIVAL
             warmth > 55 && rel.familiarity > 60 -> RelationshipKind.CLOSE_FRIEND
             warmth > 32 && rel.familiarity > 30 -> RelationshipKind.FRIEND
             rel.familiarity > 12 -> RelationshipKind.ACQUAINTANCE

@@ -97,7 +97,13 @@ enum class EventType(val label: String) {
      *  slightly, permanently, within the lifetime drift cap. See `PersonalityDevelopmentSystem`
      *  and `docs/simulation-rules.md` "Personality drift from lived experience". Internal
      *  character-development texture, not town news — always `PRIVATE`, low severity. */
-    PERSONALITY_SHIFTED("Personality shift")
+    PERSONALITY_SHIFTED("Personality shift"),
+
+    /** A past [com.ripple.town.core.model.Memory] has resurfaced — matching location, company,
+     *  recurring event type, or a current active emotion echoing an old one. See
+     *  `MemoryRecallSystem` and `docs/simulation-rules.md` "Memory recall". Internal texture for
+     *  the cause chain, essentially never newsworthy — always `PRIVATE`, very low severity. */
+    MEMORY_RECALLED("A memory resurfaces")
 }
 
 enum class EventVisibility {

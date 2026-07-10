@@ -4,6 +4,45 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-11 — Simulation Reality Remediation, Phase A.3: personality-shaped relationship thresholds
+
+Continuing Phase A remediation (see the A.1/A.2 entry directly below): the Simulation Reality
+Review's finding that "relationship kind thresholds are universal, not personality-inflected"
+(`resentment > 55 && affection < 30 -> RIVAL`, flat and identical for every resident) is now
+fixed.
+
+**New `RelationshipInterpretationSystem`** (`core/simulation/RelationshipInterpretationSystem.kt`)
+— a pure-function threshold layer `InteractionSystem` calls into at the exact points its flat
+constants used to sit. Reads `Resident.effectivePersonality()` (birth baseline + lifetime drift
+from `PersonalityDevelopmentSystem`, landed in the A.1 entry below), not the raw baseline —
+tolerance should reflect who a resident has *become*. Formula: `BASE + (empathy + patience -
+1.0) * SPREAD - (impulsiveness + (1 - honesty) - 1.0) * SPREAD`, `SPREAD = 12.0`, clamped to
+`±18` of the original constant (`MAX_SWING`); affection-side floors use the same terms with the
+sign flipped. Governance rule where a shared, non-directional `Relationship.kind` is involved:
+**the less tolerant of the two residents' thresholds governs** — a relationship only takes one
+party giving up.
+
+**Covered:** `RIVAL` formation, `PARTNER` break-up, `SPOUSE` separation, `SPOUSE`→divorce (all in
+`InteractionSystem.kt` — `updateKind`, `romanticArcs`, `processSeparations`). Friend/close-friend
+formation (`warmth()` thresholds) intentionally left flat for now, flagged as an open follow-up
+rather than silently skipped.
+
+`InteractionSystem.kt`'s actual transition logic (which dimensions gate what, event emission,
+state changes) is untouched — this was a surgical constant-value swap-in at five comparison
+sites, not a restructure. No new `ctx.rng` calls: personality is already the deterministic
+source of variation, so none was needed.
+
+**Tests:** `RelationshipInterpretationSystemTest.kt` (new) — covers a high-empathy/high-patience
+resident having a measurably higher resentment tolerance and lower affection floor than a
+low-honesty/high-impulsiveness one; the "less tolerant governs" rule for mixed pairs; bounded
+clamp behaviour at extreme (0.0/1.0) personality values; exact reproduction of the original flat
+constants at the neutral 0.5 midpoint; determinism across repeated and freshly-constructed calls.
+**Not executed** — compile-checked by careful manual review only (no gradle/kotlinc available in
+this environment this session), same caveat as the A.1/A.2 entry below.
+
+**Docs:** `docs/simulation-rules.md` "Relationships" section gained a "Personality-shaped
+relationship thresholds" subsection with the full formula and governance-rule writeup.
+
 ### 2026-07-11 — Simulation Reality Remediation, Phase A.1/A.2: personality drift, active emotions
 
 Following the Simulation Reality Review's core finding ("residents don't change from what

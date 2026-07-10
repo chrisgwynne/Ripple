@@ -3,6 +3,7 @@ package com.ripple.town.core.simulation
 import com.ripple.town.core.model.Activity
 import com.ripple.town.core.model.BuildingType
 import com.ripple.town.core.model.DetailLevel
+import com.ripple.town.core.model.EmotionType
 import com.ripple.town.core.model.GoalStatus
 import com.ripple.town.core.model.GoalType
 import com.ripple.town.core.model.LifeStage
@@ -44,6 +45,26 @@ enum class ActionKind {
     SHOP, EXERCISE, LEARN_SKILL, RELAX_HOME, REST_ILL, VISIT_CLINIC, WORK_ON_GOAL, WANDER
 }
 
+/**
+ * Record of a single meaningful decide()-call's deliberation, kept only for the duration of
+ * the call that produced it (transient — not persisted to [com.ripple.town.core.model.WorldState]
+ * or checkpoints, same scoping as any other local computation in `DecisionSystem`). Exists so the
+ * panic/impulse override step (see [DecisionSystem.applyPanicOverride]) has a small, explicit,
+ * testable place to record *what was actually considered* and *whether the final pick deviated
+ * from the top-scored option* — the same "small, bounded, causally explainable" shape as
+ * `PersonalityDevelopmentSystem`'s applied-drift bookkeeping, just scoped to one decision instead
+ * of a lifetime. The human-readable [overrideReason] (non-null only when [wasOverridden] is true)
+ * is folded directly into [ScoredAction.reason]/`Resident.activityReason` at the point the action
+ * is executed — see `docs/simulation-rules.md#panic-impulse-override`.
+ */
+data class DecisionDeliberation(
+    val consideredTopActions: List<ScoredAction>,
+    val topScored: ScoredAction,
+    val chosen: ScoredAction,
+    val wasOverridden: Boolean,
+    val overrideReason: String? = null
+)
+
 object DecisionSystem {
 
     /** Bounded shock-period multipliers on `personalityFit` — see EconomySystem.isInShock and
@@ -72,7 +93,8 @@ object DecisionSystem {
             return
         }
         val best = chooseBest(actions, ctx.rng)
-        execute(ctx, r, best)
+        val deliberation = applyPanicOverride(ctx, r, actions, best)
+        execute(ctx, r, deliberation.chosen, deliberation.overrideReason)
     }
 
     /**
@@ -85,6 +107,121 @@ object DecisionSystem {
         val nearTies = sorted.filter { it.score >= best.score * 0.95 && best.score > 0 }
         return if (nearTies.size > 1) nearTies[rng.nextInt(nearTies.size)] else best
     }
+
+    // ------------------------------------------------------------------ panic/impulse override
+    //
+    // A rare, bounded, explainable deviation from the utility-optimal choice — see
+    // docs/simulation-rules.md#panic-impulse-override for the full write-up and the Simulation
+    // Reality Review finding this addresses ("residents cannot make a genuinely irrational,
+    // out-of-character choice"). Deliberately implemented as a POST-PROCESSING step that runs
+    // strictly after `candidateActions()`'s scoring and `chooseBest`'s normal ranking/tie-break —
+    // it never touches the scoring formula, `ScoredAction.score`, or any of the per-action
+    // multiplier terms (those belong to the shock/emotion-multiplier work earlier in this file).
+    // In the large majority of ticks (>=85% for any resident, >=92%+ for a calm/disciplined one)
+    // this step is a no-op: `topScored` is returned unchanged as `chosen`.
+
+    /** Hard ceiling on the override roll — never exceeded regardless of stress/shock/emotion/
+     *  personality inputs. Per the brief's stated 0-8% normal / up to 15% exceptional-crisis
+     *  range. */
+    const val PANIC_OVERRIDE_MAX_PROBABILITY = 0.15
+
+    /**
+     * Probability [0.0, PANIC_OVERRIDE_MAX_PROBABILITY] that this decision's actual chosen
+     * action will be drawn from the second-ranked candidate instead of the top-scored one.
+     *
+     * Composed as a capped sum of independent bounded contributions — deliberately additive
+     * (not multiplicative) so each factor's contribution is easy to reason about and tune in
+     * isolation, matching the plain, auditable arithmetic `EmotionSystem.behaviourModifier` and
+     * `PersonalityDevelopmentSystem`'s delta bands already use elsewhere in this codebase:
+     *
+     * Increases (raise the odds of an irrational/impulsive pick):
+     *  - `stress` pressure: up to **+0.05** at stress=100, scaled linearly (stress/100 * 0.05).
+     *    Stress is the single biggest normal-life driver of "not thinking straight".
+     *  - Active shock (`EconomySystem.isInShock`): flat **+0.03** bump. A discrete, recent,
+     *    identifiable personal loss — deserves a flat add, not a scaled one, same treatment
+     *    `SHOCK_LOW_KEY_BOOST`/`SHOCK_EFFORTFUL_DAMPEN` give it elsewhere in this file.
+     *  - Active high-arousal negative emotions (FEAR, ANGER, ANXIETY only — the "panic" flavours;
+     *    GRIEF/LONELINESS/etc. are subdued, not impulsive, so they don't contribute here): each
+     *    contributes up to **+0.02** scaled by its own `intensity / 100.0`, summed across however
+     *    many of the three types are currently active (so a resident who is simultaneously
+     *    afraid AND angry stacks both contributions — genuinely more volatile than either alone).
+     *  - `impulsiveness` (0..1) raises the ceiling on everything above: the whole increasing sum
+     *    is scaled by `(0.5 + impulsiveness)`, i.e. a maximally-impulsive resident (1.0) gets 1.5x
+     *    the raw increases, a maximally-composed one (0.0) gets 0.5x — impulsiveness amplifies
+     *    how much stress/shock/emotion actually translates into acting on it, rather than adding
+     *    its own flat slice.
+     *
+     * Decreases (temper the odds — a disciplined, patient resident holds it together better):
+     *  - `discipline` (0..1): subtracts up to **-0.04** at discipline=1.0.
+     *  - `patience` (0..1): subtracts up to **-0.03** at patience=1.0.
+     *
+     * Final result is clamped to `[0.0, PANIC_OVERRIDE_MAX_PROBABILITY]` — the clamp is the only
+     * thing enforcing the 15% ceiling; every term above is individually bounded but the sum could
+     * otherwise exceed it in a genuine multi-factor crisis (high stress + shock + fear + anger +
+     * high impulsiveness), which is precisely the "exceptional crisis" case the brief calls out.
+     */
+    fun panicOverrideProbability(state: WorldState, r: Resident, now: Long): Double {
+        val p = r.effectivePersonality()
+        val n = r.needs
+
+        val stressTerm = (n.stress / 100.0).coerceIn(0.0, 1.0) * 0.05
+        val shockTerm = if (EconomySystem.isInShock(state, r, now)) 0.03 else 0.0
+        val emotionTerm = r.activeEmotions
+            .filter { it.type == EmotionType.FEAR || it.type == EmotionType.ANGER || it.type == EmotionType.ANXIETY }
+            .sumOf { (it.intensity / 100.0).coerceIn(0.0, 1.0) * 0.02 }
+
+        val impulsivenessAmplifier = 0.5 + p.impulsiveness.coerceIn(0.0, 1.0) // 0.5x .. 1.5x
+        val increase = (stressTerm + shockTerm + emotionTerm) * impulsivenessAmplifier
+
+        val decrease = p.discipline.coerceIn(0.0, 1.0) * 0.04 + p.patience.coerceIn(0.0, 1.0) * 0.03
+
+        return (increase - decrease).coerceIn(0.0, PANIC_OVERRIDE_MAX_PROBABILITY)
+    }
+
+    /**
+     * Post-selection override step. Rolls [panicOverrideProbability]; if it fires AND there are
+     * at least 2 candidate actions, the second-ranked (by score) real candidate is chosen instead
+     * of the top-scored one — never an arbitrary/nonsensical action, always a genuine, already-
+     * scored, plausible option that just wasn't the optimal one. Runs strictly after
+     * [chooseBest]'s own ranking/near-tie logic, so it does not alter or interact with the 5%
+     * near-tie tie-break: [best] is whatever `chooseBest` already decided (tie-break included);
+     * this step only asks "do we deviate from that pick, to the next-best real alternative?".
+     */
+    fun applyPanicOverride(
+        ctx: TickContext,
+        r: Resident,
+        actions: List<ScoredAction>,
+        best: ScoredAction
+    ): DecisionDeliberation {
+        val sorted = actions.sortedByDescending { it.score }
+        val top3 = sorted.take(3)
+        val probability = panicOverrideProbability(ctx.state, r, ctx.now)
+        val fires = ctx.rng.nextBoolean(probability)
+        if (!fires || sorted.size < 2) {
+            return DecisionDeliberation(top3, best, best, wasOverridden = false)
+        }
+        val second = sorted[1]
+        val emotionNote = r.activeEmotions
+            .filter { it.type == EmotionType.FEAR || it.type == EmotionType.ANGER || it.type == EmotionType.ANXIETY }
+            .maxByOrNull { it.intensity }
+        val stressNote = when {
+            r.needs.stress >= 70.0 -> "stress: high"
+            r.needs.stress >= 45.0 -> "stress: elevated"
+            else -> null
+        }
+        val causeParts = listOfNotNull(
+            stressNote,
+            if (EconomySystem.isInShock(ctx.state, r, ctx.now)) "recent shock" else null,
+            emotionNote?.let { "active ${it.type.label.lowercase()}" }
+        )
+        val causeText = if (causeParts.isEmpty()) "a sudden loss of composure" else causeParts.joinToString(", ")
+        val overrideReason = "Went with ${describeAction(second)} instead of ${describeAction(best)} — " +
+            "panic overwhelmed normal judgement ($causeText)."
+        return DecisionDeliberation(top3, best, second, wasOverridden = true, overrideReason = overrideReason)
+    }
+
+    private fun describeAction(action: ScoredAction): String =
+        action.activity.label.lowercase()
 
     fun candidateActions(state: WorldState, r: Resident, now: Long): List<ScoredAction> {
         val out = mutableListOf<ScoredAction>()
@@ -376,7 +513,7 @@ object DecisionSystem {
         }
     }
 
-    private fun execute(ctx: TickContext, r: Resident, action: ScoredAction) {
+    private fun execute(ctx: TickContext, r: Resident, action: ScoredAction, overrideReason: String? = null) {
         // Purchases happen up front so money flows are deterministic.
         when (action.kind) {
             ActionKind.EAT_OUT -> spend(ctx, r, action.targetBuildingId, 6.0)
@@ -395,11 +532,12 @@ object DecisionSystem {
             }
             else -> {}
         }
+        val reason = overrideReason ?: action.reason
         val target = action.targetBuildingId
         if (target != null) {
-            ctx.sendTo(r, target, action.activity, action.durationMinutes, action.reason)
+            ctx.sendTo(r, target, action.activity, action.durationMinutes, reason)
         } else {
-            ctx.beginActivity(r, action.activity, action.durationMinutes, action.reason)
+            ctx.beginActivity(r, action.activity, action.durationMinutes, reason)
         }
     }
 

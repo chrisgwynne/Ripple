@@ -62,9 +62,15 @@ object GoalSystem {
         if (stage == LifeStage.CHILD) return
         val n = r.needs
 
-        // Need income + no job -> find one
+        // Need income + no job -> find one. Threshold nudged by childhood-to-adulthood influence:
+        // a resident who grew up around real financial hardship reads "money is tight" a little
+        // more urgently as an adult (see MemoryRecallSystem.childhoodInfluenceModifier — small,
+        // bounded 0.9..1.1, 1.0/no-op when there's no matching childhood memory).
+        val findJobThreshold = 45.0 * MemoryRecallSystem.childhoodInfluenceModifier(
+            r, MemoryRecallSystem.ChildhoodSituation.FINANCIAL_HARDSHIP
+        )
         if (state.employmentOf(r) == null && stage == LifeStage.ADULT && r.ageAt(ctx.now) < 66 &&
-            n.financialSecurity < 45
+            n.financialSecurity < findJobThreshold
         ) {
             seedGoal(ctx, r, GoalType.FIND_JOB, "Money is tight and there's no wage coming in.")
         }
@@ -73,11 +79,17 @@ object GoalSystem {
         // Per design (docs/simulation-rules.md#goals): "unemployed + carpentry > 55 + vacant granary +
         // idea seed + ambition" — gated on employment status, not on a financial-security threshold
         // (a resident can be unemployed with a comfortable cushion and still be the one who opens the shop).
+        // Ambition bar nudged by childhood-to-adulthood influence: a resident who watched a family
+        // business fail as a child needs a touch more ambition before taking the same leap
+        // themselves (see MemoryRecallSystem.childhoodInfluenceModifier).
         val vacant = state.buildings.values.firstOrNull { it.type == BuildingType.VACANT && it.abandoned }
+        val startBusinessAmbitionBar = 0.45 * MemoryRecallSystem.childhoodInfluenceModifier(
+            r, MemoryRecallSystem.ChildhoodSituation.BUSINESS_FAILURE
+        )
         if (vacant != null && stage == LifeStage.ADULT && state.employmentOf(r) == null &&
             (r.skill(SkillType.CARPENTRY) > 55 || r.skill(SkillType.COOKING) > 60 || r.skill(SkillType.BUSINESS) > 55) &&
             (r.ideaSeeds.isNotEmpty() || r.memories.any { it.type == MemoryType.INSPIRATION }) &&
-            r.personality.ambition > 0.45
+            r.personality.ambition > startBusinessAmbitionBar
         ) {
             seedGoal(
                 ctx, r, GoalType.START_BUSINESS,

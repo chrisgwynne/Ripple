@@ -110,6 +110,7 @@ class SimulationCoordinator(
             IncidentSystem.updateDaily(ctx)
             EmotionSystem.updateDaily(ctx)
             PersonalityDevelopmentSystem.updateDaily(ctx)
+            MemoryRecallSystem.updateDaily(ctx)
         }
         // 13. Intervention influence regenerates through observation.
         InterventionEngine.regenerate(state, SimTime.MINUTES_PER_TICK)
