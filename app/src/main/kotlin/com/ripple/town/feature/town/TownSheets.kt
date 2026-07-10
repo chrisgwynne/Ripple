@@ -1,0 +1,457 @@
+package com.ripple.town.feature.town
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import com.ripple.town.core.model.SimTime
+import com.ripple.town.core.ui.CauseConnector
+import com.ripple.town.core.ui.EmptyNote
+import com.ripple.town.core.ui.PixelAvatar
+import com.ripple.town.core.ui.RippleColors
+import com.ripple.town.core.ui.SectionTitle
+import com.ripple.town.core.ui.SpriteProvider
+import com.ripple.town.core.ui.StatBar
+import com.ripple.town.core.model.InterventionVerb
+import com.ripple.town.data.DeathSummary
+import com.ripple.town.data.EventUi
+import com.ripple.town.data.WorldUi
+
+// ------------------------------------------------------------ resident sheet
+
+@Composable
+fun ResidentSheetContent(
+    world: WorldUi,
+    residentId: Long,
+    sprites: SpriteProvider,
+    viewModel: TownViewModel
+) {
+    val r = world.resident(residentId) ?: return
+    val residentEvents by viewModel.residentEvents.collectAsState()
+    var tab by remember { mutableIntStateOf(0) }
+    val isFollowed = world.followedResidentId == r.id
+    val isFavourite = r.id in world.favouriteIds
+
+    Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            PixelAvatar(r.sprite, sprites, size = 54.dp, pose = poseFor(r.activity))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(r.name, style = MaterialTheme.typography.headlineSmall)
+                Text(
+                    if (!r.alive) "Died aged ${r.age} — ${r.causeOfDeath ?: ""}"
+                    else if (!r.inTown) "Away — ${r.occupation}"
+                    else "${r.age} · ${r.occupation}" + (r.employerName?.let { " at $it" } ?: ""),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                if (r.alive && r.inTown) {
+                    Text(
+                        "${r.activity.label} · feeling ${r.mood.label.lowercase()}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = RippleColors.SoftInk
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = isFollowed,
+                onClick = { if (!isFollowed) viewModel.follow(r.id) },
+                label = { Text(if (isFollowed) "Following" else "Follow") }
+            )
+            FilterChip(
+                selected = isFavourite,
+                onClick = { viewModel.toggleFavourite(r.id) },
+                label = { Text(if (isFavourite) "★ Favourite" else "☆ Favourite") }
+            )
+            if (r.alive && r.inTown) {
+                FilterChip(
+                    selected = false,
+                    onClick = { viewModel.openIntervention(r.id) },
+                    label = { Text("✨ Nudge") }
+                )
+            }
+        }
+        if (r.alive && r.inTown && r.activityReason.isNotBlank()) {
+            Spacer(Modifier.height(8.dp))
+            Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceVariant) {
+                Text(
+                    "Why this? ${r.activityReason}",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        val tabs = listOf("Life", "Relationships", "Memories", "Skills", "History")
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+            tabs.forEachIndexed { i, label ->
+                FilterChip(selected = tab == i, onClick = { tab = i }, label = { Text(label) })
+            }
+        }
+        Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState())) {
+            when (tab) {
+                0 -> LifeTab(world, r)
+                1 -> RelationshipsTab(world, r, viewModel)
+                2 -> MemoriesTab(r)
+                3 -> SkillsTab(r)
+                4 -> HistoryTab(residentEvents, viewModel)
+            }
+        }
+    }
+}
+
+@Composable
+private fun LifeTab(world: WorldUi, r: com.ripple.town.data.ResidentUi) {
+    SectionTitle("Needs")
+    StatBar("Hunger", r.hunger)
+    StatBar("Energy", r.energy)
+    StatBar("Health", r.health)
+    StatBar("Social", r.social)
+    StatBar("Stress", r.stress, good = false)
+    StatBar("Purpose", r.purposeNeed)
+    StatBar("Comfort", r.comfort)
+    StatBar("Financial security", r.financialSecurity)
+    SectionTitle("Situation")
+    Text("Home: ${r.homeName ?: "No fixed home in town"}", style = MaterialTheme.typography.bodyMedium)
+    Text("Status: ${r.relationshipStatusLabel}", style = MaterialTheme.typography.bodyMedium)
+    Text("Savings: ${r.wealth.toInt()} coins" + (if (r.debt > 0) " · Debt: ${r.debt.toInt()}" else ""), style = MaterialTheme.typography.bodyMedium)
+    if (r.conditionLabels.isNotEmpty()) {
+        Text("Health notes: ${r.conditionLabels.joinToString()}", style = MaterialTheme.typography.bodyMedium, color = RippleColors.DeepBrick)
+    }
+    if (r.activeGoalLabels.isNotEmpty()) {
+        SectionTitle("Current goals")
+        r.activeGoalLabels.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium) }
+    }
+    val household = world.residents.filter { it.householdId != null && it.householdId == r.householdId && it.id != r.id }
+    if (household.isNotEmpty()) {
+        SectionTitle("Household")
+        household.forEach { Text("• ${it.name} (${it.age})", style = MaterialTheme.typography.bodyMedium) }
+    }
+}
+
+@Composable
+private fun RelationshipsTab(world: WorldUi, r: com.ripple.town.data.ResidentUi, viewModel: TownViewModel) {
+    if (r.relationships.isEmpty()) { EmptyNote("No one knows them well yet."); return }
+    r.relationships.forEach { rel ->
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clickable { viewModel.openResident(rel.otherId) }
+                .padding(vertical = 6.dp)
+        ) {
+            Row {
+                Text(rel.otherName, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                Text(rel.kindLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            StatBar("Trust", rel.trust)
+            StatBar("Affection", rel.affection)
+            if (rel.resentment > 10) StatBar("Resentment", rel.resentment, good = false)
+        }
+    }
+}
+
+@Composable
+private fun MemoriesTab(r: com.ripple.town.data.ResidentUi) {
+    if (r.memories.isEmpty()) { EmptyNote("Nothing has marked them deeply yet."); return }
+    r.memories.forEach { m ->
+        Column(Modifier.padding(vertical = 6.dp)) {
+            Text("“${m.description}”", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "${m.typeLabel} · ${SimTime.formatDate(m.createdAt)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun SkillsTab(r: com.ripple.town.data.ResidentUi) {
+    if (r.skills.isEmpty()) { EmptyNote("No practised skills yet."); return }
+    r.skills.entries.sortedByDescending { it.value }.forEach { (label, value) ->
+        StatBar(label, value)
+    }
+}
+
+@Composable
+private fun HistoryTab(events: List<EventUi>, viewModel: TownViewModel) {
+    if (events.isEmpty()) { EmptyNote("A quiet life, so far."); return }
+    events.forEach { e ->
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clickable { viewModel.openEvent(e.id) }
+                .padding(vertical = 6.dp)
+        ) {
+            Text(e.description, style = MaterialTheme.typography.bodyMedium)
+            Text(e.timeLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+// ------------------------------------------------------------ building sheet
+
+@Composable
+fun BuildingSheetContent(world: WorldUi, buildingId: Long, viewModel: TownViewModel) {
+    val b = world.building(buildingId) ?: return
+    val buildingEvents by viewModel.buildingEvents.collectAsState()
+    Column(
+        Modifier
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 24.dp)
+            .heightIn(max = 520.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        Text(b.name, style = MaterialTheme.typography.headlineSmall)
+        Text(
+            b.typeLabel + (if (b.abandoned) " · standing empty" else "") +
+                (b.businessOpen?.let { if (!it) " · closed down" else "" } ?: ""),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        b.ownerName?.let { Text("Owned by $it", style = MaterialTheme.typography.bodyMedium) }
+        SectionTitle("Condition")
+        StatBar("Condition", b.condition)
+        StatBar("Noise", b.noise, good = false)
+        Text("Value: ${b.value.toInt()} coins", style = MaterialTheme.typography.bodyMedium)
+        if (b.businessName != null) {
+            SectionTitle("Business")
+            Text(
+                "${b.businessName} — " + (if (b.businessOpen == true) "trading" else "no longer trading"),
+                style = MaterialTheme.typography.bodyMedium
+            )
+            b.businessBalance?.let {
+                Text(
+                    "Books: ${if (it >= 0) "healthy" else "in the red"} (${it.toInt()} coins)",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (it < 0) RippleColors.DeepBrick else RippleColors.DeepGreen
+                )
+            }
+            if (b.employeeNames.isNotEmpty()) {
+                Text("Staff: ${b.employeeNames.joinToString()}", style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        val occupants = b.occupantIds.mapNotNull { world.resident(it) }
+        if (occupants.isNotEmpty()) {
+            SectionTitle("Inside right now")
+            occupants.forEach { r ->
+                Text(
+                    "• ${r.name} — ${r.activity.label.lowercase()}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.clickable { viewModel.openResident(r.id) }.padding(vertical = 2.dp)
+                )
+            }
+        }
+        if (b.visibleChanges.isNotEmpty()) {
+            SectionTitle("Changes over time")
+            b.visibleChanges.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium) }
+        }
+        SectionTitle("Recent events here")
+        if (buildingEvents.isEmpty()) EmptyNote("Nothing of note lately.")
+        buildingEvents.take(8).forEach { e ->
+            Column(Modifier.clickable { viewModel.openEvent(e.id) }.padding(vertical = 4.dp)) {
+                Text(e.description, style = MaterialTheme.typography.bodyMedium)
+                Text(e.timeLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+// --------------------------------------------------------------- event sheet
+
+@Composable
+fun EventSheetContent(world: WorldUi, eventId: Long, viewModel: TownViewModel) {
+    val chain by viewModel.causeChain.collectAsState()
+    val event = chain.firstOrNull()?.firstOrNull { it.id == eventId }
+        ?: chain.firstOrNull()?.firstOrNull()
+    Column(
+        Modifier
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 24.dp)
+            .heightIn(max = 520.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        if (event == null) { EmptyNote("The record is missing."); return }
+        Text(event.typeLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(event.description, style = MaterialTheme.typography.titleLarge)
+        Text(event.timeLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        val involved = event.involvedResidentIds.mapNotNull { world.resident(it) }
+        if (involved.isNotEmpty()) {
+            SectionTitle("People involved")
+            involved.forEach { r ->
+                Row(
+                    Modifier.fillMaxWidth().clickable { viewModel.openResident(r.id) }.padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("• ${r.name}", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    if (r.id !in world.favouriteIds) {
+                        TextButton(onClick = { viewModel.toggleFavourite(r.id) }) { Text("☆ Favourite") }
+                    }
+                }
+            }
+        }
+        world.building(event.buildingId)?.let {
+            Text("Where: ${it.name}", style = MaterialTheme.typography.bodyMedium)
+        }
+        if (chain.size > 1) {
+            SectionTitle("Why did this happen?")
+            chain.drop(1).forEachIndexed { i, level ->
+                CauseConnector(Modifier.padding(start = 4.dp))
+                level.forEach { cause ->
+                    Surface(
+                        shape = MaterialTheme.shapes.small,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                    ) {
+                        Column(Modifier.padding(10.dp)) {
+                            Text("← ${cause.description}", style = MaterialTheme.typography.bodyMedium)
+                            Text(cause.timeLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        } else if (event.hasCauses) {
+            EmptyNote("Its causes run deeper than the town remembers.")
+        } else {
+            EmptyNote("As far as anyone can tell, this simply happened.")
+        }
+    }
+}
+
+// -------------------------------------------------------- intervention sheet
+
+@Composable
+fun InterventionSheetContent(world: WorldUi, residentId: Long, viewModel: TownViewModel) {
+    val r = world.resident(residentId) ?: return
+    val message by viewModel.interventionMessage.collectAsState()
+    var pendingIntroduce by remember { mutableIntStateOf(0) }
+    Column(
+        Modifier
+            .padding(horizontal = 20.dp)
+            .padding(bottom = 24.dp)
+            .heightIn(max = 520.dp)
+            .verticalScroll(rememberScrollState())
+    ) {
+        Text("A quiet nudge", style = MaterialTheme.typography.headlineSmall)
+        Text(
+            "Influence remaining: ${world.nudges}/${world.maxNudges} · ${r.name}",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            "You never control anyone. You only tilt circumstances — the town decides what follows, and you may not learn the consequences for a long time.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(vertical = 8.dp)
+        )
+        message?.let {
+            Surface(shape = MaterialTheme.shapes.small, color = RippleColors.Gold.copy(alpha = 0.3f)) {
+                Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(10.dp))
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        if (pendingIntroduce == 0) {
+            listOf(
+                InterventionVerb.DELAY, InterventionVerb.DIVERT, InterventionVerb.ENCOURAGE,
+                InterventionVerb.DISTRACT, InterventionVerb.INSPIRE, InterventionVerb.WARN,
+                InterventionVerb.REVEAL, InterventionVerb.CONCEAL, InterventionVerb.INTRODUCE
+            ).forEach { verb ->
+                OutlinedButton(
+                    onClick = {
+                        if (verb == InterventionVerb.INTRODUCE) pendingIntroduce = 1
+                        else viewModel.applyIntervention(verb, r.id)
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
+                ) {
+                    Column(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                        Text(verb.label, style = MaterialTheme.typography.titleSmall)
+                        Text(verb.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        } else {
+            SectionTitle("Introduce ${r.firstName} to…")
+            world.residents
+                .filter { it.id != r.id && it.alive && it.inTown && it.detailed }
+                .sortedBy { it.name }
+                .take(20)
+                .forEach { other ->
+                    Text(
+                        "• ${other.name} (${other.occupation})",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                viewModel.applyIntervention(InterventionVerb.INTRODUCE, r.id, other.id)
+                                pendingIntroduce = 0
+                            }
+                            .padding(vertical = 6.dp)
+                    )
+                }
+            TextButton(onClick = { pendingIntroduce = 0 }) { Text("Back") }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- death card
+
+@Composable
+fun DeathSummaryDialog(
+    death: DeathSummary,
+    onFollow: (Long) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("${death.name} has died") },
+        text = {
+            Column {
+                Text("Aged ${death.age}. Cause: ${death.cause}.", style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(8.dp))
+                Text(death.lifeSummary, style = MaterialTheme.typography.bodyMedium)
+                if (death.familyLeft.isNotEmpty()) {
+                    SectionTitle("Family left behind")
+                    death.familyLeft.forEach { (_, label) -> Text("• $label", style = MaterialTheme.typography.bodySmall) }
+                }
+                if (death.suggestions.isNotEmpty()) {
+                    SectionTitle("Lives you might follow")
+                    death.suggestions.forEach { (id, label) ->
+                        TextButton(onClick = { onFollow(id) }) { Text(label) }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Keep watching the town") }
+        }
+    )
+}
