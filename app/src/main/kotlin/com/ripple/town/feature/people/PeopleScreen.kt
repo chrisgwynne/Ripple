@@ -26,8 +26,10 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -60,6 +62,7 @@ fun PeopleScreen(
     val w = world ?: return
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf(PeopleFilter.ALL) }
+    var treeResidentId by remember { mutableStateOf<Long?>(null) }
 
     val followed = w.resident(w.followedResidentId)
     val favourites = w.favouriteIds.mapNotNull { w.resident(it) }
@@ -102,7 +105,7 @@ fun PeopleScreen(
         if (searchResults.isNotEmpty()) {
             item { SectionTitle("Search results") }
             items(searchResults, key = { "s${it.id}" }) { r ->
-                PersonRow(r, sprites, w, familyOf(w, r)) { onOpenResident(r.id) }
+                PersonRow(r, sprites, w, familyOf(w, r), onOpenTree = { treeResidentId = it }) { onOpenResident(r.id) }
             }
         }
         if (followed != null && filter in listOf(PeopleFilter.ALL, PeopleFilter.FOLLOWED)) {
@@ -137,6 +140,10 @@ fun PeopleScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedButton(onClick = { treeResidentId = followed.id }) {
+                            Text("View family tree & relationships")
+                        }
                     }
                 }
             }
@@ -144,34 +151,45 @@ fun PeopleScreen(
         if (favourites.isNotEmpty() && filter in listOf(PeopleFilter.ALL, PeopleFilter.FAVOURITES)) {
             item { SectionTitle("Favourites") }
             items(favourites, key = { "f${it.id}" }) { r ->
-                PersonRow(r, sprites, w, familyOf(w, r)) { onOpenResident(r.id) }
+                PersonRow(r, sprites, w, familyOf(w, r), onOpenTree = { treeResidentId = it }) { onOpenResident(r.id) }
             }
         }
         if (family.isNotEmpty() && filter in listOf(PeopleFilter.ALL, PeopleFilter.FAMILY)) {
             item { SectionTitle("${followed?.firstName}'s family") }
             items(family, key = { "fam${it.first.id}" }) { (r, role) ->
-                PersonRow(r, sprites, w, familyOf(w, r), subtitle = role) { onOpenResident(r.id) }
+                PersonRow(r, sprites, w, familyOf(w, r), subtitle = role, onOpenTree = { treeResidentId = it }) { onOpenResident(r.id) }
             }
         }
         if (friends.isNotEmpty() && filter in listOf(PeopleFilter.ALL, PeopleFilter.FRIENDS)) {
             item { SectionTitle("${followed?.firstName}'s friends") }
             items(friends, key = { "fr${it.id}" }) { r ->
-                PersonRow(r, sprites, w, familyOf(w, r)) { onOpenResident(r.id) }
+                PersonRow(r, sprites, w, familyOf(w, r), onOpenTree = { treeResidentId = it }) { onOpenResident(r.id) }
             }
         }
         if (rivals.isNotEmpty() && filter in listOf(PeopleFilter.ALL, PeopleFilter.FRIENDS)) {
             item { SectionTitle("Frictions") }
             items(rivals, key = { "rv${it.id}" }) { r ->
-                PersonRow(r, sprites, w, familyOf(w, r)) { onOpenResident(r.id) }
+                PersonRow(r, sprites, w, familyOf(w, r), onOpenTree = { treeResidentId = it }) { onOpenResident(r.id) }
             }
         }
         if (discovered.isNotEmpty() && filter in listOf(PeopleFilter.ALL, PeopleFilter.DISCOVERED)) {
             item { SectionTitle("Recently discovered") }
             items(discovered.takeLast(10).reversed(), key = { "d${it.id}" }) { r ->
-                PersonRow(r, sprites, w, familyOf(w, r)) { onOpenResident(r.id) }
+                PersonRow(r, sprites, w, familyOf(w, r), onOpenTree = { treeResidentId = it }) { onOpenResident(r.id) }
             }
         }
         item { Spacer(Modifier.height(24.dp)) }
+    }
+
+    val treeId = treeResidentId
+    if (treeId != null) {
+        FamilyTreeDialog(
+            world = w,
+            residentId = treeId,
+            sprites = sprites,
+            onOpenResident = { treeResidentId = null; onOpenResident(it) },
+            onDismiss = { treeResidentId = null }
+        )
     }
 }
 
@@ -187,6 +205,7 @@ private fun PersonRow(
     world: WorldUi,
     family: List<Pair<ResidentUi, String>> = emptyList(),
     subtitle: String? = null,
+    onOpenTree: (Long) -> Unit = {},
     onClick: () -> Unit
 ) {
     var expanded by remember(r.id) { mutableStateOf(false) }
@@ -228,6 +247,9 @@ private fun PersonRow(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                    TextButton(onClick = { onOpenTree(r.id) }) {
+                        Text("View family tree & relationships", style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }

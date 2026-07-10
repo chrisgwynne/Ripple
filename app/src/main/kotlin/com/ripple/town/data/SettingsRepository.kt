@@ -22,7 +22,18 @@ data class Settings(
     val worldSeed: Long = 0L,
     val speed: SimSpeed = SimSpeed.NORMAL,
     val notificationsEnabled: Boolean = true,
-    val freeNudgeUsed: Boolean = false
+    val freeNudgeUsed: Boolean = false,
+    /**
+     * The opt-in for real system (push) notifications — deliberately separate from
+     * [notificationsEnabled], which only gates the existing in-app alert banners
+     * (see [com.ripple.town.data.WorldRepository.notifyIfRelevant]). Defaults to
+     * false: a system notification requires an explicit, deliberate opt-in, not a
+     * pre-ticked box. Turning this on is what triggers the POST_NOTIFICATIONS
+     * runtime-permission prompt from the settings toggle handler.
+     */
+    val pushNotificationsEnabled: Boolean = false,
+    /** Highest [com.ripple.town.core.database.WorldEventEntity.id] already notified about. */
+    val lastNotifiedEventId: Long = 0L
 )
 
 @Singleton
@@ -36,6 +47,8 @@ class SettingsRepository @Inject constructor(
         val SPEED = stringPreferencesKey("speed")
         val NOTIFICATIONS = booleanPreferencesKey("notifications_enabled")
         val FREE_NUDGE_USED = booleanPreferencesKey("free_nudge_used")
+        val PUSH_NOTIFICATIONS = booleanPreferencesKey("push_notifications_enabled")
+        val LAST_NOTIFIED_EVENT_ID = longPreferencesKey("last_notified_event_id")
     }
 
     val settings: Flow<Settings> = context.dataStore.data.map { p ->
@@ -45,7 +58,9 @@ class SettingsRepository @Inject constructor(
             worldSeed = p[Keys.WORLD_SEED] ?: 0L,
             speed = runCatching { SimSpeed.valueOf(p[Keys.SPEED] ?: "NORMAL") }.getOrDefault(SimSpeed.NORMAL),
             notificationsEnabled = p[Keys.NOTIFICATIONS] ?: true,
-            freeNudgeUsed = p[Keys.FREE_NUDGE_USED] ?: false
+            freeNudgeUsed = p[Keys.FREE_NUDGE_USED] ?: false,
+            pushNotificationsEnabled = p[Keys.PUSH_NOTIFICATIONS] ?: false,
+            lastNotifiedEventId = p[Keys.LAST_NOTIFIED_EVENT_ID] ?: 0L
         )
     }
 
@@ -70,5 +85,24 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setFreeNudgeUsed() {
         context.dataStore.edit { it[Keys.FREE_NUDGE_USED] = true }
+    }
+
+    /**
+     * Sets the user's opt-in for real system notifications. This only records the
+     * preference — it does not itself request the runtime permission or touch
+     * WorkManager; the caller (the settings toggle handler) is responsible for
+     * driving the [android.Manifest.permission.POST_NOTIFICATIONS] launcher and
+     * enqueue/cancel of [com.ripple.town.work.NotificationCheckWorker] around this call.
+     */
+    suspend fun setPushNotificationsEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.PUSH_NOTIFICATIONS] = enabled }
+    }
+
+    suspend fun setLastNotifiedEventId(id: Long) {
+        context.dataStore.edit { current ->
+            // Never move the cursor backwards (e.g. a slower concurrent caller finishing last).
+            val existing = current[Keys.LAST_NOTIFIED_EVENT_ID] ?: 0L
+            if (id > existing) current[Keys.LAST_NOTIFIED_EVENT_ID] = id
+        }
     }
 }

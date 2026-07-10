@@ -4,6 +4,263 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-10 — Real local notifications (opt-in, POST_NOTIFICATIONS)
+
+Phase 2 **Product** item: real system notifications for followed/favourite
+residents. Another agent was concurrently building a family-tree/relationship-map
+UI in `feature/people/*` in the same checkout, so this pass stayed out of that
+package entirely — new code lives in new `notifications/` and `work/` files plus
+small, targeted edits to `AndroidManifest.xml`, `SettingsSheet.kt`,
+`SettingsRepository.kt`, `MainViewModel.kt`, `RippleApplication.kt`, and two DAOs.
+No `./gradlew` or `git` commands run, per the parallel-work constraint — code-only,
+ready for the orchestrating session to build/test/commit. **No Android
+emulator/device is configured in this environment**, which matters more here than
+for prior pure-Compose passes: manifest/permission/WorkManager code touches real
+OS behaviour (the permission dialog, notification delivery, periodic-Worker
+scheduling) that compilation cannot verify — see the explicit device-test caveat
+on the backlog bullet above and repeated at the end of this entry.
+
+- **Permission flow.** `POST_NOTIFICATIONS` declared in `AndroidManifest.xml`
+  (API 33+; a no-op below that, where the permission is implicit at install
+  time). Requested only via the standard
+  `rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission())`
+  pattern in `SettingsSheet.kt`, fired only from an explicit tap on a new "Push
+  notifications" toggle — never on app launch. Turning the toggle off cancels the
+  periodic Worker and persists the opt-in as false without touching the OS grant;
+  turning it on checks whether the permission is already granted (skips the
+  dialog if so) and otherwise launches the system prompt. A denial still persists
+  the opt-in as on (matching the "the user made a choice, don't nag" convention)
+  but delivery stays silently suppressed via `NotificationHelper
+  .canPostNotifications()` until granted through system settings — the app never
+  re-prompts itself, consistent with the platform's own single-prompt policy.
+- **Settings surface.** No dedicated settings screen existed to extend — reused
+  the existing minimal `SettingsSheet.kt` bottom sheet, which already had one
+  toggle (`notificationsEnabled`, gating the pre-existing in-app alert banners in
+  `WorldRepository.notifyIfRelevant`). Added a second, clearly distinct toggle
+  (`pushNotificationsEnabled`) rather than repurposing the existing one, since
+  overloading it would have silently changed what the pre-existing in-app-banner
+  toggle does. New `Settings.pushNotificationsEnabled` (default `false` — an
+  opt-in, not a pre-ticked box) and `Settings.lastNotifiedEventId` (the
+  de-duplication cursor, see below) in `SettingsRepository.kt`.
+- **`NotificationChannel`.** One channel, `"followed_resident_updates"`
+  ("Followed resident updates"), created idempotently in
+  `RippleApplication.onCreate()` via `NotificationHelper.ensureChannel()` — cheap
+  and safe to call unconditionally on every process start; channel existence
+  doesn't itself post anything, the opt-in/permission checks still gate that.
+- **Shared check-and-notify logic — `FollowedResidentNotifier`.** Deliberately
+  DB-only: reads `WorldDao`'s followed/favourite residents
+  (`FollowDao.allOnce()`, a new suspend snapshot query alongside the existing
+  `Flow`-returning `all()`) and notable events since a persisted cursor
+  (`EventDao.notableEventsSince`, a new suspend query mirroring the existing
+  `importantEvents` Flow query's threshold/ordering but scoped by event id
+  instead of a live collector). Reuses `ImportanceScorer.HISTORY_THRESHOLD` —
+  the same bar History/era-summary/Follow-moments already use — rather than
+  inventing a second "notable" definition. Capped at
+  `MAX_NOTIFICATIONS_PER_CHECK` (3) notifications per check, per the brief's
+  explicit anti-storm requirement; the cursor (`lastNotifiedEventId`) always
+  advances past everything scanned (whether notified or not) so a quiet check
+  never re-scans the same backlog forever, and never moves backwards under
+  concurrent callers.
+- **Delivery mechanism (a) — app open.** `MainViewModel.init` calls
+  `notifier.checkAndNotify()` right after `worldRepository.restoreIfPresent()`
+  finishes (including any offline catch-up that ran as part of that restore),
+  so it sees events from time that was just caught up on, not just the
+  pre-close state.
+- **Delivery mechanism (b) — periodic WorkManager.** New
+  `NotificationCheckWorker`, a plain Hilt-injected `CoroutineWorker` (same
+  `@HiltWorker`/`@AssistedInject` pattern as the pre-existing, currently-unused
+  `CatchUpWorker`), enqueued as a unique `PeriodicWorkRequest` at WorkManager's
+  own minimum interval (15 minutes, `ExistingPeriodicWorkPolicy.KEEP`), with
+  `setRequiresBatteryNotLow(true)` and no network requirement. No wake locks, no
+  foreground service — respects Doze/battery-optimization defaults, as instructed.
+  **Deliberately does not run the full simulation catch-up from the Worker** —
+  documented at length in the Worker's own doc comment: (1) the simulation engine
+  is confined to `WorldRepository`'s private single-threaded dispatcher and only
+  ever constructed via `restoreIfPresent()`/`createWorld()`, so running it from a
+  cold background process would mean duplicating that whole
+  restore/catch-up/checkpoint lifecycle in a second place; (2) doing so would also
+  silently advance game time on a schedule the player isn't watching, outside the
+  existing bounded, UI-visible `CatchUpProgress` flow — a bigger behavioural
+  change than "send a notification" should require; (3) the actual goal doesn't
+  need a fresh tick at all — everything needed is already sitting in the
+  `world_events` table from the last time the app was open, so the Worker just
+  calls the same `FollowedResidentNotifier.checkAndNotify()` the app-open path
+  uses. Net effect, stated explicitly: a long-closed app's periodic checks won't
+  surface anything *newer* than what was already simulated as of the last real
+  open — a delivery mechanism for already-known notable events, not a way to keep
+  the town moving in the background, consistent with "still no continuous
+  background work."
+- **Tap target.** Notifications open `MainActivity` via a `PendingIntent`
+  (`FLAG_ACTIVITY_NEW_TASK or FLAG_ACTIVITY_CLEAR_TOP`, `FLAG_IMMUTABLE`) — a
+  plain app-open, not a deep link to the specific event/resident.
+  `MainActivity`/`RippleApp.kt` have no existing intent-extra or deep-link
+  handling to build on, and adding a full deep-link path (extra parsing →
+  navigation → `TownViewModel.openEvent`/`openResident` on cold start, which
+  today only happens from in-app navigation calls) was judged more than the
+  "small addition" the brief allowed for — scoped down and stated explicitly
+  as deferred, per the brief's own instruction.
+- **Notification icon.** `NotificationCompat.Builder.setSmallIcon()` cannot use
+  the existing adaptive `ic_launcher` (background+foreground layers — the system
+  can't silhouette that for the status bar). Added a small, purpose-built flat
+  vector, `res/drawable/ic_notification.xml`, reusing the launcher's own
+  concentric-ripple motif at status-bar weight, rather than risk a blank/white-
+  square icon at runtime — a real, if minor, platform-specific pitfall worth
+  naming since it's exactly the kind of thing that's invisible at compile time
+  and only shows up on a real device.
+- No new Gradle dependencies were needed — `androidx.work:work-runtime-ktx` and
+  `androidx.core:core-ktx` (for `NotificationManagerCompat`) were already present
+  in `app/build.gradle.kts`/`libs.versions.toml`, along with `hilt-work`/
+  `hilt-ext-compiler` for `@HiltWorker`. No Room schema migration was needed
+  either — only new DAO *queries* were added (`FollowDao.allOnce()`,
+  `EventDao.notableEventsSince`), no new entities/columns/tables.
+
+Deliberately scoped out, stated explicitly: deep-linking a notification tap to
+the specific event/resident (plain app-open only, see above); richer
+notification content/grouping beyond Android's own default per-app/channel
+shade bundling; running the periodic Worker's check against a fresh simulation
+tick rather than already-persisted events (see the three reasons above); a
+second, separate "quiet hours" or notification-frequency setting beyond the one
+opt-in toggle and WorkManager's own 15-minute floor.
+
+**Not run this session** (per the parallel-work constraint): `./gradlew`
+build/test and any `git` commands. Code-only, ready for the orchestrating
+session to build/test/commit. **Not verified on a real device or emulator —
+none was available in this environment.** This is materially riskier to leave
+unverified than this session's (and prior sessions') pure-Compose UI work:
+manifest/permission declarations, the actual system permission-request dialog
+and its grant/deny branches, `NotificationChannel` creation, and WorkManager's
+periodic scheduling all depend on real OS behaviour that compilation alone
+cannot catch. Needs a real-device pass before being trusted, specifically:
+requesting the permission both ways (grant and deny) and confirming the app
+behaves correctly either way; confirming a notification actually appears when a
+followed resident has a notable event and that tapping it opens the app;
+confirming the toggle-off path actually cancels the periodic Worker (e.g. via
+WorkManager's own inspector or `adb shell dumpsys jobscheduler`); and leaving
+the app closed for 15+ minutes with a followed resident's life continuing (via
+a seeded notable event) to confirm the periodic check genuinely fires on a real
+device and behaves as designed.
+
+### 2026-07-10 — Family tree & relationship map (Phase 2 Product, People screen)
+
+Picked up the first remaining "Product" item under Phase 2 — the family
+tree/relationship-map item this same file's own "People — done 2026-07-10"
+entry (above, in the Mobile UI rebuild section) explicitly deferred: that
+earlier pass built only a flat expandable text listing per resident row
+(`familyOf()` + an `ExpandMore`/`ExpandLess` indented `Column`), and called
+out the graphical version as a separate, larger backlog item — this is that
+item. Another agent was concurrently working on Android
+notifications/WorkManager in this same checkout (`RippleApp.kt`, a new
+notification system, DI/manifest), so this pass stayed strictly inside
+`feature/people/*`, touching `RippleApp.kt` and any manifest/notification
+file not at all. No `./gradlew` or git commands were run — code-only, blind
+(no emulator), same risk acceptance as every other UI item in this session's
+log.
+
+- **Read the existing entry first, as instructed.** Confirmed `familyOf()`
+  in `PeopleScreen.kt` already does the immediate-generation lookup
+  (partner/mother/father/children/siblings-by-shared-parent, deduplicated)
+  reading `ResidentUi.partnerId/motherId/fatherId/childIds`
+  (`data/WorldSnapshot.kt`) — reused verbatim for the resident+partner and
+  parent rows of the new tree rather than reinventing it.
+- **Checked whether any data was actually missing before adding anything —
+  it wasn't.** `WorldSnapshot.kt`'s `SnapshotBuilder.residentUi` already
+  builds `ResidentUi.relationships: List<RelationUi>` from
+  `state.relationshipsOf(r.id)`, already filtered to `familiarity > 5`,
+  already sorted by `rel.warmth()` descending, and already capped at 12 —
+  precisely the "top 12 by familiarity/warmth" the brief asked for. `RelationUi`
+  already carries `kindLabel`, `warmth`, `trust`, `affection`, `resentment`,
+  `familiarity`. Grandparent/grandchild traversal for the tree (two
+  generations each way) is also derivable purely from existing
+  `motherId`/`fatherId`/`childIds` chains, one extra hop each direction — no
+  new field anywhere. Net result: zero changes to `WorldRepository.kt`,
+  `WorldSnapshot.kt`, `WorldState.kt`, or any `core/simulation`/`core/model`
+  file. This is pure UI reading data that already existed, exactly as the
+  task brief hoped for but didn't guarantee.
+- **New file: `feature/people/FamilyTreeScreen.kt`.** A full-screen
+  `androidx.compose.ui.window.Dialog` (`usePlatformDefaultWidth = false`)
+  with two `FilterChip`-toggled tabs, matching the tab-row pattern already
+  used in `TownSheets.kt`'s `ResidentSheetContent` (Life/Relationships/
+  Memories/Skills/History) rather than inventing a new tab mechanic. Chose a
+  `Dialog` over a new nav-graph route specifically because `RippleApp.kt`
+  (where `NavHost`/`Routes` live) was off-limits for the duration of the
+  concurrent notifications work — the dialog is entirely self-contained,
+  opened via a local `remember { mutableStateOf<Long?>(null) }` in
+  `PeopleScreen.kt`, no navigation graph changes.
+  - **Family tree tab.** Five generation rows (grandparents → parents →
+    resident+partner → children → grandchildren) laid out as a horizontally
+    scrollable `Column` of `Row`s, each node a `PixelAvatar` (reusing
+    `poseFor`/`SpriteProvider`, the same avatar call every other sheet in
+    the app makes) with first name + role label underneath, and a small
+    Canvas-drawn connector (`drawLine` + end-cap `drawCircle`, mirroring the
+    dotted-connector technique `core/ui/Components.kt`'s existing
+    `CauseConnector` already uses for cause chains) between each generation
+    row rather than a plain gap — this is the "genuinely more graphical than
+    a flat list" requirement the brief was explicit about. Grandparents are
+    only shown where actually traceable (both the resident's parent AND
+    that parent's own mother/fatherId must resolve) — most residents won't
+    have any, and the tab correctly shows nothing for that row rather than
+    empty placeholder circles, with a small explanatory caption underneath
+    when generations are partially known. Tapping any node calls
+    `onOpenResident`, reusing the resident sheet the rest of the app already
+    uses — no duplicate resident-detail UI was built.
+  - **Relationship map tab.** A radial layout: the resident's own
+    `PixelAvatar` centred in a `Box`, `ResidentUi.relationships` (excluding
+    family-ish kinds — `Family`, `Estranged family`, `Partner`, `Spouse`,
+    since those already have their own dedicated tree tab) placed as chips
+    around it at even angles (`cos`/`sin` over `2π × index/count`), each
+    chip's spoke drawn by a `Canvas` layer underneath (`RadialConnectors`)
+    with line thickness scaled by `warmth` and colour keyed by
+    `RelationshipKind` label (`Friend`/`Close friend` green shades, `Rival`
+    brick red, `Secret affair` blush, `Former partner` muted brown,
+    `Acquaintance`/`Stranger` blues/soft-ink) via a small local
+    `KIND_COLOURS` map, plus a text legend below. Deliberately the simpler
+    of the two views per the brief's own guidance ("a radial cluster is
+    enough, not a force-directed graph") — no physics simulation, no
+    drag/reposition, no edge bundling.
+- **Entry points wired, not left dangling.** Two call sites in
+  `PeopleScreen.kt`: (1) a new "View family tree & relationships"
+  `OutlinedButton` on the existing "Following" card, next to the family
+  summary line that card already showed; (2) a new `TextButton` inside every
+  `PersonRow`'s existing expandable family section (the one the earlier
+  "People — done 2026-07-10" pass built) — so any resident's row, not just
+  the followed one, can open the graphical view for *that* resident, not
+  only the one currently followed. `PersonRow` gained an `onOpenTree: (Long)
+  -> Unit = {}` parameter (default no-op so no other call site needed
+  updating for compilation, though all six `PersonRow(...)` call sites in
+  `PeopleScreen` were in fact updated to pass it through).
+- **Deliberately scoped out / left open:**
+  - **In-laws are not shown.** The tree covers blood generations
+    (grandparents/parents/children/grandchildren) plus the resident's own
+    partner, but not the partner's parents/siblings — the brief's acceptance
+    language ("2 generations up/down") didn't ask for affinal relatives, and
+    `familyOf()` itself never included them either, so this keeps the same
+    boundary the existing text-list feature already drew.
+  - **No force-directed/physics graph** for the relationship map, per the
+    brief's own explicit steer toward "radial cluster is enough."
+  - **No drag-to-reposition, no pinch-zoom** on either canvas — both are
+    scrollable/static layouts sized to fit typical family/relationship
+    counts; a resident with an unusually large family could overflow
+    sideways (handled via `horizontalScroll`) rather than being laid out
+    with true constraint-based graph packing.
+  - **Grandparent/grandchild traversal is a plain two-hop walk**, not a
+    general ancestor-search — a resident whose grandparent chain skips a
+    generation (e.g. missing an intermediate parent record) simply won't
+    show that branch, matching the "handle missing data gracefully, don't
+    error" instruction rather than attempting inference.
+  - **Not visually verified on a device/emulator** — no emulator was
+    available for this session, and building the app was explicitly
+    disallowed. The radial angle math, connector Canvas draws, and dialog
+    layout were reasoned through against existing Canvas usage in
+    `TownRenderer.kt`/`Components.kt` and Compose layout semantics, but
+    actual on-screen spacing/overlap (especially the relationship map at
+    high relationship counts, or the family tree at maximum traceable
+    depth) has not been eyeballed.
+  - **No changes to `RippleApp.kt`, `AndroidManifest.xml`, or any
+    notification/WorkManager file** — respected the concurrent agent's
+    territory for the entire task; the new feature is fully self-contained
+    inside `feature/people/*` as a `Dialog`, not a nav-graph route, for
+    exactly this reason.
+
 ### 2026-07-10 — Phase 4 kicked off: external world pressure
 
 First Phase 4 backlog item — `ExternalWorldEventProvider` — implemented as a
@@ -1203,8 +1460,22 @@ rather than duplicating it wholesale into this doc.
   `docs/simulation-rules.md#seasonal-events`.*
 
 **Product**
-- Family tree visualisation (proper generational graph) and a relationship
-  map canvas on the People screen.
+- [x] Family tree visualisation (proper generational graph) and a relationship
+  map canvas on the People screen. *Implemented — see the 2026-07-10 "Family
+  tree & relationship map" session-log entry near the top of this file for
+  full detail. Summary: a new `FamilyTreeScreen.kt`
+  (`feature/people/FamilyTreeScreen.kt`) full-screen `Dialog` with two tabs —
+  a genuinely graphical Canvas-connected generational tree (grandparents →
+  parents → resident+partner → children → grandchildren, where traceable)
+  and a radial relationship-map canvas (non-family relationships as spokes
+  from a centre node, coloured/grouped by `RelationshipKind`, capped at 12 by
+  warmth). Entry points wired from both the Following card and every
+  expandable `PersonRow` family section in `PeopleScreen.kt` — no dangling
+  UI. Reused `familyOf()` and the already-exposed, already-capped
+  `ResidentUi.relationships`/`RelationUi` — no `WorldRepository`,
+  `WorldSnapshot`, or simulation-core changes were needed. Not visually
+  verified on a device/emulator (blind implementation, per this session's
+  constraints).*
 - Cause viewer as a dedicated branching timeline UI (multi-parent display).
 - [x] Follow "moments": short vignette cards when the followed resident does
   something notable. *Implemented in `TownScreen.kt`, reusing the event-banner
@@ -1235,9 +1506,40 @@ rather than duplicating it wholesale into this doc.
   history of past moments (they remain visible via the ordinary event log).
   Not visually verified on a device/emulator — implemented by careful reading
   of the existing Compose patterns in this file, pending manual review.*
-- Real local notifications (opt-in, POST_NOTIFICATIONS permission flow) for
+- [x] Real local notifications (opt-in, POST_NOTIFICATIONS permission flow) for
   followed/favourite residents only, delivered on app open or via WorkManager
-  summary — still no continuous background work.
+  summary — still no continuous background work. *Implemented — see the
+  2026-07-10 "Real local notifications" session-log entry below for the full
+  writeup. Summary: an explicit opt-in toggle in `SettingsSheet` drives the
+  standard `rememberLauncherForActivityResult(RequestPermission())` flow for
+  `POST_NOTIFICATIONS` (API 33+, no unprompted launch-time request); one
+  idempotent `NotificationChannel` ("Followed resident updates"); two delivery
+  mechanisms sharing one DB-only `FollowedResidentNotifier.checkAndNotify()`
+  (reuses `ImportanceScorer.HISTORY_THRESHOLD`, capped at 3 notifications per
+  check) — (a) on app open/resume from `MainViewModel.init`, and (b) a 15-minute
+  `PeriodicWorkRequest` (`NotificationCheckWorker`, plain `CoroutineWorker`, no
+  wake locks/foreground service). Deferred: deep-linking a tap to the specific
+  event/resident (falls back to a plain app-open via `MainActivity`'s existing
+  `singleTask` launch mode — no intent-extra handling exists yet to build on);
+  richer notification content/grouping (Android's own notification-shade
+  bundling by app/channel applies by default, nothing custom built). **The
+  periodic Worker is deliberately DB-only, not a full simulation catch-up** —
+  see `NotificationCheckWorker`'s doc comment for the three reasons (engine
+  confinement to `WorldRepository`'s dispatcher, not silently advancing game
+  time off-schedule, and the check not actually needing a fresh tick). **Not
+  verified on a real device or emulator — none was available in this
+  environment.** This item is materially riskier to leave unverified than the
+  session's pure-Compose UI work: manifest/permission declarations, the actual
+  system permission-request dialog and its grant/deny branches, notification
+  channel creation, and WorkManager's periodic scheduling all depend on real
+  OS behaviour that compilation alone cannot catch. Needs a real-device pass
+  before being trusted: request the permission both ways (grant and deny),
+  confirm a notification actually appears and tapping it opens the app,
+  confirm the toggle-off path cancels the periodic Worker
+  (`adb shell dumpsys jobscheduler` or WorkManager's own inspector), and leave
+  the app closed for 15+ minutes with a followed resident's life continuing
+  (via a separate device/emulator instance or a manually seeded notable event)
+  to confirm the periodic check actually fires and behaves.*
 - Sprite atlas support in `SpriteProvider` + commissioned pixel art replacing
   the procedural placeholders; walk cycles with 4 frames and directions.
 - Sound: gentle ambient loops by time-of-day/weather.

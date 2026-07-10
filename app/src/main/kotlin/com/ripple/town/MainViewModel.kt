@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.ripple.town.core.model.InterventionVerb
 import com.ripple.town.data.SettingsRepository
 import com.ripple.town.data.WorldRepository
+import com.ripple.town.notifications.FollowedResidentNotifier
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,7 +25,8 @@ sealed class AppState {
 @HiltViewModel
 class MainViewModel @Inject constructor(
     private val worldRepository: WorldRepository,
-    private val settingsRepository: SettingsRepository
+    private val settingsRepository: SettingsRepository,
+    private val notifier: FollowedResidentNotifier
 ) : ViewModel() {
 
     private val _appState = MutableStateFlow<AppState>(AppState.Loading)
@@ -43,6 +45,11 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             val restored = worldRepository.restoreIfPresent()
             _appState.value = if (restored) AppState.Ready else AppState.NeedsOnboarding
+            // Delivery mechanism (a) from the backlog item: a check-and-notify pass on
+            // app open, after the world (and any offline catch-up) has finished
+            // restoring so this sees events from time that just got caught up on, not
+            // just the pre-close state. No-ops cheaply if the user hasn't opted in.
+            if (restored) notifier.checkAndNotify()
         }
     }
 

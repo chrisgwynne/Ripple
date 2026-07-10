@@ -2,6 +2,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!--
+      Runtime-requested (API 33+) via the standard ActivityResultContracts
+      .RequestPermission() flow, gated behind an explicit opt-in toggle in
+      Settings (see feature/settings/SettingsSheet.kt) — never requested
+      unprompted on launch. Below API 33 notifications are permitted by
+      default at install time, so this declaration is a no-op there.
+    -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:name=".RippleApplication"
         android:allowBackup="true"

@@ -63,6 +63,14 @@ interface EventDao {
     @Query("SELECT * FROM world_events WHERE time >= :fromTime AND time < :toTime ORDER BY time ASC")
     suspend fun eventsBetween(fromTime: Long, toTime: Long): List<WorldEventEntity>
 
+    /**
+     * One-shot (non-Flow) lookup for background/worker contexts that shouldn't hold a
+     * live collector open — e.g. [com.ripple.town.work.NotificationCheckWorker]'s
+     * lightweight DB-only pass. Mirrors [importantEvents]'s bar and ordering.
+     */
+    @Query("SELECT * FROM world_events WHERE importance >= :minImportance AND visibility != 'HIDDEN' AND id > :sinceId ORDER BY time ASC LIMIT :limit")
+    suspend fun notableEventsSince(minImportance: Double, sinceId: Long, limit: Int): List<WorldEventEntity>
+
     @Query("UPDATE world_events SET importance = importance + :delta WHERE id = :id")
     suspend fun boostImportance(id: Long, delta: Double)
 
@@ -124,6 +132,10 @@ interface FollowDao {
 
     @Query("SELECT * FROM followed_residents")
     fun all(): Flow<List<FollowedResidentEntity>>
+
+    /** One-shot snapshot for background/worker contexts — see [EventDao.notableEventsSince]. */
+    @Query("SELECT * FROM followed_residents")
+    suspend fun allOnce(): List<FollowedResidentEntity>
 }
 
 /**
