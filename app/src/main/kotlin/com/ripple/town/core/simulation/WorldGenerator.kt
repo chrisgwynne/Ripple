@@ -51,7 +51,10 @@ class WorldGenerator(private val seed: Long, private val townName: String = "Ash
         buildBuildings(state)
         buildDetailedResidents(state, rng)
         buildBusinessesAndJobs(state)
-        buildBackgroundResidents(state, rng)
+        // Real, connected background households (family/partner links, age pyramid) rather
+        // than the old flat buildBackgroundResidents(); see PopulationGenerator.kt's doc
+        // comment for why this replaces it outright instead of running alongside it.
+        PopulationGenerator.buildProceduralPopulation(state, rng, targetCount = PROCEDURAL_POPULATION_TARGET)
         buildRelationships(state, rng)
         seedScenarios(state)
 
@@ -534,58 +537,6 @@ class WorldGenerator(private val seed: Long, private val townName: String = "Ash
         employ(res("Vernon Silverstone"), hall, "Mayor", 70.0, 9, 16)
     }
 
-    // -------------------------------------------------- background residents
-
-    private fun buildBackgroundResidents(state: WorldState, rng: SimRandom) {
-        val occupations = listOf(
-            "Farm worker", "Delivery driver", "Seamstress", "Gardener", "Cleaner", "Fisher",
-            "Postal worker", "Labourer", "Home help", "Clerk", "Carter", "Retired", "Between jobs"
-        )
-        repeat(BACKGROUND_COUNT) {
-            val id = state.nextResidentId++
-            val gender = when (rng.nextInt(10)) {
-                in 0..4 -> Gender.FEMALE
-                in 5..9 -> Gender.MALE
-                else -> Gender.NONBINARY
-            }
-            val genderPick = if (rng.nextBoolean(0.06)) Gender.NONBINARY else gender
-            val first = when (genderPick) {
-                Gender.FEMALE -> rng.pick(NameData.FEMALE_FIRST)
-                Gender.MALE -> rng.pick(NameData.MALE_FIRST)
-                Gender.NONBINARY -> rng.pick(NameData.NEUTRAL_FIRST)
-            }
-            val age = rng.nextInt(18, 76)
-            val r = Resident(
-                id = id,
-                firstName = first,
-                surname = rng.pick(NameData.SURNAMES),
-                gender = genderPick,
-                bornAt = state.time - age.toLong() * SimTime.MINUTES_PER_YEAR - rng.nextLong(0, SimTime.MINUTES_PER_YEAR),
-                homeBuildingId = null, // lives in outer Ashcombe, off the detailed map
-                householdId = null,
-                detailLevel = DetailLevel.BACKGROUND,
-                sprite = SpriteConfig(
-                    skinTone = rng.nextInt(4), hairStyle = rng.nextInt(4), hairColor = rng.nextInt(5),
-                    shirtColor = rng.nextInt(8), trouserColor = rng.nextInt(5)
-                ),
-                occupation = rng.pick(occupations),
-                wealth = rng.nextDouble(50.0, 2_500.0),
-                needs = Needs(
-                    hunger = rng.nextDouble(50.0, 90.0), energy = rng.nextDouble(50.0, 90.0),
-                    health = rng.nextDouble(60.0, 95.0), stress = rng.nextDouble(10.0, 50.0)
-                ),
-                personality = Personality(
-                    kindness = rng.nextDouble(0.2, 0.8), ambition = rng.nextDouble(0.2, 0.8),
-                    curiosity = rng.nextDouble(0.2, 0.8), sociability = rng.nextDouble(0.2, 0.8),
-                    patience = rng.nextDouble(0.2, 0.8), honesty = rng.nextDouble(0.3, 0.9),
-                    courage = rng.nextDouble(0.2, 0.8), discipline = rng.nextDouble(0.2, 0.8),
-                    empathy = rng.nextDouble(0.2, 0.8), impulsiveness = rng.nextDouble(0.2, 0.8)
-                )
-            )
-            state.residents[id] = r
-        }
-    }
-
     // ---------------------------------------------------------- relationships
 
     private fun buildRelationships(state: WorldState, rng: SimRandom) {
@@ -758,7 +709,11 @@ class WorldGenerator(private val seed: Long, private val townName: String = "Ash
         const val MAP_H = 34
         const val HIGH_ST_Y = 10
         const val ROWAN_ST_Y = 22
-        const val BACKGROUND_COUNT = 60
+        /** Ceiling passed to [PopulationGenerator.buildProceduralPopulation] — real spare home
+         *  capacity across the existing 12 Rowan Street slots stops generation well short of
+         *  this on the current map; see docs/simulation-rules.md's "Procedural background
+         *  population" section for the honest accounting. */
+        const val PROCEDURAL_POPULATION_TARGET = 500
         const val NEW_FAMILY_NOTE = "new_family_arrival"
     }
 }

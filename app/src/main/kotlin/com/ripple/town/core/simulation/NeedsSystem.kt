@@ -178,11 +178,18 @@ object NeedsSystem {
             val hit = ctx.rng.pickOrNull(candidates) ?: return
             hit.condition = (hit.condition - ctx.rng.nextDouble(6.0, 18.0)).coerceAtLeast(5.0)
             hit.visibleChanges += "Storm damage"
-            ctx.emit(
+            val damage = ctx.emit(
                 com.ripple.town.core.model.EventType.WEATHER_DAMAGE,
                 "A storm battered ${hit.name}, leaving visible damage.",
                 buildingId = hit.id,
                 severity = 0.45
+            )
+            // Bridge 2/3 — same cross-system consequences as the river-flood mechanic in
+            // SeasonalEventSystem: a housed business takes a real operational hit, and anyone
+            // caught inside gets a genuine FEAR memory, not just a generic need hit.
+            com.ripple.town.core.simulation.PressureBridgeSystem.onBuildingWeatherDamaged(ctx, damage)
+            com.ripple.town.core.simulation.PressureBridgeSystem.onSevereWeatherNearResidents(
+                ctx, damage, "That storm hit hard while we were still inside — properly frightening."
             )
         }
     }

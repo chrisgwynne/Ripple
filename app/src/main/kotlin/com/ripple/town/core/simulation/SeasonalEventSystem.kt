@@ -153,6 +153,13 @@ object SeasonalEventSystem {
             severity = 0.65
         )
         ConsequenceEngine.onEvent(ctx, event)
+        // Bridge 2 — a business housed in this building takes a real operational hit beyond the
+        // building's own condition drop; Bridge 3's severe end gives anyone inside a genuine
+        // FEAR memory rather than just the safety/comfort need hit already applied above.
+        PressureBridgeSystem.onBuildingWeatherDamaged(ctx, event)
+        PressureBridgeSystem.onSevereWeatherNearResidents(
+            ctx, event, "The flood tore through while we were still inside — I won't forget that fear."
+        )
     }
 
     /** True if any tile within [FLOOD_PROXIMITY_TILES] of the building's footprint is water. */

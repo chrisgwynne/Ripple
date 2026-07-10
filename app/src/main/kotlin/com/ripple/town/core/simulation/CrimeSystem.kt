@@ -204,6 +204,7 @@ object CrimeSystem {
             )
             r.needs.safety -= 4.0
             ConsequenceEngine.onEvent(ctx, crime)
+            PressureBridgeSystem.onCrimeNearBusiness(ctx, crime)
             if (ctx.rng.nextBoolean(SHOPLIFTING_REPORT_CHANCE)) investigate(ctx, crime)
         }
     }
@@ -281,6 +282,7 @@ object CrimeSystem {
                 ctx.addMemory(v, MemoryType.FEAR, "Someone had been in our home while we were out.", 60.0, crime.id)
             }
             ConsequenceEngine.onEvent(ctx, crime)
+            PressureBridgeSystem.onCrimeNearBusiness(ctx, crime)
             investigate(ctx, crime) // burglary is always reported — too significant to sit hidden
         }
     }
@@ -352,6 +354,7 @@ object CrimeSystem {
                 victim.needs.stress += 14.0
                 ctx.addMemory(victim, MemoryType.FEAR, "Being robbed like that shook me more than I expected.", 70.0, crime.id, listOf(mugger.id))
                 ConsequenceEngine.onEvent(ctx, crime)
+                PressureBridgeSystem.onCrimeNearBusiness(ctx, crime)
                 investigate(ctx, crime) // a mugging with a victim who saw a face is always reported
             }
         }
@@ -527,6 +530,7 @@ object CrimeSystem {
             target.needs.stress += 10.0
             ctx.addMemory(target, MemoryType.FEAR, "Someone tried to burn us out.", 80.0, crime.id, listOf(aggressor.id))
             ConsequenceEngine.onEvent(ctx, crime)
+            PressureBridgeSystem.onCrimeNearBusiness(ctx, crime)
             investigate(ctx, crime) // always investigated — too severe to sit unreported
         }
     }

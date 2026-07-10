@@ -931,6 +931,82 @@ Healthy businesses (> 9 000) may expand (+capacity, building extension);
 demand > 62 with spare capacity hires — preferring detailed residents with
 active `FIND_JOB` goals, promoting background residents otherwise.
 
+## Economy calibration audit (added 2026-07-11)
+
+Ordered by the Simulation Reality Review's flag that the economy might be overtuned toward
+debt/business distress — but that flag was anecdotal, never actually measured. This section
+records a real, instrumented measurement, not another guess.
+
+**What was built.** `app/src/test/kotlin/com/ripple/town/simulation/calibration/`:
+`EconomyMetricsCollector` (pure `WorldState` reader — per-resident wealth/debt/employment,
+per-business balance/daysInTrouble/demand/reputation/priceLevel/open-state, and honest
+percentile distributions computed by sort+index, never average-only), `EconomyCalibrationRunner`
+(drives fresh, independent `TestWorld` simulations across a seed list, snapshotting at a fixed
+day interval), and `EconomyCalibrationReport` — a `@Test` that runs the audit and prints the full
+report, so any future session can regenerate this diagnosis on demand with:
+`./gradlew :app:testDebugUnitTest --tests "com.ripple.town.simulation.calibration.EconomyCalibrationReport"`.
+
+**Scope actually run: 10 seeds × 1 simulated year, snapshotted every 30 in-game days.** The
+brief's original suggestion (~100 seeds × 5-10 years) was not realistic for a single JVM test
+invocation — `SimulationTickBenchmark` (this session) already put a single `tick()` at a
+50-75ms *ceiling* on this host, and one simulated day is 144 ticks over a full system pipeline.
+10 seeds × 360 days measured at **~30-45s wall clock**, comfortably inside a normal test run, so
+that is the scope that actually shipped real numbers rather than a larger scope that would have
+produced none. Only `DETAILED` adult residents are counted (background residents never pass
+through `EconomySystem.dailySettlement`'s wealth/debt logic, so including them would dilute every
+percentile with residents the economy doesn't actually simulate).
+
+**Real measured numbers (10 seeds, pooled, end of simulated year 1):**
+
+| Metric | p10 | p25 | median | p75 | p90 |
+|---|---|---|---|---|---|
+| Resident wealth (n=426) | 392 | 1,495 | 5,116 | 12,099 | 15,512 |
+| Resident debt, debtors only (n=34) | 114 | 282 | 656 | 2,852 | 4,727 |
+| Open business balance (n=30) | 41 | 5,093 | 9,410 | 18,890 | 43,594 |
+
+- Residents in any debt: 7.9% (pooled). Residents over `DEBT_CRISIS_THRESHOLD` (2,000): 2.9%.
+- Employment rate across seeds: min 56.1%, median 95.0%, max 96.3%.
+- **Business closure rate over the year: 66.7%** (60 of 90 tracked businesses closed), with every
+  single one of the 10 independently-seeded towns landing between 56% and 78% — not a small-sample
+  artifact, a consistent structural result.
+- Business distress (`daysInTrouble > 0`) peaked at 38.6% of open businesses around day 30, then
+  fell — because by then most of the businesses that were ever going to fail had already closed,
+  not because the survivors got healthier as a population. Median open-business balance climbed
+  from 2,400 (day 0) to 9,410 (day 360) — survivorship bias in the pooled stat, not evidence the
+  mechanic is gentle.
+
+**Diagnosis — which hypothesis actually holds, from the numbers:**
+
+1. *Wages can't cover living costs* — **not supported**. `EconomySystem.LIVING_COST_PER_DAY` = 9.0
+   against `salaryFor()` = 40.0 (most roles) to 54.0 (SCHOOL) is a >4x cushion. Measured resident
+   wealth is healthy at every percentile; debt-crisis rate is low (2.9%).
+2. *The 18-day `CLOSURE_DAYS` cutoff is too strict* — **not the root cause in isolation**. 18
+   consecutive red days, reset by any single profitable day, is a genuinely long runway. The real
+   issue is how often a business can't string together that one profitable day in the first place
+   (see #3), not the cutoff itself.
+3. *New businesses (`GoalSystem.START_BUSINESS`) don't start with enough capital* — **supported,
+   the strongest candidate found**. A new WORKSHOP opens with `balance = STARTUP_CAPITAL × 0.6` =
+   240.0. Pure overhead for a workshop is `EconomySystem.overheads(WORKSHOP)` = 30.0/day; the
+   moment it hires one employee at `salaryFor(WORKSHOP)` = 40.0/day, fixed costs alone are
+   ~70.0/day against a 240.0 starting balance — about 3.4 days of runway with zero revenue. New
+   businesses also open at `demand = 35.0`, well below the town average, so revenue is not
+   guaranteed to arrive quickly. `EXPANSION_BALANCE` (9,000, the "healthy" bar) is 37.5× the
+   actual starting balance.
+4. *The whole "overtuned" read was anecdotal, not a real pattern* — **not supported**. The 66.7%
+   closure rate reproduces consistently across all 10 independent seeds (56-78% range); this is
+   real and structural.
+
+**Net finding.** The review's framing was half right, half wrong. Resident-side debt/wage
+pressure is **not** structurally broken — this measurement found no support for it. Business-side
+distress **is** real and consistent: roughly two-thirds of businesses that open over a simulated
+year end up closing, and the most plausible mechanical driver, found directly in
+`GoalSystem`/`EconomySystem`'s own constants rather than assumed, is that a newly-opened business
+starts with only ~3-4 days of expense runway and a below-average demand level to grow from. This
+is an audit-only finding — no tuning constants were changed as part of it; a future remediation
+pass should treat `GoalSystem.STARTUP_CAPITAL`'s `× 0.6` opening-balance multiplier and/or new
+businesses' starting `demand` as the first things to reconsider, informed by this data rather than
+by guesswork.
+
 ## Business rivalries
 
 Economy v2 slice, scoped down to price/demand competition and rivalries
@@ -1401,6 +1477,142 @@ attempting CAN-tier — the following were **not** built this pass:
   of this (comfort genuinely dropping near a noisy building); a true
   "neighbour dispute" (two specific residents, not a building-vs-petitioner
   shape) would need its own precondition design, not attempted here.
+
+## Cross-system pressure bridges (added 2026-07-11)
+
+The individual systems above (economy, crime, weather, emotion) are each
+independently causal, but the connective tissue *between* them was thin: a
+flood damaging a building didn't ripple into that building's business losing
+customers for weeks; a crime near a business didn't measurably depress
+demand for a period. `core/simulation/PressureBridgeSystem.kt` is the glue —
+four bridges, each reusing an existing mechanism rather than inventing a
+parallel one. It never duplicates or overrides `EconomySystem`/
+`CrimeSystem`/`SeasonalEventSystem`/`NeedsSystem`'s own logic; it only reacts
+to their events/daily passes.
+
+**Shared mechanism (Bridges 1 & 2).** Both are "a business's demand takes a
+bounded, temporary hit that recovers over N days" — implemented once as
+`PressureBridgeSystem.applyTemporaryDemandPenalty`, which schedules a paired
+dip-then-recovery through the *existing* `DelayedEffectType.DEMAND_SHIFT`
+mechanism (already read by `DelayedEffectSystem.apply`, already used by
+`ConsequenceEngine`'s `BUSINESS_CLOSED` → rival-demand-shift rule): a
+negative `DEMAND_SHIFT` fires almost immediately (the dip, within ~1 day), a
+matching positive `DEMAND_SHIFT` of equal magnitude fires `recoverAfterDays`
+later (the recovery). No new `DelayedEffectType`. A business housed in a
+weather-damaged building additionally gets a bounded `priceLevel` surcharge
+(disrupted supply costing more), tracked on `WorldState.pendingPriceEasing`
+(businessId → owed amount + when to hand it back) and eased back by
+`PressureBridgeSystem.easePriceBumps` once the same recovery window closes —
+persisted on `WorldState` (not a static in-memory map) so it survives a
+checkpoint reload, and small/self-cleaning like every other pending
+consequence in this codebase.
+
+Every bridge is silent/mechanical — no new `EventType` was added.
+`DEMAND_SHIFT`-flavoured nudges were already judged not newsworthy on their
+own (see `ConsequenceEngine`'s `BUSINESS_CLOSED` rule, which schedules the
+same effect type without emitting a fresh event); the *triggering* event
+(`SHOPLIFTING`/`BURGLARY`/`MUGGING`/`ARSON_ATTEMPT`, `WEATHER_DAMAGE`) is
+already real town news on its own and already scored by `ImportanceScorer`.
+
+### Bridge 1 — crime near a business dents its demand
+
+`PressureBridgeSystem.onCrimeNearBusiness`, called inline from `CrimeSystem`
+right after each of shoplifting, burglary, mugging and arson-attempt emits
+its event (fraud is deliberately excluded — it's the owner quietly cooking
+their own books, not a public scare that would make anyone avoid the
+street). If the crime event already carries a `businessId` (shoplifting,
+arson — "at" the business) that business takes the hit directly; otherwise
+(burglary, mugging — no business involved at all) the nearest *open*
+business within `CRIME_PROXIMITY_TILES` (3, the same radius
+`SeasonalEventSystem.FLOOD_PROXIMITY_TILES` uses for "near water") of the
+crime's building takes it instead — "fear changes routes" even when the
+crime itself wasn't a shop theft. No pathfinding/route-avoidance is built;
+the demand dip stands in for reduced footfall, exactly as
+`EconomySystem.hourlyFootfall` already converts `demand` into customers.
+
+- **Trigger.** A `SHOPLIFTING`/`BURGLARY`/`MUGGING`/`ARSON_ATTEMPT` event at
+  or within 3 tiles of an open business.
+- **Magnitude.** A flat `3..8` demand-point dip (`CRIME_DEMAND_DIP_MIN/MAX`).
+- **Expiry.** Recovers fully over `7..14` days
+  (`CRIME_RECOVERY_DAYS_MIN/MAX`) — deliberately longer than
+  `EmotionType.FEAR`'s own 10/day decay rate: the spawned emotion fades
+  faster than the town's habit of avoiding the block.
+
+### Bridge 2 — flood/weather damage disrupts a housed business
+
+`PressureBridgeSystem.onBuildingWeatherDamaged`, called inline from both
+`SeasonalEventSystem.maybeFlood` (the river-flood mechanic) and
+`NeedsSystem.updateWeather`'s storm-damage roll, right after each emits its
+`WEATHER_DAMAGE` event — on top of, never replacing, the building's own
+`condition` hit those two already apply directly.
+
+- **Trigger.** A `WEATHER_DAMAGE` event on a building that currently houses
+  an open business.
+- **Magnitude.** A `6..14` demand-point dip (`FLOOD_DEMAND_DIP_MIN/MAX`,
+  harsher than a crime scare — structural damage is a bigger deal than a
+  fright) plus a `+0.12` `priceLevel` surcharge (`FLOOD_PRICE_BUMP`,
+  disrupted supply costing more), bounded overall to
+  `PressureBridgeSystem.MAX_PRICE_LEVEL` (2.2).
+- **Expiry.** Both recover over `10..21` days
+  (`FLOOD_RECOVERY_DAYS_MIN/MAX`) — longer than Bridge 1's window, matching
+  "structural damage takes longer to shrug off than a scare".
+
+### Bridge 3 — weather affects mood, not just needs
+
+Two parts, both in `PressureBridgeSystem`:
+
+- **Prolonged poor weather → low-key weariness.** Nothing previously tracked
+  a weather *streak* (`NeedsSystem.updateWeather`'s daily roll is
+  independent each day) — `WorldState.consecutivePoorWeatherDays` is the
+  minimal counter added for this, incremented daily in
+  `PressureBridgeSystem.updateDaily` (wired into `SimulationCoordinator`'s
+  `if (newDay)` block) whenever `weather` is RAIN/STORM/SNOW/FOG, reset to 0
+  the moment it turns CLEAR/CLOUDY. Once the streak reaches
+  `POOR_WEATHER_THRESHOLD_DAYS` (4), every detailed resident currently
+  outdoors/exposed (`currentBuildingId == null` — between buildings or
+  travelling; sheltered residents indoors are untouched) gets a bounded
+  `EmotionType.ANXIETY` nudge (intensity 22, via the existing
+  `EmotionSystem.spawnEmotion` — deliberately reusing ANXIETY rather than
+  inventing a new "weary" flavour, see `EmotionType`'s own doc on keeping the
+  set to a practical, non-duplicating twelve) plus a small `-3` `comfort`
+  nudge. Expires naturally: `EmotionSystem.updateDaily`'s existing decay
+  fades the ANXIETY entry, and the streak itself resets the instant weather
+  turns fair.
+- **Severe weather damage → a genuine FEAR memory.** Called from the same
+  `SeasonalEventSystem.maybeFlood`/`NeedsSystem.updateWeather` hooks as
+  Bridge 2, `PressureBridgeSystem.onSevereWeatherNearResidents` gives every
+  detailed resident actually inside the damaged building (not just a generic
+  safety/comfort need hit, which those two systems already apply directly) a
+  real `MemoryType.FEAR` memory plus a spawned `EmotionType.FEAR` emotion
+  (intensity 55) — the same `ctx.addMemory` + `EmotionSystem.spawnEmotion
+  (FEAR)` pairing `CrimeSystem.updateBurglary`/`updateMugging` already use
+  for their victims, just extended to weather. Bounded like any other
+  memory/emotion (memory list cap, `EmotionSystem.MAX_ACTIVE_EMOTIONS`,
+  daily decay).
+
+### Bridge 4 — sustained financial trouble strains a partnership
+
+`PressureBridgeSystem.onSustainedFinancialTrouble`, called daily from
+`SimulationCoordinator`'s `if (newDay)` block. Reuses
+`EconomySystem.DEBT_CRISIS_THRESHOLD` — the exact existing bar this
+codebase already treats as "serious financial trouble" (the same threshold
+`EconomySystem.dailySettlement` uses to set the `debt_crisis` awareness flag
+and fire `DEBT_CRISIS`) — rather than inventing a new one. Previously,
+sustained debt only produced a generic stress bump on the affected resident
+themselves; this adds the brief's "unemployment increases household
+tension" as a *targeted* relationship-dimension effect instead.
+
+- **Trigger.** A detailed resident still over `DEBT_CRISIS_THRESHOLD` with
+  the `debt_crisis` awareness flag set, who has a live partner/spouse (only
+  `RelationshipKind.PARTNER`/`SPOUSE` — not casual acquaintances).
+- **Magnitude.** `resentment +4`, `dependency +3`, `affection -2` on the
+  couple's shared `Relationship` — small and bounded, same clamp discipline
+  as every other relationship mutation.
+- **Expiry/cooldown.** At most once per `PARTNER_NUDGE_COOLDOWN_DAYS` (5)
+  per resident, tracked on `WorldState.lastFinancialStrainNudgeAt`
+  (residentId → last-nudged sim time, same shape as `lastIncidentAt`) — a
+  sustained crisis nudges the relationship every few days, never piles on
+  daily while it drags on for weeks.
 
 ## Events, causes, importance
 
@@ -2172,3 +2384,166 @@ documented range — verified in `ConversationInfluenceSystemTest`.
 - `emotionalAttachment` (on `Belief`) is still not written or read by
   anything, including this system — still reserved for a future deeper
   persuasion-resistance mechanic.
+
+## Town sentiment (added 2026-07-11)
+
+`core/model/WorldState.kt` (the `TownSentiment` data class + `WorldState
+.townSentiment` field) + `core/simulation/TownSentimentSystem.kt` (the daily
+update). A persistent, town-wide aggregate mood — distinct from both
+`BeliefSystem` (one resident's personal, settled worldview) and the live
+`TownStatsUi.averageWellbeing` (a per-tick average of current `Needs.stress`,
+recomputed fresh every read, never stored anywhere). Town sentiment is the
+town's own slow-moving emotional weather: it accumulates from real
+aggregated events over days and decays gently back toward neutral when
+nothing is actively pushing it.
+
+### Dimensions
+
+Six, each `0.0..100.0` with `50.0` the neutral baseline (mirrors `Needs`'
+own 0..100 scale rather than `Belief`'s signed `-1..1` — sentiment is a
+*level*, not a position on a for/against axis):
+
+- `trust` — faith in the town's institutions/governance. Partly an
+  aggregate readout of the town-wide mean `BeliefTopic.TRUST_IN_GOVERNMENT`
+  (see "Aggregate belief readout" below), but also independently moved by
+  town-level events (petitions, crisis response) no single belief trigger
+  captures.
+- `fear` — how anxious the town feels about crime/safety right now.
+- `optimism` — how good the near future looks; the same "partly a belief
+  readout" relationship as `trust`, this time against the mean
+  `BeliefTopic.ECONOMIC_OPTIMISM`.
+- `civicPride` — how good the town feels about itself and its own recent
+  conduct (crisis response, successful petitions). Kept distinct from
+  `trust` on purpose: pride is about the town's *character*, trust is about
+  whether its institutions can be relied on.
+- `safety` — the practical, crime-driven cousin of `fear`, kept as its own
+  dimension rather than collapsed into `1 - fear` since a town can
+  plausibly feel unsettled in the abstract while its actual recent safety
+  record stays fine, or vice versa.
+- `cohesion` — how much the town pulls together, fed by petition/community
+  outcomes. Distinct from `civicPride`: cohesion is "do we act as one",
+  pride is "do we feel good about ourselves".
+
+Deliberately excluded from the brief's fuller list, and why: "political
+tension" (would just be the inverse of `cohesion`/`trust`); "grief"
+(already exists per-resident as `MemoryType`/`EmotionType.GRIEF`, no
+town-wide aggregate need identified this pass); "economic confidence"
+(== `optimism`, a synonym); "police legitimacy" (== `trust` narrowed to the
+constable specifically, which `BeliefTopic.TRUST_IN_POLICE` already covers
+per-resident with no town-wide consumer needed yet).
+
+### Real triggers (never a flat daily dice roll)
+
+Read each day from `TownSentimentSystem.updateDaily`, all scanning the same
+bounded `WorldState.recentEventIds` window (via `ctx.eventIndex`, capped
+further to `RECENT_TRIGGER_WINDOW_DAYS = 10` days) that `CrimeSystem`/
+`BeliefSystem` already read — never a fresh full-log scan:
+
+1. **Repeated unsolved crime** (`evaluateCrimeRun`) — recent
+   `CRIME_REPORTED` events, weighted by `payload["accurate"]`: an inaccurate
+   report (the wrong person named, per `CrimeSystem.investigate`) counts
+   double an accurate one — the wrong person being blamed while the real
+   culprit gets away is genuinely scarier than an equal number of correctly
+   resolved crimes. Once the weighted run crosses `CRIME_RUN_THRESHOLD = 3`,
+   `fear` rises and `safety` falls by the same bounded delta
+   (`EVENT_DELTA_MIN..EVENT_DELTA_MAX`, scaled by how far past the
+   threshold the run sits).
+2. **Crisis response** (`evaluateCrisisResponse`) — a `WEATHER_DAMAGE`
+   flood followed, within the window, by a `BUILDING_REPAIRED` for the same
+   building (the same causal pairing `BeliefSystem
+   .evaluateCommunityResponse` already reads per-resident, read here
+   town-wide instead) lifts `civicPride` and, at a smaller weight, `trust`.
+3. **Resolved petitions** (`evaluatePetitions`) — `PETITION_RESOLVED`
+   events lift `trust`/`cohesion` on success, dampen them a smaller amount
+   on failure — the same asymmetric bigger-reward-than-penalty shape
+   `PetitionSystem`'s own per-resident consequences already use. Each
+   petition event only ever applies once (de-duped via
+   `WorldState.townSentimentAppliedReasons`, a bounded
+   `"petition:<eventId>"` reason-key log, same shape `Resident.awareness`
+   uses for cooldowns) — otherwise the same resolved petition would keep
+   nudging sentiment every day it stayed inside the recent-events window.
+4. **Aggregate belief readout** (`applyBeliefReadout`) — a cheap mean,
+   across every detailed in-town resident with a formed view, of
+   `BeliefTopic.TRUST_IN_GOVERNMENT` and `BeliefTopic.ECONOMIC_OPTIMISM`
+   (rescaled from `-1..1` to `0..100`), nudging `trust`/`optimism` a small
+   step (`BELIEF_READOUT_PULL = 0.05` of the gap per day) toward that mean.
+   This is the "town sentiment can legitimately be partly an aggregate
+   readout of individual beliefs" half of the brief — a slow background
+   pull alongside the event-driven deltas above, never a hard overwrite,
+   and skipped entirely while nobody in town has formed a view yet (rather
+   than pulling toward a meaningless mean of zero).
+
+### Decay
+
+After every trigger above runs, `decayTowardBaseline` pulls every dimension
+a small step (`DECAY_RATE = 0.015` of the gap) back toward the `50.0`
+neutral baseline — the brief's "should decay slowly". A quiet stretch with
+nothing happening gently forgets old spikes; a day with a real trigger
+still nets a real move, since the trigger deltas are larger than one day's
+decay pull. Every dimension is clamped to `0..100` after decay, so lifetime
+drift structurally cannot leave the documented range no matter how many
+triggers fire — verified in `TownSentimentSystemTest`.
+
+### Significant-shift reporting
+
+`reportSignificantShifts` emits at most one low-severity, `PUBLIC`
+`EventType.TOWN_MILESTONE` per day (reused verbatim — no new `EventType`
+needed; verified safe against `ImportanceScorer`'s existing
+`TOWN_MILESTONE -> 60.0` case and `NewspaperGenerator`'s `else ->` category/
+headline fallbacks), and only when a dimension actually crosses one of two
+named bands (`LOW_BAND = 35.0` / `HIGH_BAND = 65.0`, thirds of the 0..100
+scale) between yesterday and today — never on every small daily nudge,
+which would be noise. If several dimensions cross the same day, only the
+single largest-magnitude crossing is reported.
+
+### Behavioural feedback (the brief's "should influence future behaviour")
+
+Two real, wired consumers:
+
+- **`DecisionSystem`** (`townFearSocialMultiplier`) — a small, bounded
+  multiplier (floor `TOWN_FEAR_SOCIAL_MULTIPLIER_FLOOR = 0.82`, composed
+  multiplicatively alongside the existing shock/emotion multipliers, never
+  replacing either) on `VISIT_FRIEND`/`SOCIALISE_PUBLIC`'s
+  `personalityFit`, reading how far `fear` sits above and `safety` below
+  their neutral baselines. At the neutral baseline (both at `50.0`) this
+  returns exactly `1.0` — a town whose sentiment has never moved behaves
+  identically to before this wiring existed. Never zeroes an action out or
+  overrides `chooseBest`'s ranking on its own, same convention as every
+  other multiplier at those call sites.
+- **`VotingSystem`** (`turnoutChance(voter, state)` overload) — a small
+  additive term (`TOWN_SENTIMENT_TURNOUT_WEIGHT = 0.08`) from the mean of
+  `trust`/`civicPride`, rescaled to a signed `-1..1` offset around the
+  neutral baseline, added on top of the existing single-resident
+  `turnoutChance(voter)` formula. Deliberately kept as a separate overload
+  rather than changing `turnoutChance`'s own signature — every existing
+  caller/test of the single-resident formula (`BeliefDrivenVotingTest`) is
+  completely unaffected; only `VotingSystem.tally` calls the richer
+  two-argument version. A town that doesn't trust its institutions votes a
+  little less; a proud, trusting one votes a little more — never enough to
+  swamp the underlying belief-aware formula.
+
+### Read helper
+
+`TownSentimentSystem.summaryPhrase(state)` (or the lower-level
+`summaryPhrase(sentiment)` overload) returns a short, human-readable
+one-line description of the town's overall mood, picking off whichever
+single dimension sits furthest from baseline (a `< 6.0` deviation on every
+dimension reads as "The town feels much as it usually does."). Not wired
+into any UI screen this pass — same "modelled and available, ready for a
+later read" convention `WorldState.pressureHistory` used before any
+newspaper/town-sheet work actually read it. `feature/town/TownSheets.kt`'s
+existing `buildTodaysStory` mood line derives its wording from the live
+`stats.averageWellbeing` instead, a different, already-existing signal;
+`summaryPhrase` is left available for a future pass to fold in alongside
+it, not forced into that function this session.
+
+### Determinism & bounds
+
+Every trigger above is fully deterministic given `WorldState` and the
+shared `ctx.eventIndex` — no `ctx.rng` draw anywhere in
+`TownSentimentSystem` (unlike `BeliefSystem`'s inheritance noise, there's no
+randomness in how sentiment moves, only in what upstream events happened to
+occur). Verified in `TownSentimentSystemTest`: bounded range under a heavy
+repeated-trigger stress run, identical timelines from two identically-seeded
+worlds fed the same event sequence, and decay-only convergence toward
+baseline from both above and below.

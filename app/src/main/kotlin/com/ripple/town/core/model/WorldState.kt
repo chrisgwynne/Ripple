@@ -108,6 +108,68 @@ data class Petition(
 }
 
 /**
+ * Persistent, town-wide aggregate mood — distinct from any one resident's [Belief]s (an
+ * individual's settled worldview) or the live `TownStatsUi.averageWellbeing` (a per-tick
+ * average of current `Needs.stress`, recomputed fresh every read, never stored). This is the
+ * town's own slow-moving emotional weather: it accumulates from real aggregated events over
+ * days, decays gently back toward neutral when nothing is actively pushing it, and is read back
+ * by other systems as a small, bounded behavioural input. See
+ * `com.ripple.town.core.simulation.TownSentimentSystem` and `docs/simulation-rules.md`
+ * "Town sentiment".
+ *
+ * Six dimensions, each `0.0..100.0` with `50.0` as the neutral baseline (mirrors `Needs`'
+ * own 0..100 scale rather than `Belief`'s signed -1..1 — sentiment is a *level*, not a
+ * position on a for/against axis):
+ *
+ * - [trust] — faith in the town's institutions/governance. Deliberately NOT a duplicate of
+ *   `BeliefTopic.TRUST_IN_GOVERNMENT`: that's one resident's personal, settled opinion; this is
+ *   a town-wide readout partly *sourced from* the mean of those opinions (see
+ *   `TownSentimentSystem.applyBeliefReadout`) but also independently moved by aggregate events
+ *   (petitions, crime) no single belief trigger captures at the town level.
+ * - [fear] — how anxious the town feels about crime/safety right now.
+ * - [optimism] — how good the near future looks, echoing (partly reading from) the town-wide
+ *   mean `BeliefTopic.ECONOMIC_OPTIMISM`, the same "partly an aggregate readout" relationship as
+ *   [trust].
+ * - [civicPride] — how good the town feels about itself and its own recent conduct (crisis
+ *   response, successful petitions) — deliberately kept distinct from [trust] (pride is about
+ *   the town's *character*, trust is about whether its institutions can be relied on) rather
+ *   than folded into a single "institutional confidence" number.
+ * - [safety] — the practical, crime-driven cousin of [fear] (kept as its own dimension rather
+ *   than collapsed into `1 - fear`, since the brief explicitly lists both and they can
+ *   plausibly diverge — a town can feel unsettled/fearful in the abstract while its actual
+ *   recent safety record stays fine, or vice versa).
+ * - [cohesion] — how much the town pulls together, fed by petition/community outcomes,
+ *   distinct from [civicPride] (cohesion is "do we act as one", pride is "do we feel good about
+ *   ourselves").
+ *
+ * Deliberately excluded from the brief's fuller list: "political tension" (would just be the
+ * inverse of [cohesion]/[trust]); "grief" (already exists per-resident as
+ * `MemoryType`/`EmotionType.GRIEF` — no town-wide aggregate need identified this pass);
+ * "economic confidence" (== [optimism], just a synonym); "police legitimacy" (== [trust]
+ * narrowed to the constable specifically, which `BeliefTopic.TRUST_IN_POLICE` already covers
+ * per-resident with no town-wide consumer needed yet).
+ */
+@Serializable
+data class TownSentiment(
+    var trust: Double = 50.0,
+    var fear: Double = 50.0,
+    var optimism: Double = 50.0,
+    var civicPride: Double = 50.0,
+    var safety: Double = 50.0,
+    var cohesion: Double = 50.0
+)
+
+/**
+ * A `Business.priceLevel` surcharge `PressureBridgeSystem` owes back once its recovery window
+ * closes — see `WorldState.pendingPriceEasing`'s own doc comment.
+ */
+@Serializable
+data class PendingPriceEase(
+    val amount: Double,
+    val easeAt: Long   // sim minutes
+)
+
+/**
  * The complete factual state of the simulated world at a moment in time.
  *
  * This object is what the engine mutates each tick, what checkpoints serialise,
@@ -218,6 +280,22 @@ data class WorldState(
      */
     var nationalTaxRate: Double = 1.0,
 
+    /**
+     * The town's slow-moving aggregate mood — see [TownSentiment]'s own doc comment and
+     * `com.ripple.town.core.simulation.TownSentimentSystem`. Safe default (all dimensions at
+     * the neutral `50.0` baseline), no migration needed.
+     */
+    var townSentiment: TownSentiment = TownSentiment(),
+    /**
+     * Bounded de-dup log of one-shot `TownSentimentSystem` trigger reason-keys already applied
+     * (e.g. `"petition:<eventId>"`) — stops a resolved petition sitting inside the recent-events
+     * window from nudging trust/cohesion again every day it stays in view. Same bounded-list-of-
+     * strings shape `Resident.awareness` uses for cooldowns, capped at
+     * `TownSentimentSystem.MAX_APPLIED_REASONS`, scoped to the world (rather than any one
+     * resident) since sentiment itself is world-scoped.
+     */
+    val townSentimentAppliedReasons: MutableList<String> = mutableListOf(),
+
     // Id counters (all state needed for deterministic continuation)
     var nextResidentId: Long = 1L,
     var nextHouseholdId: Long = 1L,
@@ -239,7 +317,37 @@ data class WorldState(
     var deathsToday: Int = 0,
 
     /** Sliding window of recent event ids for the live ticker. */
-    val recentEventIds: MutableList<Long> = mutableListOf()
+    val recentEventIds: MutableList<Long> = mutableListOf(),
+
+    /**
+     * How many in-game days in a row `weather` has been RAIN/STORM/SNOW/FOG, right up to and
+     * including today — updated once daily by `PressureBridgeSystem.updateDaily` (cross-system
+     * pressure bridges, see `docs/simulation-rules.md`). Resets to 0 the moment weather turns
+     * CLEAR/CLOUDY again. A new, safe-default field (0) so existing checkpoints deserialize
+     * unchanged.
+     */
+    var consecutivePoorWeatherDays: Int = 0,
+
+    /**
+     * residentId -> sim time `PressureBridgeSystem.onSustainedFinancialTrouble` last nudged that
+     * resident's partner relationship for sustained debt-crisis strain — a cooldown so a
+     * weeks-long crisis doesn't compound the relationship hit daily. Same shape as
+     * `lastIncidentAt`, kept separate since the two cooldowns are conceptually unrelated. A new,
+     * safe-default field (empty map) so existing checkpoints deserialize unchanged.
+     */
+    val lastFinancialStrainNudgeAt: MutableMap<Long, Long> = mutableMapOf(),
+
+    /**
+     * businessId -> (the `priceLevel` surcharge still owed back, sim time it should be eased).
+     * `PressureBridgeSystem.applyTemporaryDemandPenalty`'s flood/storm price-bump leg (Bridge 2)
+     * bumps `Business.priceLevel` directly and records the debt here so
+     * `PressureBridgeSystem.easePriceBumps` can hand it back once the recovery window closes —
+     * kept on `WorldState` (not a static/in-memory map) specifically so it survives a checkpoint
+     * reload exactly like every other pending consequence in this codebase. Small and
+     * self-cleaning: entries are removed the moment they're eased. A new, safe-default field
+     * (empty map) so existing checkpoints deserialize unchanged.
+     */
+    val pendingPriceEasing: MutableMap<Long, PendingPriceEase> = mutableMapOf()
 ) {
     fun resident(id: Long): Resident? = residents[id]
 

@@ -4,6 +4,100 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-11 — Cross-system pressure bridges
+
+Closes the Simulation Reality Review finding: *"The genuinely mature individual systems
+(economy, crime, weather, relationships) are individually causal; the connective tissue BETWEEN
+systems is thin. A flood damaging a building doesn't yet ripple into that building's business
+losing customers for weeks; a crime near a business doesn't measurably depress demand for a
+period."* New `core/simulation/PressureBridgeSystem.kt` — pure glue, never duplicates or
+overrides `EconomySystem`/`CrimeSystem`/`SeasonalEventSystem`/`NeedsSystem`'s own logic. Four
+bridges built (see `docs/simulation-rules.md` "Cross-system pressure bridges" for full detail):
+
+- **Bridge 1 — crime near a business dents its demand.** Shoplifting/burglary/mugging/arson at
+  or within 3 tiles of an open business schedules a bounded `3..8`-point demand dip recovering
+  over `7..14` days. Called inline from `CrimeSystem` right after each incident's event fires.
+- **Bridge 2 — flood/storm damage disrupts a housed business.** A `WEATHER_DAMAGE` event on a
+  building housing an open business adds a real operational hit beyond the building's own
+  `condition` drop: a `6..14`-point demand dip plus a temporary `+0.12` `priceLevel` surcharge,
+  both recovering over `10..21` days. Called inline from `SeasonalEventSystem.maybeFlood` and
+  `NeedsSystem.updateWeather`'s storm-damage roll.
+- **Bridge 3 — weather affects mood, not just needs.** A new `WorldState
+  .consecutivePoorWeatherDays` counter (updated daily) crossing 4 consecutive RAIN/STORM/SNOW/FOG
+  days spawns a bounded ANXIETY nudge + small comfort hit for detailed residents currently
+  outdoors/exposed. Severe weather damage (the same flood/storm hooks as Bridge 2) gives anyone
+  actually inside the damaged building a genuine `MemoryType.FEAR` memory + spawned FEAR emotion,
+  not just the generic safety/comfort hit those systems already apply.
+- **Bridge 4 — sustained debt crisis strains the partner relationship.** Reuses
+  `EconomySystem.DEBT_CRISIS_THRESHOLD` (the existing bar for "serious financial trouble", no new
+  threshold invented) — a resident still over it with the `debt_crisis` flag set nudges their
+  PARTNER/SPOUSE relationship's `resentment`/`dependency`/`affection` directly, gated to once per
+  5 days per resident via a new `WorldState.lastFinancialStrainNudgeAt` cooldown map. Previously
+  sustained debt only produced a generic stress bump on the resident themselves.
+
+**Shared mechanism.** Bridges 1 & 2 both need "a business's demand takes a bounded, temporary hit
+that recovers over N days" — built once as `PressureBridgeSystem.applyTemporaryDemandPenalty`,
+reusing the *existing* `DelayedEffectType.DEMAND_SHIFT` mechanism (already read by
+`DelayedEffectSystem`, already used by `ConsequenceEngine`'s `BUSINESS_CLOSED` rule) rather than
+inventing a parallel one — a negative `DEMAND_SHIFT` fires almost immediately, a matching
+positive one fires later. No new `DelayedEffectType`, no new `EventType` (every bridge is a
+silent mechanical nudge on top of an already-real, already-scored triggering event). The one
+genuinely new piece of persisted state is `WorldState.pendingPriceEasing`
+(businessId → owed `priceLevel` surcharge + when to hand it back) for Bridge 2's price leg —
+deliberately kept on `WorldState` rather than a static/in-memory map so it survives a checkpoint
+reload like every other pending consequence in this codebase.
+
+New `app/src/test/kotlin/com/ripple/town/simulation/PressureBridgeSystemTest.kt` covering all
+four bridges (scheduling, actual application via `DelayedEffectSystem`, recovery, cooldowns,
+edge cases) plus a same-seed determinism check across 10 simulated days. Not run through the full
+gradle suite this session (compile-only verification per this session's constraints) — written
+against the same `TestWorld`/Truth patterns every other engine test in this file tree uses.
+
+Read but did not touch the concurrently-developed `TownSentiment`/`TownSentimentSystem` work
+below — no file overlap beyond additive fields on the shared `WorldState.kt`.
+
+### 2026-07-11 — Town sentiment: a persistent, town-wide aggregate mood
+
+New `TownSentiment` (`core/model/WorldState.kt`) + `WorldState.townSentiment` field (safe
+default, no migration) + `core/simulation/TownSentimentSystem.kt`. Six dimensions, each
+`0..100` with `50` neutral: `trust`, `fear`, `optimism`, `civicPride`, `safety`, `cohesion` —
+picked over the brief's fuller list (skipped "political tension"/"grief"/"economic
+confidence"/"police legitimacy" as duplicates of these six or of existing per-resident
+`BeliefTopic`s already covering the same ground; see `TownSentiment`'s own doc comment and
+`docs/simulation-rules.md#town-sentiment-added-2026-07-11` for the full reasoning). Distinct
+from both `BeliefSystem` (one resident's personal, settled worldview) and the live
+`TownStatsUi.averageWellbeing` (a per-tick recomputed average, never stored) — town sentiment
+is the town's own slow-moving emotional weather.
+
+Four real triggers, wired into `TownSentimentSystem.updateDaily`, no flat daily dice roll
+anywhere: (1) repeated unsolved crime (`CRIME_REPORTED` events, inaccurate reports weighted
+double) raises `fear`/lowers `safety`; (2) a `WEATHER_DAMAGE` flood followed by a matching
+`BUILDING_REPAIRED` raises `civicPride`/`trust`; (3) `PETITION_RESOLVED` events move
+`trust`/`cohesion` up on success, down (smaller) on failure, de-duped via a new
+`WorldState.townSentimentAppliedReasons` bounded reason-key log; (4) a cheap daily mean, across
+detailed in-town residents, of `BeliefTopic.TRUST_IN_GOVERNMENT`/`ECONOMIC_OPTIMISM` nudges
+`trust`/`optimism` a small step toward it — the "town sentiment can legitimately be partly an
+aggregate readout of individual beliefs" half of the brief, never a hard overwrite. Every
+dimension also decays a small step toward the 50 baseline every day regardless of triggers.
+Significant band-crossings (never every small daily nudge) emit a low-severity, `PUBLIC`
+`EventType.TOWN_MILESTONE` — reused verbatim, no new event type needed.
+
+Two real behavioural-feedback wirings: `DecisionSystem.townFearSocialMultiplier` dampens
+`VISIT_FRIEND`/`SOCIALISE_PUBLIC`'s `personalityFit` (floor 0.82, composed multiplicatively
+alongside the existing shock/emotion multipliers, returns exactly 1.0 at neutral baseline) when
+the town's mood runs fearful/unsafe; `VotingSystem.turnoutChance(voter, state)` — a new
+**overload**, not a signature change, so `BeliefDrivenVotingTest`'s existing single-arg calls
+are completely unaffected — adds a small signed term from the mean of `trust`/`civicPride`.
+`TownSentimentSystem.summaryPhrase(state)` is available for a future UI surface (not wired into
+`TownSheets.kt` this pass, same "modelled, ready for a later read" convention as
+`WorldState.pressureHistory` before any newspaper work read it).
+
+New `TownSentimentSystemTest.kt`: repeated unsolved crime measurably moves fear/safety, a real
+flood→repair pair measurably lifts civic pride/trust, decay-only convergence toward baseline
+from both above and below, bounded range under a heavy stress run, determinism across two
+identically-seeded runs, and both behavioural-feedback wirings' effects. Compile-checked only
+per this session's constraints (no `./gradlew`, no `git` commands run).
+
 ### 2026-07-11 — Simulation Reality Remediation, Phase B.2: conversation influence
 
 New `ConversationInfluenceSystem`, riding the exact conversation pairs `InteractionSystem`

@@ -116,6 +116,21 @@ class SimulationCoordinator(
             MemoryRecallSystem.updateDaily(ctx)
             IdeaDiffusionSystem.updateDaily(ctx)
             BeliefSystem.updateDaily(ctx)
+            // Cross-system pressure bridges (2026-07-11): the connective tissue between the
+            // systems above — prolonged poor weather wearing residents down (and resetting the
+            // consecutive-poor-weather streak daily), plus sustained debt-crisis strain nudging
+            // the affected resident's partner relationship specifically. Crime-near-business and
+            // flood/storm-damage-near-business bridges fire inline from CrimeSystem/
+            // SeasonalEventSystem/NeedsSystem at the moment of the triggering event instead — see
+            // PressureBridgeSystem's own doc comment.
+            PressureBridgeSystem.updateDaily(ctx)
+            PressureBridgeSystem.onSustainedFinancialTrouble(ctx)
+            // Town sentiment (2026-07-11): a persistent, town-wide aggregate mood — see
+            // TownSentimentSystem's own doc comment. Reads real aggregated events from the
+            // systems above (crime reports, flood/repair pairs, resolved petitions, the mean of
+            // residents' own beliefs) rather than being set directly by any of them; run last so
+            // it always sees this tick's freshest picture of what actually happened today.
+            TownSentimentSystem.updateDaily(ctx)
         }
         // 13. Intervention influence regenerates through observation.
         InterventionEngine.regenerate(state, SimTime.MINUTES_PER_TICK)

@@ -76,6 +76,32 @@ object DecisionSystem {
     const val SHOCK_LOW_KEY_BOOST = 1.15
     const val SHOCK_EFFORTFUL_DAMPEN = 0.75
 
+    /** Town-sentiment feedback (2026-07-11) — see `TownSentimentSystem`'s own doc comment and
+     *  `docs/simulation-rules.md` "Town sentiment". Never below this floor, however fearful/
+     *  unsafe the town's mood has gotten — same "never zeroes an action out" convention as the
+     *  shock/emotion multipliers above. */
+    const val TOWN_FEAR_SOCIAL_MULTIPLIER_FLOOR = 0.82
+
+    /**
+     * A small, bounded multiplier on `VISIT_FRIEND`/`SOCIALISE_PUBLIC`'s `personalityFit` —
+     * composed multiplicatively alongside the shock/emotion multipliers already applied at
+     * those two call sites, never replacing either. Reads `WorldState.townSentiment.fear` and
+     * `.safety` (see [TownSentiment]): when the town's mood is genuinely more fearful/less safe
+     * than the neutral baseline, evening-out-and-about actions read slightly less appealing —
+     * residents venture out a little less when the town feels unsafe, without ever forbidding it
+     * outright. At the neutral baseline (both dimensions at 50) this returns exactly `1.0`, so a
+     * town that has never had `TownSentimentSystem.updateDaily` move its sentiment away from
+     * default behaves identically to before this wiring existed.
+     */
+    private fun townFearSocialMultiplier(state: WorldState): Double {
+        val sentiment = state.townSentiment
+        val fearAboveBaseline = (sentiment.fear - TownSentimentSystem.BASELINE).coerceAtLeast(0.0)
+        val unsafetyBelowBaseline = (TownSentimentSystem.BASELINE - sentiment.safety).coerceAtLeast(0.0)
+        val concern = ((fearAboveBaseline + unsafetyBelowBaseline) / 2.0) / TownSentimentSystem.BASELINE // 0..1
+        val multiplier = 1.0 - concern * (1.0 - TOWN_FEAR_SOCIAL_MULTIPLIER_FLOOR)
+        return multiplier.coerceIn(TOWN_FEAR_SOCIAL_MULTIPLIER_FLOOR, 1.0)
+    }
+
     /** Evaluate residents whose current activity has finished and choose their next action. */
     fun update(ctx: TickContext) {
         for (r in ctx.state.residentsOrdered()) {
@@ -365,7 +391,8 @@ object DecisionSystem {
                         "Calling on ${friend.firstName}",
                         needPressure = lonely * 1.2,
                         personalityFit = (0.5 + p.sociability * 0.8) * (if (inShock) SHOCK_LOW_KEY_BOOST else 1.0) *
-                            EmotionSystem.behaviourModifier(r, EmotionSystem.ActionCategory.SOCIAL),
+                            EmotionSystem.behaviourModifier(r, EmotionSystem.ActionCategory.SOCIAL) *
+                            townFearSocialMultiplier(state),
                         expectedReward = 0.8 + (state.relationship(r.id, friend.id)?.warmth() ?: 0.0) / 100.0,
                         confidence = 0.9, socialInfluence = 1.1, opportunity = 1.0,
                         risk = 0.02, cost = 0.02, effort = 0.15, moralResistance = 0.0
@@ -379,7 +406,8 @@ object DecisionSystem {
                     "Some company at ${spot.name}",
                     needPressure = lonely,
                     personalityFit = (0.4 + p.sociability * 0.9) * (if (inShock) SHOCK_LOW_KEY_BOOST else 1.0) *
-                        EmotionSystem.behaviourModifier(r, EmotionSystem.ActionCategory.SOCIAL),
+                        EmotionSystem.behaviourModifier(r, EmotionSystem.ActionCategory.SOCIAL) *
+                        townFearSocialMultiplier(state),
                     expectedReward = 0.9, confidence = 0.9, socialInfluence = 1.15, opportunity = 1.0,
                     risk = 0.02, cost = if (spot.type == BuildingType.PARK) 0.0 else 0.1,
                     effort = 0.12, moralResistance = 0.0

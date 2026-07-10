@@ -96,6 +96,30 @@ object VotingSystem {
         return raw.coerceIn(MIN_TURNOUT_CHANCE, MAX_TURNOUT_CHANCE)
     }
 
+    /** How much `WorldState.townSentiment` (trust/civicPride, rescaled 0..100 -> a small signed
+     *  term) can shift turnout beyond the single-resident [turnoutChance] above — see
+     *  `TownSentimentSystem`'s own doc comment. Deliberately small: a town that doesn't trust its
+     *  institutions votes a little less, never a lot less — this is flavour on top of the
+     *  already-tested per-resident formula, not a replacement for it. */
+    const val TOWN_SENTIMENT_TURNOUT_WEIGHT = 0.08
+
+    /**
+     * [turnoutChance] plus a small additive term from [com.ripple.town.core.model.TownSentiment]
+     * (mean of `trust`/`civicPride`, rescaled from `0..100` to a `-1..1` signed offset around the
+     * `50.0` neutral baseline, then scaled by [TOWN_SENTIMENT_TURNOUT_WEIGHT]) — a town that
+     * doesn't trust its institutions turns out a little less; a proud, trusting one turns out a
+     * little more. Kept as a separate overload rather than changing [turnoutChance]'s own
+     * signature, so every existing caller/test of the single-resident formula is completely
+     * unaffected; only `tally` below uses this richer version, added 2026-07-11.
+     */
+    fun turnoutChance(voter: Resident, state: WorldState): Double {
+        val sentiment = state.townSentiment
+        val civicMean = (sentiment.trust + sentiment.civicPride) / 2.0
+        val signedOffset = (civicMean - 50.0) / 50.0 // -1..1
+        val adjusted = turnoutChance(voter) + signedOffset * TOWN_SENTIMENT_TURNOUT_WEIGHT
+        return adjusted.coerceIn(MIN_TURNOUT_CHANCE, MAX_TURNOUT_CHANCE)
+    }
+
     /**
      * How strongly [voter] favours [candidate]: belief alignment across [SALIENT_TOPICS] (each
      * topic contributes `1.0 - abs(voterPosition - candidatePosition)`, so 0..[MAX_ALIGNMENT_SCORE]
@@ -141,7 +165,7 @@ object VotingSystem {
             .sortedBy { it.id } // deterministic iteration order regardless of map internals
 
         for (voter in voters) {
-            if (!ctx.rng.nextBoolean(turnoutChance(voter))) continue
+            if (!ctx.rng.nextBoolean(turnoutChance(voter, state))) continue
             val choice = candidates.maxByOrNull { candidate ->
                 voterScoreFor(state, voter, candidate, candidacyByResident[candidate.id])
             } ?: continue
