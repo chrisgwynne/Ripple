@@ -1,0 +1,2010 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "d635b81788a1068df15989a19cbd92c3",
+    "entities": [
+      {
+        "tableName": "worlds",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `seed` INTEGER NOT NULL, `name` TEXT NOT NULL, `createdAtRealMs` INTEGER NOT NULL, `simTimeMinutes` INTEGER NOT NULL, `lastSavedRealMs` INTEGER NOT NULL, `speedName` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "seed",
+            "columnName": "seed",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAtRealMs",
+            "columnName": "createdAtRealMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "simTimeMinutes",
+            "columnName": "simTimeMinutes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastSavedRealMs",
+            "columnName": "lastSavedRealMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "speedName",
+            "columnName": "speedName",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "towns",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `worldId` INTEGER NOT NULL, `name` TEXT NOT NULL, `mapWidth` INTEGER NOT NULL, `mapHeight` INTEGER NOT NULL, `mapJson` TEXT NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`worldId`) REFERENCES `worlds`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "worldId",
+            "columnName": "worldId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mapWidth",
+            "columnName": "mapWidth",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mapHeight",
+            "columnName": "mapHeight",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mapJson",
+            "columnName": "mapJson",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_towns_worldId",
+            "unique": false,
+            "columnNames": [
+              "worldId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_towns_worldId` ON `${TABLE_NAME}` (`worldId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "worlds",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "worldId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "residents",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `worldId` INTEGER NOT NULL, `firstName` TEXT NOT NULL, `surname` TEXT NOT NULL, `gender` TEXT NOT NULL, `bornAt` INTEGER NOT NULL, `alive` INTEGER NOT NULL, `diedAt` INTEGER, `causeOfDeath` TEXT, `leftTownAt` INTEGER, `detailLevel` TEXT NOT NULL, `homeBuildingId` INTEGER, `householdId` INTEGER, `occupation` TEXT NOT NULL, `employmentId` INTEGER, `relationshipStatus` TEXT NOT NULL, `partnerId` INTEGER, `motherId` INTEGER, `fatherId` INTEGER, `wealth` REAL NOT NULL, `debt` REAL NOT NULL, `reputation` REAL NOT NULL, `politicalInterest` REAL NOT NULL, `needsJson` TEXT NOT NULL, `personalityJson` TEXT NOT NULL, `spriteJson` TEXT NOT NULL, `childIdsCsv` TEXT NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`worldId`) REFERENCES `worlds`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "worldId",
+            "columnName": "worldId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "firstName",
+            "columnName": "firstName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "surname",
+            "columnName": "surname",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "gender",
+            "columnName": "gender",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bornAt",
+            "columnName": "bornAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "alive",
+            "columnName": "alive",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "diedAt",
+            "columnName": "diedAt",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "causeOfDeath",
+            "columnName": "causeOfDeath",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "leftTownAt",
+            "columnName": "leftTownAt",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "detailLevel",
+            "columnName": "detailLevel",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "homeBuildingId",
+            "columnName": "homeBuildingId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "householdId",
+            "columnName": "householdId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "occupation",
+            "columnName": "occupation",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "employmentId",
+            "columnName": "employmentId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "relationshipStatus",
+            "columnName": "relationshipStatus",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "partnerId",
+            "columnName": "partnerId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "motherId",
+            "columnName": "motherId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "fatherId",
+            "columnName": "fatherId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "wealth",
+            "columnName": "wealth",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "debt",
+            "columnName": "debt",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reputation",
+            "columnName": "reputation",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "politicalInterest",
+            "columnName": "politicalInterest",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "needsJson",
+            "columnName": "needsJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "personalityJson",
+            "columnName": "personalityJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "spriteJson",
+            "columnName": "spriteJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "childIdsCsv",
+            "columnName": "childIdsCsv",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_residents_worldId",
+            "unique": false,
+            "columnNames": [
+              "worldId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_residents_worldId` ON `${TABLE_NAME}` (`worldId`)"
+          },
+          {
+            "name": "index_residents_surname",
+            "unique": false,
+            "columnNames": [
+              "surname"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_residents_surname` ON `${TABLE_NAME}` (`surname`)"
+          },
+          {
+            "name": "index_residents_alive",
+            "unique": false,
+            "columnNames": [
+              "alive"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_residents_alive` ON `${TABLE_NAME}` (`alive`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "worlds",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "worldId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "households",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `worldId` INTEGER NOT NULL, `name` TEXT NOT NULL, `homeBuildingId` INTEGER, `savings` REAL NOT NULL, `monthlyRent` REAL NOT NULL, `memberIdsCsv` TEXT NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`worldId`) REFERENCES `worlds`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "worldId",
+            "columnName": "worldId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "homeBuildingId",
+            "columnName": "homeBuildingId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "savings",
+            "columnName": "savings",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "monthlyRent",
+            "columnName": "monthlyRent",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "memberIdsCsv",
+            "columnName": "memberIdsCsv",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_households_worldId",
+            "unique": false,
+            "columnNames": [
+              "worldId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_households_worldId` ON `${TABLE_NAME}` (`worldId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "worlds",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "worldId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "relationships",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`aId` INTEGER NOT NULL, `bId` INTEGER NOT NULL, `kind` TEXT NOT NULL, `familiarity` REAL NOT NULL, `trust` REAL NOT NULL, `affection` REAL NOT NULL, `attraction` REAL NOT NULL, `respect` REAL NOT NULL, `resentment` REAL NOT NULL, `dependency` REAL NOT NULL, `sharedHistory` REAL NOT NULL, `lastInteractionAt` INTEGER NOT NULL, PRIMARY KEY(`aId`, `bId`))",
+        "fields": [
+          {
+            "fieldPath": "aId",
+            "columnName": "aId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bId",
+            "columnName": "bId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "kind",
+            "columnName": "kind",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "familiarity",
+            "columnName": "familiarity",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "trust",
+            "columnName": "trust",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "affection",
+            "columnName": "affection",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "attraction",
+            "columnName": "attraction",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "respect",
+            "columnName": "respect",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "resentment",
+            "columnName": "resentment",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dependency",
+            "columnName": "dependency",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sharedHistory",
+            "columnName": "sharedHistory",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastInteractionAt",
+            "columnName": "lastInteractionAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "aId",
+            "bId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_relationships_aId",
+            "unique": false,
+            "columnNames": [
+              "aId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_relationships_aId` ON `${TABLE_NAME}` (`aId`)"
+          },
+          {
+            "name": "index_relationships_bId",
+            "unique": false,
+            "columnNames": [
+              "bId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_relationships_bId` ON `${TABLE_NAME}` (`bId`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "memories",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `residentId` INTEGER NOT NULL, `eventId` INTEGER, `type` TEXT NOT NULL, `description` TEXT NOT NULL, `emotionalIntensity` REAL NOT NULL, `accuracy` REAL NOT NULL, `importance` REAL NOT NULL, `createdAt` INTEGER NOT NULL, `lastRecalledAt` INTEGER NOT NULL, `decayPerYear` REAL NOT NULL, `associatedResidentIdsCsv` TEXT NOT NULL, `beliefFormed` TEXT, PRIMARY KEY(`id`), FOREIGN KEY(`residentId`) REFERENCES `residents`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "residentId",
+            "columnName": "residentId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventId",
+            "columnName": "eventId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "description",
+            "columnName": "description",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "emotionalIntensity",
+            "columnName": "emotionalIntensity",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accuracy",
+            "columnName": "accuracy",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "importance",
+            "columnName": "importance",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastRecalledAt",
+            "columnName": "lastRecalledAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "decayPerYear",
+            "columnName": "decayPerYear",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "associatedResidentIdsCsv",
+            "columnName": "associatedResidentIdsCsv",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "beliefFormed",
+            "columnName": "beliefFormed",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_memories_residentId",
+            "unique": false,
+            "columnNames": [
+              "residentId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_memories_residentId` ON `${TABLE_NAME}` (`residentId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "residents",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "residentId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "skills",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`name` TEXT NOT NULL, `label` TEXT NOT NULL, PRIMARY KEY(`name`))",
+        "fields": [
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "label",
+            "columnName": "label",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "name"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "resident_skills",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`residentId` INTEGER NOT NULL, `skillName` TEXT NOT NULL, `value` REAL NOT NULL, PRIMARY KEY(`residentId`, `skillName`), FOREIGN KEY(`residentId`) REFERENCES `residents`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "residentId",
+            "columnName": "residentId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "skillName",
+            "columnName": "skillName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value",
+            "columnName": "value",
+            "affinity": "REAL",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "residentId",
+            "skillName"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_resident_skills_residentId",
+            "unique": false,
+            "columnNames": [
+              "residentId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_resident_skills_residentId` ON `${TABLE_NAME}` (`residentId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "residents",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "residentId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "goals",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `ownerId` INTEGER NOT NULL, `type` TEXT NOT NULL, `motivation` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, `progress` REAL NOT NULL, `risk` REAL NOT NULL, `status` TEXT NOT NULL, `resolvedAt` INTEGER, `targetResidentId` INTEGER, `targetSkill` TEXT, `causeEventId` INTEGER, PRIMARY KEY(`id`), FOREIGN KEY(`ownerId`) REFERENCES `residents`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerId",
+            "columnName": "ownerId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "motivation",
+            "columnName": "motivation",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "progress",
+            "columnName": "progress",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "risk",
+            "columnName": "risk",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "status",
+            "columnName": "status",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "resolvedAt",
+            "columnName": "resolvedAt",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "targetResidentId",
+            "columnName": "targetResidentId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "targetSkill",
+            "columnName": "targetSkill",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "causeEventId",
+            "columnName": "causeEventId",
+            "affinity": "INTEGER",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_goals_ownerId",
+            "unique": false,
+            "columnNames": [
+              "ownerId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_goals_ownerId` ON `${TABLE_NAME}` (`ownerId`)"
+          },
+          {
+            "name": "index_goals_status",
+            "unique": false,
+            "columnNames": [
+              "status"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_goals_status` ON `${TABLE_NAME}` (`status`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "residents",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "ownerId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "buildings",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `worldId` INTEGER NOT NULL, `name` TEXT NOT NULL, `type` TEXT NOT NULL, `originX` INTEGER NOT NULL, `originY` INTEGER NOT NULL, `width` INTEGER NOT NULL, `height` INTEGER NOT NULL, `doorX` INTEGER NOT NULL, `doorY` INTEGER NOT NULL, `ownerId` INTEGER, `condition` REAL NOT NULL, `noise` REAL NOT NULL, `value` REAL NOT NULL, `capacity` INTEGER NOT NULL, `constructedAt` INTEGER NOT NULL, `upgradeLevel` INTEGER NOT NULL, `abandoned` INTEGER NOT NULL, `visibleChangesJson` TEXT NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`worldId`) REFERENCES `worlds`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "worldId",
+            "columnName": "worldId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "originX",
+            "columnName": "originX",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "originY",
+            "columnName": "originY",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "width",
+            "columnName": "width",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "height",
+            "columnName": "height",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "doorX",
+            "columnName": "doorX",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "doorY",
+            "columnName": "doorY",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerId",
+            "columnName": "ownerId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "condition",
+            "columnName": "condition",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "noise",
+            "columnName": "noise",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "value",
+            "columnName": "value",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "capacity",
+            "columnName": "capacity",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "constructedAt",
+            "columnName": "constructedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "upgradeLevel",
+            "columnName": "upgradeLevel",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "abandoned",
+            "columnName": "abandoned",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "visibleChangesJson",
+            "columnName": "visibleChangesJson",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_buildings_worldId",
+            "unique": false,
+            "columnNames": [
+              "worldId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_buildings_worldId` ON `${TABLE_NAME}` (`worldId`)"
+          },
+          {
+            "name": "index_buildings_type",
+            "unique": false,
+            "columnNames": [
+              "type"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_buildings_type` ON `${TABLE_NAME}` (`type`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "worlds",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "worldId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "businesses",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `buildingId` INTEGER NOT NULL, `name` TEXT NOT NULL, `type` TEXT NOT NULL, `ownerId` INTEGER, `balance` REAL NOT NULL, `reputation` REAL NOT NULL, `demand` REAL NOT NULL, `priceLevel` REAL NOT NULL, `employeeCapacity` INTEGER NOT NULL, `open` INTEGER NOT NULL, `openedAt` INTEGER NOT NULL, `closedAt` INTEGER, `daysInTrouble` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`buildingId`) REFERENCES `buildings`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "buildingId",
+            "columnName": "buildingId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "ownerId",
+            "columnName": "ownerId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "balance",
+            "columnName": "balance",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reputation",
+            "columnName": "reputation",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "demand",
+            "columnName": "demand",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "priceLevel",
+            "columnName": "priceLevel",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "employeeCapacity",
+            "columnName": "employeeCapacity",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "open",
+            "columnName": "open",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "openedAt",
+            "columnName": "openedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "closedAt",
+            "columnName": "closedAt",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "daysInTrouble",
+            "columnName": "daysInTrouble",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_businesses_buildingId",
+            "unique": false,
+            "columnNames": [
+              "buildingId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_businesses_buildingId` ON `${TABLE_NAME}` (`buildingId`)"
+          },
+          {
+            "name": "index_businesses_open",
+            "unique": false,
+            "columnNames": [
+              "open"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_businesses_open` ON `${TABLE_NAME}` (`open`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "buildings",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "buildingId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "employments",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `residentId` INTEGER NOT NULL, `businessId` INTEGER NOT NULL, `role` TEXT NOT NULL, `dailySalary` REAL NOT NULL, `startedAt` INTEGER NOT NULL, `endedAt` INTEGER, `shiftStartHour` INTEGER NOT NULL, `shiftEndHour` INTEGER NOT NULL, `reducedHours` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`residentId`) REFERENCES `residents`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`businessId`) REFERENCES `businesses`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "residentId",
+            "columnName": "residentId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "businessId",
+            "columnName": "businessId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "role",
+            "columnName": "role",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dailySalary",
+            "columnName": "dailySalary",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAt",
+            "columnName": "startedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endedAt",
+            "columnName": "endedAt",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "shiftStartHour",
+            "columnName": "shiftStartHour",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shiftEndHour",
+            "columnName": "shiftEndHour",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reducedHours",
+            "columnName": "reducedHours",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_employments_residentId",
+            "unique": false,
+            "columnNames": [
+              "residentId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_employments_residentId` ON `${TABLE_NAME}` (`residentId`)"
+          },
+          {
+            "name": "index_employments_businessId",
+            "unique": false,
+            "columnNames": [
+              "businessId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_employments_businessId` ON `${TABLE_NAME}` (`businessId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "residents",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "residentId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          },
+          {
+            "table": "businesses",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "businessId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "health_conditions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `residentId` INTEGER NOT NULL, `type` TEXT NOT NULL, `severity` REAL NOT NULL, `startedAt` INTEGER NOT NULL, `hidden` INTEGER NOT NULL, `diagnosedAt` INTEGER, `recoveredAt` INTEGER, PRIMARY KEY(`id`), FOREIGN KEY(`residentId`) REFERENCES `residents`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "residentId",
+            "columnName": "residentId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "severity",
+            "columnName": "severity",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startedAt",
+            "columnName": "startedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hidden",
+            "columnName": "hidden",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "diagnosedAt",
+            "columnName": "diagnosedAt",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "recoveredAt",
+            "columnName": "recoveredAt",
+            "affinity": "INTEGER",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_health_conditions_residentId",
+            "unique": false,
+            "columnNames": [
+              "residentId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_health_conditions_residentId` ON `${TABLE_NAME}` (`residentId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "residents",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "residentId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "world_events",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `worldId` INTEGER NOT NULL, `time` INTEGER NOT NULL, `type` TEXT NOT NULL, `sourceResidentId` INTEGER, `targetResidentIdsCsv` TEXT NOT NULL, `buildingId` INTEGER, `businessId` INTEGER, `severity` REAL NOT NULL, `visibility` TEXT NOT NULL, `description` TEXT NOT NULL, `payloadJson` TEXT NOT NULL, `consequenceDepth` INTEGER NOT NULL, `importance` REAL NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "worldId",
+            "columnName": "worldId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "time",
+            "columnName": "time",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceResidentId",
+            "columnName": "sourceResidentId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "targetResidentIdsCsv",
+            "columnName": "targetResidentIdsCsv",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "buildingId",
+            "columnName": "buildingId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "businessId",
+            "columnName": "businessId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "severity",
+            "columnName": "severity",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "visibility",
+            "columnName": "visibility",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "description",
+            "columnName": "description",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "payloadJson",
+            "columnName": "payloadJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "consequenceDepth",
+            "columnName": "consequenceDepth",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "importance",
+            "columnName": "importance",
+            "affinity": "REAL",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_world_events_time",
+            "unique": false,
+            "columnNames": [
+              "time"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_world_events_time` ON `${TABLE_NAME}` (`time`)"
+          },
+          {
+            "name": "index_world_events_type",
+            "unique": false,
+            "columnNames": [
+              "type"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_world_events_type` ON `${TABLE_NAME}` (`type`)"
+          },
+          {
+            "name": "index_world_events_importance",
+            "unique": false,
+            "columnNames": [
+              "importance"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_world_events_importance` ON `${TABLE_NAME}` (`importance`)"
+          },
+          {
+            "name": "index_world_events_sourceResidentId",
+            "unique": false,
+            "columnNames": [
+              "sourceResidentId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_world_events_sourceResidentId` ON `${TABLE_NAME}` (`sourceResidentId`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "event_causes",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`eventId` INTEGER NOT NULL, `causeEventId` INTEGER NOT NULL, PRIMARY KEY(`eventId`, `causeEventId`), FOREIGN KEY(`eventId`) REFERENCES `world_events`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "eventId",
+            "columnName": "eventId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "causeEventId",
+            "columnName": "causeEventId",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "eventId",
+            "causeEventId"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_event_causes_eventId",
+            "unique": false,
+            "columnNames": [
+              "eventId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_event_causes_eventId` ON `${TABLE_NAME}` (`eventId`)"
+          },
+          {
+            "name": "index_event_causes_causeEventId",
+            "unique": false,
+            "columnNames": [
+              "causeEventId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_event_causes_causeEventId` ON `${TABLE_NAME}` (`causeEventId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "world_events",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "eventId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "delayed_effects",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `sourceEventId` INTEGER NOT NULL, `targetResidentId` INTEGER, `secondaryResidentId` INTEGER, `targetBusinessId` INTEGER, `type` TEXT NOT NULL, `strength` REAL NOT NULL, `earliestAt` INTEGER NOT NULL, `latestAt` INTEGER NOT NULL, `condition` TEXT NOT NULL, `decayPerDay` REAL NOT NULL, `applied` INTEGER NOT NULL, `cancelled` INTEGER NOT NULL, `note` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceEventId",
+            "columnName": "sourceEventId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "targetResidentId",
+            "columnName": "targetResidentId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "secondaryResidentId",
+            "columnName": "secondaryResidentId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "targetBusinessId",
+            "columnName": "targetBusinessId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "type",
+            "columnName": "type",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "strength",
+            "columnName": "strength",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "earliestAt",
+            "columnName": "earliestAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "latestAt",
+            "columnName": "latestAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "condition",
+            "columnName": "condition",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "decayPerDay",
+            "columnName": "decayPerDay",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "applied",
+            "columnName": "applied",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "cancelled",
+            "columnName": "cancelled",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "note",
+            "columnName": "note",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_delayed_effects_applied",
+            "unique": false,
+            "columnNames": [
+              "applied"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_delayed_effects_applied` ON `${TABLE_NAME}` (`applied`)"
+          },
+          {
+            "name": "index_delayed_effects_earliestAt",
+            "unique": false,
+            "columnNames": [
+              "earliestAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_delayed_effects_earliestAt` ON `${TABLE_NAME}` (`earliestAt`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "interventions",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `verb` TEXT NOT NULL, `targetResidentId` INTEGER, `secondaryResidentId` INTEGER, `targetBuildingId` INTEGER, `appliedAt` INTEGER NOT NULL, `note` TEXT NOT NULL, `eventId` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "verb",
+            "columnName": "verb",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "targetResidentId",
+            "columnName": "targetResidentId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "secondaryResidentId",
+            "columnName": "secondaryResidentId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "targetBuildingId",
+            "columnName": "targetBuildingId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "appliedAt",
+            "columnName": "appliedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "note",
+            "columnName": "note",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventId",
+            "columnName": "eventId",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_interventions_appliedAt",
+            "unique": false,
+            "columnNames": [
+              "appliedAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_interventions_appliedAt` ON `${TABLE_NAME}` (`appliedAt`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "newspaper_issues",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `issueNumber` INTEGER NOT NULL, `publishedAt` INTEGER NOT NULL, `masthead` TEXT NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "issueNumber",
+            "columnName": "issueNumber",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "publishedAt",
+            "columnName": "publishedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "masthead",
+            "columnName": "masthead",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_newspaper_issues_publishedAt",
+            "unique": false,
+            "columnNames": [
+              "publishedAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_newspaper_issues_publishedAt` ON `${TABLE_NAME}` (`publishedAt`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "newspaper_stories",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `issueId` INTEGER NOT NULL, `category` TEXT NOT NULL, `headline` TEXT NOT NULL, `body` TEXT NOT NULL, `eventId` INTEGER, `orderInIssue` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`issueId`) REFERENCES `newspaper_issues`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "issueId",
+            "columnName": "issueId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "category",
+            "columnName": "category",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "headline",
+            "columnName": "headline",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "body",
+            "columnName": "body",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "eventId",
+            "columnName": "eventId",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "orderInIssue",
+            "columnName": "orderInIssue",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_newspaper_stories_issueId",
+            "unique": false,
+            "columnNames": [
+              "issueId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_newspaper_stories_issueId` ON `${TABLE_NAME}` (`issueId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "newspaper_issues",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "issueId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "followed_residents",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`residentId` INTEGER NOT NULL, `isPrimary` INTEGER NOT NULL, `followedSinceSimTime` INTEGER NOT NULL, PRIMARY KEY(`residentId`))",
+        "fields": [
+          {
+            "fieldPath": "residentId",
+            "columnName": "residentId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isPrimary",
+            "columnName": "isPrimary",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "followedSinceSimTime",
+            "columnName": "followedSinceSimTime",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "residentId"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "town_statistics",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`dayIndex` INTEGER NOT NULL, `population` INTEGER NOT NULL, `detailedPopulation` INTEGER NOT NULL, `employedAdults` INTEGER NOT NULL, `adultCount` INTEGER NOT NULL, `openBusinesses` INTEGER NOT NULL, `averageWellbeing` REAL NOT NULL, `averageWealth` REAL NOT NULL, `births` INTEGER NOT NULL, `deaths` INTEGER NOT NULL, PRIMARY KEY(`dayIndex`))",
+        "fields": [
+          {
+            "fieldPath": "dayIndex",
+            "columnName": "dayIndex",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "population",
+            "columnName": "population",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "detailedPopulation",
+            "columnName": "detailedPopulation",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "employedAdults",
+            "columnName": "employedAdults",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "adultCount",
+            "columnName": "adultCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "openBusinesses",
+            "columnName": "openBusinesses",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "averageWellbeing",
+            "columnName": "averageWellbeing",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "averageWealth",
+            "columnName": "averageWealth",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "births",
+            "columnName": "births",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "deaths",
+            "columnName": "deaths",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "dayIndex"
+          ]
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "simulation_checkpoints",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `worldId` INTEGER NOT NULL, `simTimeMinutes` INTEGER NOT NULL, `savedAtRealMs` INTEGER NOT NULL, `stateJson` TEXT NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "worldId",
+            "columnName": "worldId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "simTimeMinutes",
+            "columnName": "simTimeMinutes",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "savedAtRealMs",
+            "columnName": "savedAtRealMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "stateJson",
+            "columnName": "stateJson",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_simulation_checkpoints_simTimeMinutes",
+            "unique": false,
+            "columnNames": [
+              "simTimeMinutes"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_simulation_checkpoints_simTimeMinutes` ON `${TABLE_NAME}` (`simTimeMinutes`)"
+          }
+        ],
+        "foreignKeys": []
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'd635b81788a1068df15989a19cbd92c3')"
+    ]
+  }
+}
