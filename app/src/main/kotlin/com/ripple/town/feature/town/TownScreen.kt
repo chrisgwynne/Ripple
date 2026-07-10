@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -160,7 +161,8 @@ fun TownScreen(
                 camera = camera,
                 sprites = sprites,
                 modifier = Modifier.fillMaxSize(),
-                onTap = viewModel::onTap
+                onTap = viewModel::onTap,
+                recentEvents = recentEvents
             )
         }
 
@@ -432,27 +434,44 @@ fun TownScreen(
     }
 
     // ------- Sheets -------
+    // Default height: the brief wants sheets opening around 55-60% of screen height, not
+    // fully collapsed (a sliver of content) or fully expanded (edge to edge). Material3
+    // 1.3.1 (this project's resolved compose-bom version — no newer override exists in
+    // libs.versions.toml) has `SheetValue.PartiallyExpanded` as a real detent
+    // (`skipPartiallyExpanded = false` already opts into it), but exposes no public API
+    // to set its height as an explicit fraction of the screen — that arrived later
+    // (custom-detent / positional-value-provider `SheetState` constructors, ~1.4.0-alpha).
+    // The closest achievable equivalent without bumping the BOM: `PartiallyExpanded`
+    // wraps to the sheet CONTENT's own measured height, so giving the content a
+    // `heightIn(min = ...)` of ~57% of the screen forces that detent to land there. This
+    // is an approximation, not a true fraction lock — a very short sheet (e.g. a near-
+    // empty building with no events) will still size to content if content is taller than
+    // the min, and users can drag past it either way; stated here rather than overclaimed.
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val targetSheetHeight = (configuration.screenHeightDp.dp * 0.57f)
     sheet?.let { current ->
         ModalBottomSheet(
             onDismissRequest = viewModel::closeSheet,
             sheetState = sheetState,
             containerColor = MaterialTheme.colorScheme.surface
         ) {
-            when (current) {
-                is TownSheet.ResidentSheet -> ResidentSheetContent(
-                    world = w, residentId = current.residentId, sprites = sprites, viewModel = viewModel
-                )
-                is TownSheet.BuildingSheet -> BuildingSheetContent(
-                    world = w, buildingId = current.buildingId, viewModel = viewModel
-                )
-                is TownSheet.EventSheet -> EventSheetContent(
-                    world = w, eventId = current.eventId, viewModel = viewModel
-                )
-                is TownSheet.InterventionSheet -> InterventionSheetContent(
-                    world = w, residentId = current.residentId, viewModel = viewModel
-                )
-                TownSheet.TownOverviewSheet -> TownOverviewSheetContent(world = w, viewModel = viewModel)
+            Box(Modifier.heightIn(min = targetSheetHeight)) {
+                when (current) {
+                    is TownSheet.ResidentSheet -> ResidentSheetContent(
+                        world = w, residentId = current.residentId, sprites = sprites, viewModel = viewModel
+                    )
+                    is TownSheet.BuildingSheet -> BuildingSheetContent(
+                        world = w, buildingId = current.buildingId, viewModel = viewModel
+                    )
+                    is TownSheet.EventSheet -> EventSheetContent(
+                        world = w, eventId = current.eventId, viewModel = viewModel
+                    )
+                    is TownSheet.InterventionSheet -> InterventionSheetContent(
+                        world = w, residentId = current.residentId, viewModel = viewModel
+                    )
+                    TownSheet.TownOverviewSheet -> TownOverviewSheetContent(world = w, viewModel = viewModel)
+                }
             }
         }
     }

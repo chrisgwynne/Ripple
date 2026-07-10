@@ -4,6 +4,309 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-10 — Town screen: ambient life pass, sheet default height, "Today's story", Chronicle categories
+
+Four related refinements to `feature/town/TownRenderer.kt`, `TownScreen.kt`, and
+`TownSheets.kt`, extending groundwork built earlier this same session (idle-sway
+animation, dusk wash for closed shops, the Town Chronicle tab). **No Android
+emulator/device exists in this environment — everything below was written and
+compile-verified blind, never seen running.** This is explicitly the riskiest
+pass of the session for that reason: animation timing (frame-rate feel, drift
+speed, flash cadence) and sheet-height proportions cannot be confirmed correct
+without a sighted pass on a real device. Flagged per-item below.
+
+**1. Living-world ambient rendering (`TownRenderer.kt`).**
+- **Already substantially covered — confirmed, not rebuilt:** citizens
+  "walking" is real, not cosmetic. Investigated `ResidentUi.x`/`y`
+  (`WorldSnapshot.kt`) and `WorldRepository`'s tick loop first: resident
+  positions are recomputed fresh in `SnapshotBuilder.positionOf()` on every
+  `WorldUi` snapshot, itself only published once a full sim tick completes
+  (`MINUTES_PER_TICK = 10`, runner wakes every `RUNNER_PERIOD_MS = 500ms` and
+  only ticks/publishes once enough game-time has accumulated — roughly every
+  ~10 real seconds at 1x speed, faster at 3x/10x). `positionOf()` itself
+  already does genuine time-based L-path interpolation for travelling
+  residents (walks x-then-y based on elapsed time vs `travelArrivesAt`) — but
+  that's still only recomputed once per snapshot. `TownRenderer`'s existing
+  per-frame `eased` lerp (HashMap<Long, Offset>, factor 0.18 at ~11fps) is
+  therefore doing real, necessary work: smoothing the ~10-second gaps between
+  discrete snapshots into continuous-looking motion, not decoration on top of
+  already-continuous movement. Left untouched — it was already correct.
+- **New — chimney smoke now animates.** `SpriteProvider`'s HOUSE bitmap bakes
+  two static smoke pixels into the cached sprite (can't animate the cache
+  itself without re-rendering every frame, which would defeat the point of
+  caching). `TownRenderer` now draws one extra soft puff per HOUSE building
+  on top, on the same ~11fps clock and per-building-id offset already used
+  for the pre-existing idle-sway animation — drifts up and sideways (sine
+  wobble) over a 24-frame cycle and fades out, then repeats.
+- **New — a bird crosses the map periodically.** Cheapest honest "wildlife":
+  a single 3-pixel dot on a slow sine arc across a slice of the map, flapping
+  every few frames, present for 40% of a long clock cycle then gone for the
+  rest (reads as something passing through, not a looping decoration nailed
+  to the sky). No flock/AI/pathing.
+- **New — "trouble just happened here" flashing accent.** The brief's
+  cheapest-honest version of an emergency-response cue: no vehicle entity or
+  routing exists in the simulation layer to animate an emergency vehicle
+  convincingly, so instead a small flashing red accent appears near the
+  roofline of any building tied to a recent crime/damage-flavoured event
+  (`CRIME_COMMITTED`, `BUILDING_DAMAGED`, `SHOPLIFTING`, `VANDALISM`,
+  `BURGLARY`, `MUGGING`, `DOMESTIC_DISTURBANCE` — matched against
+  `EventUi.buildingId` from the same `recentEvents` list the HUD banners
+  already consume, now threaded into `TownRenderer` as a new optional
+  parameter). Flashes on/off every 3 frames.
+- **New — CLOUDY weather gained a visual.** It previously fell through to
+  `else -> {}` with no wash at all (only the HUD glyph distinguished it from
+  CLEAR). Added a flat, uniform, very low-alpha dulling overlay — no
+  particles, deliberately the cheapest honest reading of "overcast" without
+  inventing per-tile cloud shadows.
+- **Shops opening/closing:** the existing dusk-wash-when-closed cue was
+  reviewed and left as-is — its absence already doubles as the "just opened"
+  cue (a shop reads as trading the instant `businessOpen` flips true, same
+  frame as everything else), so a second transient flourish would have been
+  redundant, not additive. No changes made here.
+- **Day/night lighting, rain/snow/fog/storm washes:** reviewed, confirmed
+  already working as designed (time-of-day tint table + per-particle weather
+  effects), left untouched beyond the CLOUDY addition above.
+- **Deliberately NOT built, stated explicitly:** true traffic/vehicle
+  simulation (cars, an animated emergency vehicle) and true particle-based
+  weather beyond what already existed — both would require real
+  simulation-layer infrastructure (routed entities, a particle system) that
+  doesn't exist in this codebase, and building either as pure rendering
+  fakery would misrepresent what the sim actually models. Tree sway was also
+  skipped: trees are baked pixels inside the single cached ground bitmap
+  (`renderGround`), not separate drawable entities, so animating them would
+  require restructuring ground rendering out of its cache — too invasive for
+  this pass; flagged as a possible future item if ground rendering is ever
+  split into static/animated layers.
+- **Confidence:** mechanically low-risk (all additive draws behind existing
+  clock/id-based determinism, no new per-frame randomness, no changes to
+  existing draw calls' geometry). Genuinely unverified: whether the smoke
+  drift speed, bird frequency, and flash cadence *feel* right at real
+  screen scale and real animation frame timing — these numbers (24-frame
+  smoke cycle, 400-frame bird cycle, 3-frame flash) are reasoned estimates,
+  not tuned against anything visible.
+
+**2. Bottom sheet default height (`TownScreen.kt`).** Investigated the actual
+resolved Material3 version first (`composeBom = "2024.12.01"` in
+`libs.versions.toml`, no override) — resolves to Material3 1.3.1, confirmed
+via `rememberModalBottomSheetState`'s available signature. That version has
+`SheetValue.PartiallyExpanded` as a real detent (`skipPartiallyExpanded =
+false` already opts into it, unchanged) but exposes no public API to set its
+height as an explicit screen fraction — custom-detent/positional-value-
+provider `SheetState` construction arrived later (~1.4.0-alpha), so bumping
+the BOM was out of scope for this pass. **Approximated instead:**
+`PartiallyExpanded` sizes to the sheet content's own measured height, so the
+sheet content is now wrapped in `Box(Modifier.heightIn(min =
+configuration.screenHeightDp.dp * 0.57f))`, forcing that detent to land
+around 57% of screen height for any sheet whose real content is shorter than
+that. **Stated honestly: this is an approximation, not a locked fraction** —
+a sheet whose content is genuinely taller than 57% still grows past it (as it
+always could, by design), and the user can still drag to full-expand or
+collapsed at any time; the change only affects where the sheet lands on
+first open. No change was needed to any individual sheet's own internal
+padding (`ResidentSheetContent`, `BuildingSheetContent`, etc. already start
+with real content immediately, no title-bar-then-empty-space problem found).
+
+**3. "Today's story" leading section (`TownSheets.kt`,
+`TownOverviewSheetContent`).** New capped 5-7-line story feed now leads the
+"At a glance" tab, ahead of the existing population/employment/wellbeing/
+economy stats block (moved down, not deleted, not otherwise changed). Lines:
+a mood line derived from the same `stats.averageWellbeing` already computed
+for the stats block (just read earlier, phrased as a sentence, three
+emoji/tone bands), a weather-forecast line reusing the existing
+`weatherGlyph()` helper, then up to 5 more lines from `recentEvents`
+(`TownViewModel.recentEvents`, newly read here — the same 30-deep StateFlow
+the HUD banners already consume), most-recent-first, capped to one line per
+`StoryCategory` so five lines don't all read as variations on one story.
+Tapping a line whose source event still exists opens that event's sheet,
+same as Chronicle rows.
+- **Text-generation choice, made deliberately and documented in code:**
+  formats `EventUi.description` directly rather than routing every candidate
+  line through `TemplateNarrativeTextProvider.elaborate()`. Investigated
+  `elaborate()` first — it's a one-shot `suspend` call keyed to a single
+  event id, already wired end-to-end via `TownViewModel.requestElaboration`
+  → `EventSheetContent`'s `LaunchedEffect(eventId, expanded)` pattern for
+  exactly one thing: a user-triggered "more detail" expand on a single
+  currently-open event. Reusing it here would mean 5-7 separate
+  engine-dispatcher suspend round-trips every time this sheet opens, just to
+  render a summary — the wrong tool for a synchronous capped list.
+  `EventUi.description` is already the same complete sentence the event
+  banners, Chronicle rows, and event sheet headline all show as-is, so
+  direct formatting was the practical choice; `elaborate()` stays reserved
+  for its existing single-event expand affordance.
+- **Category mapping:** `NewspaperGenerator.categoryFor(EventType):
+  StoryCategory` is `private` to that file, so it can't be called directly.
+  `StoryCategory` itself (`core/model/Goal.kt`) is a shared public enum, so a
+  small local `storyCategoryFor()` mirrors that mapping in `TownSheets.kt`
+  rather than inventing a parallel taxonomy or making the private helper
+  public across an unrelated file for one caller — the brief's own
+  instruction, applied literally.
+- **Confidence:** mechanically low-risk (pure data formatting, no new
+  animation/timing). Genuinely unverified: whether 5-7 short lines read well
+  visually stacked above the stats block, and whether the emoji set renders
+  consistently across device font/emoji stacks (not something checkable
+  without a device).
+
+**4. Chronicle tab as a light newspaper feed (`TownSheets.kt`,
+`TownChronicleTab`).** Extended, not replaced: rows keep the exact same
+time-ordered "HH:MM — description" format and single-list chronological
+order from the earlier pass — no re-sort into per-category sections, which
+would break the chronological read and wasn't asked for. Each row now also
+shows a small category emoji ahead of the time (same `storyCategoryFor()` /
+`emojiFor()` helpers the "Today's story" section above uses — one taxonomy,
+two presentations) and is now tappable through to the full event sheet
+(previously static text). This closes the "no chronicle-specific filtering
+UI (category chips, search)" item the earlier session's entry explicitly
+deferred — narrowly: light per-row differentiation was added, not the fuller
+filtering UI, which remains out of scope.
+- **Confidence:** low-risk — additive to an existing, already-working list,
+  same click-through pattern already used elsewhere in this file
+  (`BuildingSheetContent`'s event rows, `EventSheetContent`'s cause chain).
+
+Files touched: `feature/town/TownRenderer.kt`, `feature/town/TownScreen.kt`,
+`feature/town/TownSheets.kt`. `core/ui/SpriteProvider.kt` was read for
+palette/technique reference but not edited — the smoke-drift animation and
+bird are drawn directly in `TownRenderer` rather than baked into
+`SpriteProvider`'s cached bitmaps, for the caching reasons explained above.
+`feature/people/PeopleScreen.kt` was not touched (a concurrent session was
+working in it). No `./gradlew`/`git` commands run, per this session's
+constraints — compile-only verification, never run on a device or emulator.
+
+### 2026-07-10 — Needs card rework (icon states, trend arrows, contributors) + trauma-recovery damping in NeedsSystem
+
+Triggered by a user report: Tom Bell, a resident who had just lost his business,
+showed Stress = 0 on the Needs display — reading as either "the sim is broken"
+or "0 means max stress." Investigated before touching anything.
+
+**Investigation finding — real gap confirmed, small fix applied.**
+`EconomySystem.closeBusiness()` (`core/simulation/EconomySystem.kt`) correctly
+applies `owner.needs.stress += 18.0`, `owner.needs.purpose -= 15.0`, and records
+a `MemoryType.LOSS` memory (`"Losing {business} broke something in me."`,
+intensity 80 → importance 72 via `TickContext.addMemory`'s `importance =
+intensity * 0.9`) on business closure. `Resident.kt`'s `Needs` model confirms
+stress is 0..100 with higher = worse (not inverted), and the old
+`ResidentProfileScreen.kt` needs display read `r.stress` directly with no
+inversion bug either. So the *shock* itself is applied correctly and the UI
+reads it correctly — the gap is what happens *after*. Reading
+`NeedsSystem.update()` in full: stress and purpose have **no baseline
+"return-to-resting-value" pull at all** — they only move via explicit
+per-activity deltas (SLEEPING -0.35, RELAXING -0.4, SOCIALISING -0.25, etc. for
+stress; WORKING/LEARNING/etc. for purpose) with zero connection to how
+recent or severe the resident's memories are. A single good night's sleep or
+a relaxing session can walk stress all the way back to near-0 with nothing
+reflecting that the resident's business collapsed hours or days earlier —
+this is exactly the gap the standing brief's point #6 calls out ("people
+should heal over time rather than resetting instantly"). Confirmed no other
+system file compensates for this (checked every file referencing `stress`
+under `core/simulation/`).
+
+**Fix — `core/simulation/NeedsSystem.kt`:** added `traumaRecoveryDamping()`,
+a small bounded (0.4..1.0) multiplier applied only to the *recovery-direction*
+stress/purpose deltas in the existing activity-effects `when` block (SLEEPING,
+SOCIALISING, VISITING, EXERCISING, RESTING_ILL, AT_CLINIC, RELAXING,
+CELEBRATING for stress; WORKING, LEARNING for purpose). It looks at the
+resident's most recent high-importance (>=70) negative memory of type LOSS/
+BETRAYAL/HUMILIATION/ARGUMENT/FEAR/NEGLECT within the last 14 in-world days,
+and scales recovery down proportionally to how fresh + severe it is (fresh +
+severe = 0.4x speed, i.e. ~2.5x slower recovery; nothing recent/severe enough
+= 1.0x, unchanged). This does **not** touch the memory system, does not
+resurface memories, and does not floor stress/purpose at a fixed value — it
+only slows existing recovery deltas, matching this codebase's established
+"small bounded modifier" convention (same shape as
+`FamilyReputationSystem.standingModifier`). Deliberately scoped smaller than
+a "memories resurface periodically" system, which would be a separate,
+larger feature.
+
+**`feature/town/ResidentProfileScreen.kt` — Needs card rework** (extends the
+existing accordion Needs card from the earlier profile-redesign pass in this
+same session; not a rewrite):
+- Raw 0..100 numbers are no longer the primary display. Each need is bucketed
+  onto a small icon+label ladder (`stressState`/`purposeState`/
+  `financialState`/`socialState`/`healthState` for the 5-6-bucket "emotional"
+  ladders per the brief; simpler 3-bucket labels for Hunger/Energy/Comfort/
+  Safety, which are transient/routine needs rather than states worth a full
+  emotional ladder). Exact numbers are still available behind the existing
+  "Show numbers" toggle (reused, not rebuilt) — no data lost, just
+  reprioritised.
+- Two `SectionTitle`-labelled groups: **Physical** (Hunger, Energy, Health,
+  Comfort, Safety) and **Emotional** (Stress, Purpose, Social, Financial
+  security), per the brief.
+- **Trend arrows** (⬆/⬇/➡) per need. `ResidentUi`/the snapshot pipeline was
+  checked (`data/WorldSnapshot.kt`) and confirmed to expose no prior-tick
+  value for needs — there is no true multi-day trend available without
+  touching the simulation/snapshot layer. Used the cheapest honest
+  approximation instead: a Compose `remember(r.id) { r }` snapshot captured
+  once when the sheet is first opened for a given resident, diffed against
+  the live value on every recomposition. This is "did it move since I last
+  opened this profile," not a real trend — documented inline at the
+  `NeedsCardBody`/`trendArrow` definitions. (Note: an earlier draft used a
+  `LaunchedEffect` keyed on the live values, which would have re-synced the
+  snapshot every tick and collapsed every arrow to "stable" within a frame —
+  caught and fixed before landing; the final version only snapshots on
+  resident-id change.)
+- **Contributors**: for needs in a notably bad state (Stress > 60, Purpose <
+  40, Financial security < 30, Social < 25, Health < 30), up to 3 short
+  templated-from-real-data phrases pulled from `conditionLabels`,
+  `activeGoalLabels`, `memories` (matched by `typeLabel` substring —
+  "betrayed"/"lost"/"humiliated"/"argument"/"let down" map onto the
+  MemoryType labels already defined in `core/model/Goal.kt`), `debt`, and
+  `employerName == null` — same structured-facts-to-phrase approach as
+  `ChronicleBuilder`/`TemplateNarrativeTextProvider` elsewhere in this
+  codebase, not free-form text.
+
+**Not verified on device** — no Android emulator/device is available in this
+environment; everything above was written and manually re-read for
+correctness, and checked against the actual field names/types in
+`ResidentUi`, `Resident`, `Needs`, `Memory`, `MemoryType`, and
+`EconomySystem.closeBusiness()`, but the Compose layout, emoji rendering, and
+`NeedsSystem` numeric balance have not been exercised at runtime. Per
+standing instruction, no `./gradlew` build/test was run and no `git` command
+was executed this session.
+
+### 2026-07-10 — Ripple Asset Studio: gallery-first review UX
+
+Replaced the table-based detection review surface with a real three-pane
+layout: Atlas View | Sprite Gallery | Inspector. New `gallery_model.py`
+holds all filter/search/bulk-edit/selection *logic* with zero Qt imports
+(27 new tests, independently runnable without a display); `gui.py` is Qt
+wiring on top of it.
+
+- **Sprite Gallery**: a `QListWidget` icon-mode thumbnail grid — each
+  card shows the sprite's own cropped pixel content (nearest-neighbour
+  scaled, never blurred), dimensions, and a colour-coded review status.
+  Three thumbnail size presets. Ctrl/Shift-click multi-select
+  (`gallery_model.select_range` for the shift-range math).
+- **Atlas ↔ Gallery sync**: selecting a card highlights + auto-scrolls
+  the atlas to that region; clicking a region in the atlas selects the
+  matching card — the single highest-value feature in the brief.
+- **Inspector**: full editable detail (id, dimensions, bbox, confidence,
+  source, category/subtype/variant/export filename/tags, approved) for
+  the current single-card selection.
+- **Instant search** + **All/Approved/Needs Review/Rejected/Manual filter
+  chips** + a **live stats bar** (total/approved/rejected/tagged%).
+- **Bulk edit**: apply one category/type assignment to every selected
+  card at once.
+- **Keyboard shortcuts**: Delete = reject selected, Enter = approve
+  selected, Ctrl+A = select all in the current filtered view.
+
+Verified for real, not just claimed: `pytest -q` → 93 passed (66 prior +
+27 new), and the GUI was exercised headlessly
+(`QT_QPA_PLATFORM=offscreen`) against both real Downloads reference
+sheets end-to-end — construction, gallery population (348/140 cards,
+matching the prior pass's regression numbers), search, filter chips,
+atlas-click selection, and bulk category apply were all driven
+programmatically and produced correct results. Caught and fixed a real
+bug this way: the inspector's Approved checkbox wasn't included in the
+signal-blocking guard when repopulating for a new selection, so *merely
+selecting* a card silently marked it approved — found by an actual
+functional run, not code review.
+
+Explicitly deferred, see `tools/ripple-asset-studio/README.md`'s
+Deferred/TODO section for the full list: the searchable category tree
+(flat dropdown stays), image-similarity duplicate detection, drag-
+rectangle marquee select, the fuller bulk-edit matrix (tags/padding/
+variant/animation-type), the rest of the 10-shortcut list, an export-
+preview screen, and a confidence-range filter.
+
 ### 2026-07-10 — Living Conversation Engine: topics, knowledge, and opportunity (extends existing systems, no rewrite)
 
 The brief asked for conversations that "carry real content" and only surface
@@ -2335,6 +2638,99 @@ Development order from the brief (status noted inline):
    same depth the pre-existing followed-family section already used —
    grandparents/grandchildren/in-laws are not included; not visually
    verified on a device/emulator.*
+
+   **Follow-up — 2026-07-10, population-browser reframing (blind, no
+   emulator — same risk note as above).** The first People pass above had
+   drifted into "the followed resident's social graph": separate Following /
+   Favourites / Family / Friends / Frictions / Discovered sections could all
+   show the same person more than once, and the family tree was surfaced
+   prominently on the row itself. This pass restructures `PeopleScreen.kt`
+   around a single filtered+sorted population list instead:
+   - **New filter set** (`PeopleFilter`): All, Following, Favourites,
+     Family, Friends, Coworkers, Children, Elderly, Nearby, Recently Seen,
+     Recently Updated — still the same non-wrapping `LazyRow` +
+     `FilterChip` pattern. Family/Friends reuse `familyOf()`/
+     `relationships`/`kindLabel` as before. **Coworkers** is new: matches
+     `employerName` against the followed resident's `employerName`, or
+     `currentBuildingId` against their workplace building — both fields
+     already existed on `ResidentUi`, no snapshot changes needed.
+     Children/Elderly map onto `LifeStage` (`CHILD`/`TEEN` vs `ELDER`).
+     **Nearby** computes plain Euclidean distance between `ResidentUi.x/y`
+     and the followed resident's position, threshold `NEARBY_TILE_RADIUS =
+     12f` tiles (a judgement call, not derived from any existing constant).
+     **Recently Seen / Recently Updated are the two approximated filters**
+     — see below.
+   - **New sort menu** (`PeopleSort`): Recently active, Alphabetical, Age,
+     Occupation, Household, Distance, Mood, Health, Following, Favourites —
+     a `DropdownMenu`/`DropdownMenuItem` behind an `OutlinedButton` (this
+     codebase had no prior `DropdownMenu` usage; introduced fresh, standard
+     Material3 pattern). Applied as a `sortedBy`/`sortedByDescending`/
+     `sortedWith` over the full resident list *before* the filter runs.
+     Distance sorts by proximity to the followed resident; Following/
+     Favourites do boolean-then-name sort.
+   - **Single list, one appearance each.** The old per-section rendering
+     (Following card + Favourites + Family + Friends + Frictions +
+     Discovered, each its own `items(...)` block) is gone. There is now one
+     `items(population, ...)` list built from `sorted.filter { matchesFilter
+     (it) }`, so a person who is both a favourite and family appears
+     exactly once, in whichever position the active sort puts them.
+   - **Pinned followed card, scoped down.** `FollowedCard` keeps name,
+     age, employer/occupation, current activity, and mood, plus an "Open
+     Profile" button calling the same `onOpenResident(id)` already wired
+     from `RippleApp.kt` (→ `TownViewModel.openResident` → the resident
+     sheet/profile). The family summary line and the "View family tree &
+     relationships" button are both removed from this card — family tree
+     access now lives only on the resident's own profile
+     (`ResidentProfileScreen.kt`/`FamilyTreeDialog`, untouched). The
+     `treeResidentId` dialog state and its wiring were deleted from this
+     file entirely rather than left dead, since nothing on this screen
+     opens it anymore.
+   - **Row content.** `PersonRow` dropped the expand/collapse family-listing
+     chevron (`ExpandMore`/`ExpandLess`, `AnimatedVisibility`) — at
+     population-browser density an accordion per row didn't fit, so it's
+     gone rather than kept minimal. Rows now show avatar, name, age,
+     occupation, current activity, and mood as both the existing text label
+     and a new emoji glyph (`moodGlyph`, mapped off `Mood.label` — no new
+     field, `Mood` already exists on `ResidentUi`). A small relationship
+     glyph (❤️ partner, ⭐ close friend, 👥 friend, ⚡ rival, 👪 family, 💼
+     coworker) appears next to the name when that row's resident has a
+     relationship with the currently-followed resident, read from the
+     followed resident's own `relationships: List<RelationUi>` plus
+     `partnerId` — no new data.
+   - **Update badges, not a separate section.** A small "•" dot plus the
+     event's `typeLabel` (e.g. "New job", "Marriage", "Crime") appears on
+     any row whose resident was involved in one of a fixed
+     `UPDATE_EVENT_TYPES` set (job change, relationship change, birth,
+     death, moved house, illness, crime, argument, domestic disturbance) in
+     the last 30 town-wide events. This replaces the old "Recently
+     discovered" section — residents with a recent notable event now stay
+     in their normal sorted position with a badge, instead of being pulled
+     into a separate list that could hide them elsewhere.
+   - **Approximation, called out explicitly per the brief:** there is no
+     per-resident "last seen"/"last updated" timestamp anywhere in
+     `WorldRepository`/`WorldSnapshot` — the simulation does not track that.
+     Both **Recently Seen** and **Recently Updated**, and the update badge
+     itself, are all built from the same proxy:
+     `TownViewModel.recentEvents` (already a `StateFlow<List<EventUi>>` of
+     the latest 30 town-wide events, used elsewhere for the town event
+     banner) cross-referenced against `EventUi.involvedResidentIds` per
+     resident. "Recently Seen" = appears in any of those 30 events at all;
+     "Recently Updated" = appears in one whose `EventType` is in
+     `UPDATE_EVENT_TYPES`. This is a reasonable read of "an event involving
+     this resident happened recently" as the brief suggested, but it is
+     bounded by the 30-event window (a resident's last notable event could
+     have scrolled out of that window and this filter would then miss
+     them) — no new simulation/backend state was added to make this exact,
+     per the brief's own instruction not to invent new tracked state.
+   - **Data read, not added:** no `WorldRepository`/`WorldSnapshot` changes
+     were made — every field this pass reads (`employerName`,
+     `currentBuildingId`, `x`/`y`, `lifeStage`, `mood`, `relationships`,
+     `partnerId`) already existed on `ResidentUi`/`RelationUi`.
+   *Still open: Recently Seen/Recently Updated are windowed proxies, not a
+   true per-resident activity log (see above); Nearby's 12-tile radius is a
+   judgement call, not simulation-derived; not visually verified on a
+   device/emulator — no Android emulator/device available in this
+   environment, this pass was written and reasoned about from source only.*
 
 Full acceptance criteria (20 items), palette/typography guidance, and the
 complete asset/animation checklists are in the original brief (session

@@ -25,6 +25,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import com.ripple.town.core.model.Activity
+import com.ripple.town.core.model.BuildingType
+import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.TileType
 import com.ripple.town.core.model.TimeOfDay
 import com.ripple.town.core.model.TownMap
@@ -37,6 +39,7 @@ import com.ripple.town.core.ui.SPRITE_W
 import com.ripple.town.core.ui.SpriteProvider
 import com.ripple.town.core.ui.TILE_PX
 import com.ripple.town.data.BuildingUi
+import com.ripple.town.data.EventUi
 import com.ripple.town.data.ResidentUi
 import com.ripple.town.data.WorldUi
 
@@ -79,7 +82,15 @@ fun TownRenderer(
     camera: TownCamera,
     sprites: SpriteProvider,
     modifier: Modifier = Modifier,
-    onTap: (TownTap) -> Unit = {}
+    onTap: (TownTap) -> Unit = {},
+    /**
+     * Recent events, newest first — same list `TownScreen`'s event banners already
+     * consume (`TownViewModel.recentEvents`). Used only for a cheap "trouble just
+     * happened here" cue (a flashing accent on a building where a crime/damage event
+     * fired moments ago) — optional so any other/older caller of this composable
+     * doesn't need to thread it through.
+     */
+    recentEvents: List<EventUi> = emptyList()
 ) {
     val groundBitmap = remember(world.map) { renderGround(world.map, world.worldSeed) }
     var frame by remember { mutableLongStateOf(0L) }
@@ -96,6 +107,22 @@ fun TownRenderer(
                 }
             }
         }
+    }
+
+    // Ambient life, part 2: "trouble just happened here" — a small flashing accent on a
+    // building tied to a recent crime/damage-flavoured event. Cheapest honest version of
+    // an "emergency response" cue: no vehicle entities or pathfinding exist in the
+    // simulation layer to animate, so this reads the same `recentEvents` list the HUD
+    // banners already surface and just marks the building, rather than inventing motion
+    // the sim can't back up. Recomputed only when the event list itself changes, not
+    // every frame — cheap by construction.
+    val troubledBuildingIds = remember(recentEvents) {
+        recentEvents
+            .asSequence()
+            .filter { it.type in TROUBLE_EVENT_TYPES }
+            .mapNotNull { it.buildingId }
+            .take(6) // recentEvents is already capped small; this is just a safety bound
+            .toSet()
     }
 
     Canvas(
@@ -178,7 +205,11 @@ fun TownRenderer(
                 // Town rhythm, part 1: a closed shop reads as visibly "shut" — a flat
                 // dusk-toned wash over its own footprint, using data already on
                 // BuildingUi (businessOpen is null for non-businesses/homes, so this
-                // only ever touches shops/pubs/clinics etc. that actually trade).
+                // only ever touches shops/pubs/clinics etc. that actually trade). No
+                // separate "just opened" cue was added: the absence of the wash already
+                // is that cue (a shop reads as open the instant `businessOpen` flips
+                // true, same frame as everything else), so a second transient flourish
+                // would be redundant rather than additive.
                 if (b.businessOpen == false) {
                     val closedWash = Paint().apply { color = Color(0x552B3350) }
                     canvas.drawRect(
@@ -188,6 +219,39 @@ fun TownRenderer(
                         ),
                         closedWash
                     )
+                }
+
+                // Ambient life, part 2 continued: the flashing "trouble" accent itself —
+                // a small alternating red/amber dot near the roofline, on/off every few
+                // animation frames (clock-driven, no per-frame randomness) so it reads as
+                // an alert rather than a static decoration.
+                if (b.id in troubledBuildingIds && (frame / 3) % 2 == 0L) {
+                    val alertColor = Paint().apply { color = Color(0xFFE0533F) }
+                    canvas.drawRect(
+                        Rect(
+                            (b.x * TILE_PX + bmp.width - 3).toFloat(), (topY - 1).toFloat(),
+                            (b.x * TILE_PX + bmp.width).toFloat(), (topY + 2).toFloat()
+                        ),
+                        alertColor
+                    )
+                }
+
+                // Ambient life, part 3: chimney-smoke drift. SpriteProvider bakes two
+                // static smoke pixels into every cached HOUSE bitmap (cheap, but frozen —
+                // animating the cached bitmap itself would mean re-rendering it every
+                // frame, which defeats the point of caching). Instead this draws one
+                // extra soft puff on top, on the same ~11fps clock and per-building-id
+                // offset already used for the idle-sway animation elsewhere in this file,
+                // so houses get a believable drift without any new animation machinery.
+                if (b.type == BuildingType.HOUSE && !b.abandoned) {
+                    val drift = ((frame + b.id) % 24).toInt()
+                    val riseY = drift * 0.5f
+                    val driftX = kotlin.math.sin(drift / 24f * (Math.PI * 2)).toFloat() * 1.5f
+                    val fade = (1f - drift / 24f).coerceIn(0f, 1f)
+                    val smokeX = b.x * TILE_PX + bmp.width - 5f + driftX
+                    val smokeY = topY - 3f - riseY
+                    val smoke = Paint().apply { color = Color(0xFFD9D3C6).copy(alpha = 0.45f * fade) }
+                    canvas.drawRect(Rect(smokeX, smokeY, smokeX + 1f, smokeY + 1f), smoke)
                 }
             }
 
@@ -226,6 +290,31 @@ fun TownRenderer(
                     dstOffset = IntOffset(drawX.toInt(), drawY.toInt()),
                     dstSize = IntSize(SPRITE_W, SPRITE_H),
                     paint = paint
+                )
+            }
+            // Ambient life, part 4: a bird crossing the map. Deliberately the cheapest
+            // honest version of "wildlife" — a single animated dot on a slow sine arc,
+            // periodic rather than continuous (only present for part of a long cycle) so
+            // it reads as something passing through, not a looping decoration nailed to
+            // the sky. No flock/AI/pathing — just a clock-driven position, same technique
+            // as everything else in this pass.
+            val birdCycle = (frame % 400).toInt()
+            if (birdCycle < 160) {
+                val t = birdCycle / 160f
+                val bx = -1f + t * (world.map.width + 2f)
+                val by = 1.5f + kotlin.math.sin(t * Math.PI.toFloat() * 2.5f) * 1.2f
+                val bird = Paint().apply { color = RippleColors.Ink.copy(alpha = 0.55f) }
+                val wingUp = (frame % 6) < 3
+                val bpx = bx * TILE_PX
+                val bpy = by * TILE_PX
+                canvas.drawRect(Rect(bpx, bpy, bpx + 1f, bpy + 1f), bird)
+                canvas.drawRect(
+                    Rect(bpx - 1f, bpy + (if (wingUp) -1f else 1f), bpx, bpy + (if (wingUp) 0f else 2f)),
+                    bird
+                )
+                canvas.drawRect(
+                    Rect(bpx + 1f, bpy + (if (wingUp) -1f else 1f), bpx + 2f, bpy + (if (wingUp) 0f else 2f)),
+                    bird
                 )
             }
             canvas.restore()
@@ -267,10 +356,29 @@ fun TownRenderer(
                     drawCircle(Color(0xAAF5F2E8), radius = 1.8f, center = Offset(hx, hy))
                 }
             }
+            // CLOUDY previously had no visual distinct from CLEAR beyond the HUD glyph —
+            // a flat, uniform dulling wash (no particles; genuinely just an overcast dim,
+            // the cheapest honest reading of "cloudy" without inventing per-tile cloud
+            // shadows) closes that gap at effectively zero per-frame cost.
+            Weather.CLOUDY -> drawRect(Color(0x18707A80))
             else -> {}
         }
     }
 }
+
+/**
+ * Event types that justify the "trouble just happened here" flashing accent in
+ * [TownRenderer] — crime and building-damage flavoured, i.e. exactly the cases the task
+ * brief called out ("CRIME_COMMITTED/BUILDING_DAMAGED-type event"). Deliberately narrow:
+ * this is a static visual cue on the affected building, not an animated emergency
+ * vehicle — there's no vehicle entity or routing in the simulation layer to animate one
+ * honestly.
+ */
+private val TROUBLE_EVENT_TYPES = setOf(
+    EventType.CRIME_COMMITTED, EventType.BUILDING_DAMAGED,
+    EventType.SHOPLIFTING, EventType.VANDALISM, EventType.BURGLARY,
+    EventType.MUGGING, EventType.DOMESTIC_DISTURBANCE
+)
 
 /**
  * Derives a resident's pose purely from already-known UI state (their

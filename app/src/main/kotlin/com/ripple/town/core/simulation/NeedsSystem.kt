@@ -3,6 +3,8 @@ package com.ripple.town.core.simulation
 import com.ripple.town.core.model.Activity
 import com.ripple.town.core.model.BuildingType
 import com.ripple.town.core.model.DetailLevel
+import com.ripple.town.core.model.MemoryType
+import com.ripple.town.core.model.Resident
 import com.ripple.town.core.model.SimTime
 import com.ripple.town.core.model.SkillType
 import com.ripple.town.core.model.Weather
@@ -44,27 +46,34 @@ object NeedsSystem {
             n.comfort -= 0.08
             n.purpose -= 0.05
 
+            // Recent, severe trauma dampens how fast stress recovers and purpose rebuilds —
+            // a small bounded multiplier on the *recovery-direction* deltas below, not a new
+            // decay mechanic. Without this, a resident who just lost their business/livelihood
+            // can be soothed back to "calm" by a single nap or relaxing session, which reads as
+            // the simulation not registering the event at all. See traumaRecoveryDamping().
+            val recoveryDamping = traumaRecoveryDamping(ctx.now, r)
+
             // Activity effects
             when (r.activity) {
-                Activity.SLEEPING -> { n.energy += 1.6; n.stress -= 0.35; n.comfort += 0.2 }
+                Activity.SLEEPING -> { n.energy += 1.6; n.stress -= 0.35 * recoveryDamping; n.comfort += 0.2 }
                 Activity.EATING -> { n.hunger += 5.5; n.comfort += 0.4 }
-                Activity.WORKING -> { n.purpose += 0.35; n.stress += 0.12; n.financialSecurity += 0.03 }
+                Activity.WORKING -> { n.purpose += 0.35 * recoveryDamping; n.stress += 0.12; n.financialSecurity += 0.03 }
                 Activity.AT_SCHOOL -> {
                     n.purpose += 0.3; n.social += 0.25
                     // Schooling builds general grounding, faster for the more disciplined.
                     val gain = 0.02 + r.personality.discipline * 0.02
                     r.skills[SkillType.TEACHING] = (r.skill(SkillType.TEACHING) + gain).coerceAtMost(100.0)
                 }
-                Activity.SOCIALISING, Activity.COMMUNITY -> { n.social += 1.4; n.stress -= 0.25 }
-                Activity.VISITING -> { n.social += 1.1; n.stress -= 0.2 }
+                Activity.SOCIALISING, Activity.COMMUNITY -> { n.social += 1.4; n.stress -= 0.25 * recoveryDamping }
+                Activity.VISITING -> { n.social += 1.1; n.stress -= 0.2 * recoveryDamping }
                 Activity.SHOPPING -> { n.comfort += 0.5 }
-                Activity.EXERCISING -> { n.health += 0.15; n.energy -= 0.5; n.stress -= 0.3 }
-                Activity.LEARNING -> { n.purpose += 0.5 }
-                Activity.RESTING_ILL -> { n.energy += 0.9; n.health += 0.12; n.stress -= 0.15 }
-                Activity.AT_CLINIC -> { n.stress -= 0.1 }
-                Activity.RELAXING -> { n.comfort += 0.8; n.stress -= 0.4; n.energy += 0.4 }
+                Activity.EXERCISING -> { n.health += 0.15; n.energy -= 0.5; n.stress -= 0.3 * recoveryDamping }
+                Activity.LEARNING -> { n.purpose += 0.5 * recoveryDamping }
+                Activity.RESTING_ILL -> { n.energy += 0.9; n.health += 0.12; n.stress -= 0.15 * recoveryDamping }
+                Activity.AT_CLINIC -> { n.stress -= 0.1 * recoveryDamping }
+                Activity.RELAXING -> { n.comfort += 0.8; n.stress -= 0.4 * recoveryDamping; n.energy += 0.4 }
                 Activity.ARGUING -> { n.stress += 1.2; n.social -= 0.4 }
-                Activity.CELEBRATING -> { n.social += 1.6; n.stress -= 0.5; n.purpose += 0.3 }
+                Activity.CELEBRATING -> { n.social += 1.6; n.stress -= 0.5 * recoveryDamping; n.purpose += 0.3 }
                 Activity.MOURNING -> { n.stress += 0.4; n.comfort -= 0.2 }
                 else -> {}
             }
@@ -96,6 +105,38 @@ object NeedsSystem {
 
             n.clampAll()
         }
+    }
+
+    /**
+     * Small, bounded (0.4..1.0) multiplier applied to stress/purpose *recovery* deltas when a
+     * resident has a recent, severe negative memory (LOSS, BETRAYAL, HUMILIATION, ARGUMENT,
+     * FEAR, NEGLECT with importance >= 70, within the last ~14 in-world days). Full recovery
+     * speed (1.0) resumes once no such memory is recent enough — this does not touch the memory
+     * system itself, does not resurface memories, and does not floor stress/purpose at a fixed
+     * value; it only slows the existing recovery-direction deltas above, matching this
+     * codebase's "small bounded modifier" convention (see `FamilyReputationSystem
+     * .standingModifier`). At minimum damping (0.4) a resident still recovers, just ~2.5x slower
+     * — trauma fades, it isn't erased in a handful of ticks nor frozen forever.
+     */
+    private fun traumaRecoveryDamping(now: Long, r: Resident): Double {
+        val windowMinutes = 14 * SimTime.MINUTES_PER_DAY
+        val worst = r.memories
+            .asSequence()
+            .filter { it.importance >= 70.0 }
+            .filter {
+                it.type == MemoryType.LOSS || it.type == MemoryType.BETRAYAL ||
+                    it.type == MemoryType.HUMILIATION || it.type == MemoryType.ARGUMENT ||
+                    it.type == MemoryType.FEAR || it.type == MemoryType.NEGLECT
+            }
+            .filter { now - it.createdAt in 0..windowMinutes }
+            .maxOfOrNull { memory ->
+                val age = (now - memory.createdAt).coerceIn(0L, windowMinutes)
+                val recency = 1.0 - (age.toDouble() / windowMinutes) // 1.0 = just happened, 0.0 = at window edge
+                val severity = (memory.importance / 100.0).coerceIn(0.0, 1.0)
+                recency * severity
+            } ?: 0.0
+        // worst in [0,1] -> damping in [1.0, 0.4], i.e. up to 60% slower recovery when fresh + severe.
+        return (1.0 - worst * 0.6).coerceIn(0.4, 1.0)
     }
 
     fun financialTarget(wealth: Double, debt: Double): Double {

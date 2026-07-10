@@ -570,23 +570,64 @@ private fun RelationshipsTab(
 // ------------------------------------------------------------------ needs card body
 
 /**
- * Readable-first needs: each need becomes a short human phrase built from the same 0..100
- * values `StatBar` already renders (display-layer reinterpretation, no new state). Numeric
- * `StatBar`s are still available — one tap reveals them — so no data is lost, just
- * reprioritised so the headline is legible at a glance instead of eight bars up front.
+ * A single need's descriptive state: icon, short label, and the raw 0..100 value it was
+ * derived from (kept alongside so the numeric view and the trend comparison can reuse the same
+ * bucketing pass instead of recomputing).
+ */
+private data class NeedState(val need: String, val icon: String, val label: String, val value: Double)
+
+/**
+ * Descriptive-state-first needs card (2026-07-10 rework). Raw 0..100 numbers are no longer the
+ * primary display — each need is bucketed onto a small icon+label ladder instead, grouped into
+ * Physical vs Emotional per the redesign brief. Numbers are still available behind the existing
+ * "Show numbers" toggle (unchanged mechanism from the prior pass), and each need row shows a
+ * trend arrow plus, for notably bad states, up to 3 short "why" contributors built from data
+ * already on `ResidentUi` (conditions, goals, memories, employment, debt) — templated from real
+ * fields, not free-form text.
+ *
+ * Trend approximation: `ResidentUi`/the snapshot pipeline exposes no prior-tick value for a
+ * resident's needs (this was checked in `WorldSnapshot.kt` — `ResidentUi` only carries the
+ * current tick's numbers). The cheapest *honest* approximation available without touching the
+ * simulation/snapshot layer is: remember the values from the last time this resident's sheet
+ * was opened (keyed by resident id, in local Compose `remember` state) and diff against that on
+ * the next open. This is NOT a true multi-day trend — it only reflects "did this move since I
+ * last looked at this resident", which could be seconds or days of sim time depending on how
+ * often the player checks in. Documented here and in the trend-arrow helper below.
  */
 @Composable
 private fun NeedsCardBody(r: ResidentUi) {
     var showBars by remember { mutableStateOf(false) }
 
-    val phrases = needPhrases(r)
-    if (phrases.isEmpty()) {
-        Text("Doing fine — no pressing needs.", style = MaterialTheme.typography.bodyMedium, color = RippleColors.SoftInk)
-    } else {
-        phrases.forEach { phrase ->
-            Text("• $phrase", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 2.dp))
-        }
-    }
+    // "Since I last looked" snapshot — see trend-approximation note above. Keyed by resident id
+    // so switching profiles doesn't compare unrelated residents' numbers against each other.
+    // Deliberately captured once per (composable-instance, resident id) via `remember` rather
+    // than re-synced on every value change (a naive `LaunchedEffect` keyed on the live values
+    // would fire on every tick's recomposition and immediately overwrite `prior` with the
+    // current value, collapsing every arrow to "stable" within a frame). The snapshot is only
+    // ever written on first composition for a given resident id, so it holds steady for the
+    // whole time this sheet stays open on this resident — i.e. genuinely "since I last opened
+    // this profile", not "since last frame".
+    val prior = remember(r.id) { r }
+
+    val physical = listOf(
+        needState("Hunger", hungerState(r.hunger), r.hunger),
+        needState("Energy", energyState(r.energy), r.energy),
+        needState("Health", healthState(r.health), r.health),
+        needState("Comfort", comfortState(r.comfort), r.comfort),
+        needState("Safety", safetyState(r.safety), r.safety)
+    )
+    val emotional = listOf(
+        needState("Stress", stressState(r.stress), r.stress),
+        needState("Purpose", purposeState(r.purposeNeed), r.purposeNeed),
+        needState("Social", socialState(r.social), r.social),
+        needState("Financial security", financialState(r.financialSecurity), r.financialSecurity)
+    )
+
+    SectionTitle("Physical")
+    physical.forEach { NeedRow(it, prior, r) }
+
+    SectionTitle("Emotional")
+    emotional.forEach { NeedRow(it, prior, r) }
 
     TextButton(onClick = { showBars = !showBars }, modifier = Modifier.animateContentSize()) {
         Text(if (showBars) "Hide numbers" else "Show numbers")
@@ -607,23 +648,177 @@ private fun NeedsCardBody(r: ResidentUi) {
     }
 }
 
+@Composable
+private fun NeedRow(state: NeedState, prior: ResidentUi?, current: ResidentUi) {
+    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Text("${state.icon} ${state.label}", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            Text(
+                trendArrow(state.need, prior, current),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        val contributors = if (state.isNotable) needContributors(state.need, current) else emptyList()
+        if (contributors.isNotEmpty()) {
+            Text(
+                contributors.joinToString(" · "),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 1.dp)
+            )
+        }
+    }
+}
+
+/** True when this need's state is notable enough to be worth showing "why" contributors for. */
+private val NeedState.isNotable: Boolean
+    get() = when (need) {
+        "Stress" -> value > 60
+        "Purpose" -> value < 40
+        "Financial security" -> value < 30
+        "Social" -> value < 25
+        "Health" -> value < 30
+        else -> false
+    }
+
+private fun needState(need: String, labeled: Pair<String, String>, value: Double) =
+    NeedState(need, labeled.first, labeled.second, value)
+
+// ---- descriptive-state ladders (thresholds are display-layer judgement calls, not tuned sim balance) ----
+
+/** Stress is inverted: low value = good. 5 buckets across 0..100. */
+private fun stressState(value: Double): Pair<String, String> = when {
+    value < 20 -> "😌" to "Calm"
+    value < 40 -> "🙂" to "Content"
+    value < 60 -> "😐" to "Concerned"
+    value < 80 -> "😟" to "Stressed"
+    else -> "😫" to "Overwhelmed"
+}
+
+/** Purpose: high = good. `purposeNeed` runs 0..100 like every other need, so 6 buckets fit
+ * comfortably without over- or under-splitting the range. */
+private fun purposeState(value: Double): Pair<String, String> = when {
+    value >= 85 -> "✨" to "Inspired"
+    value >= 65 -> "💼" to "Fulfilled"
+    value >= 45 -> "🙂" to "Content"
+    value >= 25 -> "🤔" to "Searching"
+    value >= 10 -> "⬇" to "Lost"
+    else -> "💔" to "Broken"
+}
+
+private fun financialState(value: Double): Pair<String, String> = when {
+    value >= 80 -> "💰" to "Wealthy"
+    value >= 60 -> "🟢" to "Comfortable"
+    value >= 40 -> "🟡" to "Stable"
+    value >= 20 -> "🟠" to "Struggling"
+    else -> "🔴" to "Critical"
+}
+
+private fun socialState(value: Double): Pair<String, String> = when {
+    value >= 80 -> "🥳" to "Thriving"
+    value >= 60 -> "😊" to "Connected"
+    value >= 40 -> "😐" to "Average"
+    value >= 20 -> "😔" to "Lonely"
+    else -> "💔" to "Isolated"
+}
+
+private fun healthState(value: Double): Pair<String, String> = when {
+    value >= 80 -> "❤️" to "Excellent"
+    value >= 60 -> "💚" to "Good"
+    value >= 40 -> "💛" to "Fair"
+    value >= 20 -> "🧡" to "Poor"
+    else -> "❤️‍🩹" to "Critical"
+}
+
+/** Simple 2-3 word labels for the remaining physical needs — a full 5-icon ladder is overkill
+ * here since these are transient/routine needs rather than emotional states worth dwelling on. */
+private fun hungerState(value: Double): Pair<String, String> = when {
+    value >= 60 -> "🍽" to "Well fed"
+    value >= 30 -> "🍽" to "Getting hungry"
+    else -> "🍽" to "Needs food"
+}
+
+private fun energyState(value: Double): Pair<String, String> = when {
+    value >= 60 -> "⚡" to "Energised"
+    value >= 30 -> "⚡" to "Tired"
+    else -> "⚡" to "Exhausted"
+}
+
+private fun comfortState(value: Double): Pair<String, String> = when {
+    value >= 60 -> "🛋" to "Comfortable"
+    value >= 30 -> "🛋" to "Getting by"
+    else -> "🛋" to "Uncomfortable"
+}
+
+private fun safetyState(value: Double): Pair<String, String> = when {
+    value >= 60 -> "🛡" to "Feels safe"
+    value >= 30 -> "🛡" to "Uneasy"
+    else -> "🛡" to "Feels unsafe"
+}
+
 /**
- * Short readable phrases for needs that need attention (low value, or high for "bad-when-high"
- * stats like stress). Needs comfortably in range are simply omitted rather than padded out
- * with filler "doing fine" lines per-need — the calmer overall phrase above covers that case.
+ * Trend arrow for a single need, comparing against the "last time this sheet was opened"
+ * snapshot described on `NeedsCardBody`. Returns a stable dash when there's no prior snapshot
+ * yet (first time viewing this resident this session) rather than a misleading arrow.
  */
-private fun needPhrases(r: ResidentUi): List<String> {
+private fun trendArrow(need: String, prior: ResidentUi?, current: ResidentUi): String {
+    if (prior == null) return "–"
+    val (before, after) = when (need) {
+        "Hunger" -> prior.hunger to current.hunger
+        "Energy" -> prior.energy to current.energy
+        "Health" -> prior.health to current.health
+        "Comfort" -> prior.comfort to current.comfort
+        "Safety" -> prior.safety to current.safety
+        "Stress" -> prior.stress to current.stress
+        "Purpose" -> prior.purposeNeed to current.purposeNeed
+        "Social" -> prior.social to current.social
+        "Financial security" -> prior.financialSecurity to current.financialSecurity
+        else -> return "–"
+    }
+    val delta = after - before
+    return when {
+        delta > 1.0 -> "⬆"
+        delta < -1.0 -> "⬇"
+        else -> "➡"
+    }
+}
+
+/**
+ * Up to 3 short "why" contributors for a notably good/bad need state, built from fields already
+ * on `ResidentUi` — conditions, active goals, recent memories, employment, debt — the same
+ * "structured facts -> short phrase" approach `ChronicleBuilder`/`TemplateNarrativeTextProvider`
+ * use elsewhere. Most relevant/recent first; not free-form generated text.
+ */
+private fun needContributors(need: String, r: ResidentUi): List<String> {
     val out = mutableListOf<String>()
-    if (r.hunger < 30) out += "Hungry — needs food soon"
-    if (r.energy < 30) out += "Exhausted — needs rest"
-    if (r.health < 30) out += "In poor health"
-    if (r.safety < 30) out += "Feeling unsafe"
-    if (r.social < 30) out += "Lonely — craving company"
-    if (r.comfort < 30) out += "Uncomfortable living conditions"
-    if (r.purposeNeed < 30) out += "Searching for direction"
-    if (r.stress > 70) out += "Under a lot of stress"
-    if (r.financialSecurity < 30) out += financialSituationPhrase(r).replaceFirstChar { it.uppercase() }
-    return out
+    when (need) {
+        "Stress" -> {
+            if (r.employerName == null && (r.occupation.isBlank() || r.occupation == "Unemployed")) out += "Unemployed"
+            if (r.debt > 0) out += "In debt"
+            r.memories.firstOrNull { it.typeLabel.contains("betrayed", true) || it.typeLabel.contains("lost", true) || it.typeLabel.contains("humiliated", true) || it.typeLabel.contains("argument", true) }
+                ?.let { out += it.description }
+            if (r.conditionLabels.isNotEmpty()) out += r.conditionLabels.first()
+        }
+        "Purpose" -> {
+            if (r.employerName == null && (r.occupation.isBlank() || r.occupation == "Unemployed")) out += "No work to focus on"
+            if (r.activeGoalLabels.isEmpty()) out += "No active goals"
+            r.memories.firstOrNull { it.typeLabel.contains("lost", true) }?.let { out += it.description }
+        }
+        "Financial security" -> {
+            if (r.debt > 0) out += "Carrying debt"
+            out += financialSituationPhrase(r).replaceFirstChar { it.uppercase() }
+            if (r.employerName == null && r.occupation == "Unemployed") out += "Unemployed"
+        }
+        "Social" -> {
+            if (r.relationships.isEmpty()) out += "No close relationships yet"
+            r.memories.firstOrNull { it.typeLabel.contains("let down", true) || it.typeLabel.contains("argument", true) }?.let { out += it.description }
+        }
+        "Health" -> {
+            if (r.conditionLabels.isNotEmpty()) out += r.conditionLabels.take(2)
+        }
+    }
+    return out.distinct().take(3)
 }
 
 // ------------------------------------------------------------------ timeline card body
