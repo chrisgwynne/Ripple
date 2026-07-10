@@ -469,6 +469,26 @@ fun DeathSummaryDialog(
                 Text("Aged ${death.age}. Cause: ${death.cause}.", style = MaterialTheme.typography.bodyMedium)
                 Spacer(Modifier.height(8.dp))
                 Text(death.lifeSummary, style = MaterialTheme.typography.bodyMedium)
+                death.era?.let { era ->
+                    SectionTitle("Their era")
+                    Text(
+                        if (era.notableTownEventCount > 0)
+                            "${era.years} years in the town's history — ${era.notableTownEventCount} notable town events, ${era.relationshipsFormed} close relationships formed."
+                        else
+                            "${era.years} years in the town's history.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    if (era.witnessed.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text("Lived through:", style = MaterialTheme.typography.labelMedium)
+                        era.witnessed.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                    }
+                    if (era.definingMemories.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text("Will be remembered for:", style = MaterialTheme.typography.labelMedium)
+                        era.definingMemories.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall) }
+                    }
+                }
                 if (death.familyLeft.isNotEmpty()) {
                     SectionTitle("Family left behind")
                     death.familyLeft.forEach { (_, label) -> Text("• $label", style = MaterialTheme.typography.bodySmall) }

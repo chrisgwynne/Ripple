@@ -248,6 +248,96 @@ in a new `WorldState.petitions` list. `WorldState` checkpoints as one JSON
 blob, so this is a plain new field with a sensible default (`emptyList`);
 no schema migration involved.
 
+## Local politics: elections
+
+Council seats and campaign-driven elections, run daily by
+`ElectionSystem.updateDaily` right after `LifecycleSystem.updateDaily` in
+`SimulationCoordinator`'s `if (newDay)` block — deliberately positioned there
+so it always sees the same-day result of `LifecycleSystem.election()`, the
+pre-existing (and unmodified) function that actually decides the mayor from
+`WorldState.nextElectionAt`/`mayorId`. `ElectionSystem` doesn't replace that
+vote or duplicate its outcome rule; it makes the weeks before it mean
+something, and adds a genuinely new piece the vote never had — council seats.
+
+- **Calling.** `CAMPAIGN_WINDOW_DAYS` (20) before `nextElectionAt`,
+  `callElection` derives the same candidate pool `LifecycleSystem.election()`
+  will independently re-derive at the vote itself (politically-interested
+  in-town adults, `politicalInterest > 0.35`, ranked by
+  `politicalInterest × 50 + reputation + POLITICS skill`, top `MAX_CANDIDATES`
+  (3)) and gives it a name and a campaign: a `Candidacy` (`support = 0`,
+  `actionsTaken = 0`) per candidate in a new `WorldState.candidacies` list,
+  and `WorldState.campaignEndsAt` set to `nextElectionAt`. `ELECTION_CALLED`
+  fires here — the type already existed in `EventType` and was already fully
+  wired into `ImportanceScorer` (30.0 base) and `NewspaperGenerator`
+  (`StoryCategory.TOWN_NEWS`, falls through to its `else -> e.type.label`
+  headline, "Election called") but had never actually been emitted by
+  anything before this system; this is the first thing that fires it.
+- **Campaigning.** While a campaign is open, `runCampaigns` gives each
+  candidate a bounded `DAILY_CAMPAIGN_CHANCE` (30%) roll per day, capped at
+  `MAX_CAMPAIGN_ACTIONS` (10) campaigning days total — a short push, not a
+  grind or a sub-simulation of its own. A landed campaign day:
+  - Adds to the candidate's `Candidacy.support`: a `CAMPAIGN_SUPPORT_GAIN_BASE`
+    (4.0) plus a **track record** bonus (`TRACK_RECORD_BONUS_PER_SUCCESS`
+    (2.0) per petition the candidate has personally started *and won*, capped
+    at `MAX_TRACK_RECORD_BONUS` (8.0) — genuine local-politics history via
+    `PetitionSystem`'s own success/failure record, not a personality stat)
+    plus a **familiarity** bonus (mean `Relationship.familiarity` across
+    everyone the candidate already has a relationship with, divided by
+    `FAMILIARITY_SUPPORT_DIVISOR` (25) — a stranger with no relationships
+    contributes nothing here) plus a small random wobble
+    (`ctx.rng.nextDouble(-1.0, 2.0)`).
+  - Nudges the candidate's own `reputation` up by `CAMPAIGN_REPUTATION_GAIN`
+    (1.5) and `needs.purpose` by 3.0. This is the actual mechanism by which
+    campaigning influences who wins: `LifecycleSystem.election()` already
+    reads `reputation` when scoring candidates at the vote, so a campaign
+    that lands composes with the existing outcome rule instead of
+    introducing a second, competing one.
+  - Sends the candidate to the town hall (`BuildingType.TOWN_HALL`, if one
+    exists) for a `COMMUNITY` activity — a visible campaign stop, reusing
+    `TickContext.sendTo` rather than inventing new activity/travel plumbing.
+- **Council seats.** The day the vote lands — detected by watching
+  `nextElectionAt` advance past the `campaignEndsAt` the campaign opened
+  with, which `LifecycleSystem.election()` always does once it fires
+  (whether or not it actually changes `mayorId`) — `fillCouncil` takes every
+  candidate *other than* the winning `mayorId`, ranks them by accumulated
+  `Candidacy.support` (ties broken by resident id for determinism), and
+  seats the top `COUNCIL_SEATS` (2) as councillors in a new
+  `WorldState.councillorIds` list (cleared and replaced each election, not
+  additive — a councillor who isn't re-selected loses the seat). Each new
+  councillor gets the `"Councillor"` occupation label if they were
+  unemployed, +4 reputation, +8 purpose, and an `ACHIEVEMENT` memory; a
+  `TOWN_MILESTONE` event announces the seated council (only if there was at
+  least one seat filled). Campaign bookkeeping
+  (`campaignEndsAt`/`candidacies`) is cleared at the end of this step either
+  way, ready for the next `callElection` window.
+- **Policy effect.** A term in office has one small, real, bounded
+  consequence: while `mayorId` is non-null, `ElectionSystem.repairChanceBonus`
+  adds `MAYORAL_REPAIR_CHANCE_BONUS` (0.04) to
+  `BuildingLifecycleSystem`'s per-building daily repair-chance roll — read
+  where that system already composes its base chance with the family-standing
+  modifier, so all three sources (base, family reputation, mayoral term) add
+  together rather than one overriding another, and the roll stays clamped to
+  that system's existing `0.02..0.35` bounds. Zero effect while the office is
+  vacant (a fresh world, before the first election lands).
+
+Modelled with a new `Candidacy` data class (`core/model/WorldState.kt`) —
+resident id, accumulated support, campaign-actions-taken — held in a new
+`WorldState.candidacies` list, plus `WorldState.campaignEndsAt: Long?` and
+`WorldState.councillorIds: MutableList<Long>`. All plain new fields with
+safe defaults (`null`/`emptyList`); no schema migration involved. All
+randomness goes through `ctx.rng`, never `Math.random()`.
+
+**Deliberately out of scope for this pass:** no policy platforms or issue
+positions for candidates to campaign on (a campaign day is a single
+undifferentiated "campaigning" action, not a choice between stances); no
+voter-level individual ballots or turnout modelling (the vote itself is
+still `LifecycleSystem.election()`'s existing aggregate scoring, unchanged);
+no councillor-specific duties or powers beyond the shared mayoral repair
+bonus (a councillor's seat is a standing/reputation outcome, not yet a
+second lever on the simulation); no recall elections, resignations, or
+scandal-driven early elections; no negative campaigning or rival
+sabotage between candidates.
+
 ## Family & generations
 
 Births to fertile couples (both 20–44, affection ≥ 55) at
@@ -274,8 +364,79 @@ loosely trade-themed heirloom (e.g. a carpenter's "well-used toolbox", a
 cook's "worn recipe book"). This is deliberately lightweight: no new
 inventory model, just a formatted `"heirloom:<name>'s <item>"` entry on the
 heir's `ideaSeeds` (the same list `GoalSystem` already reads to help trigger
-`START_BUSINESS`) plus an `INSPIRATION` memory recording the gift. Family
-reputation and an "era summary" on death are still open — see the backlog.
+`START_BUSINESS`) plus an `INSPIRATION` memory recording the gift.
+
+**Family reputation.** Distinct from an individual's own `Resident
+.reputation`: a lineage's standing, as it bears on one particular living
+member right now. Deliberately **not** a second persisted running total —
+`Resident.reputation` already reacts to exactly the collective deeds that
+should feed a family's name (petitions won/lost, crime, business
+success/failure, affairs discovered, elections… all already move an
+individual's `reputation` via `ConsequenceEngine`/`PetitionSystem`/
+`CrimeSystem`/etc.), so a second hand-maintained number would either
+duplicate that bookkeeping or drift out of sync with it. Instead
+`FamilyReputationSystem.familyReputationOf` computes a weighted mean **at
+read time**: the resident's own reputation (full weight), every other
+living member of their current household (weight 0.7 — the household is
+also what persists and merges across a marriage, see "households merge"
+under `EventType.MARRIAGE` above), and up to two generations of direct
+ancestors via `motherId`/`fatherId` (weight decaying ×0.4 per generation,
+whether the ancestor is alive or dead) — a family's name still carries
+weight a generation or two after the people who built it are gone, but
+fades rather than lingering forever. Falls back to the town-wide default
+(50.0) for a resident with no traceable family at all (e.g. a founding
+resident). `FamilyReputationSystem.standingModifier` turns that into a
+small, bounded modifier — centred on 0 at the 50.0 default, clamped to a
+caller-supplied `maxSwing` — for composing into existing rolls without ever
+letting one family's name dominate an outcome:
+- **Building repairs.** `BuildingLifecycleSystem`'s daily repair roll for a
+  home (not a business — family standing is a personal-name effect, not a
+  balance-sheet one) now adds `standingModifier(…, FAMILY_REPUTATION_CHANCE_
+  SWING = 0.05)` on top of its `BASE_REPAIR_CHANCE` (0.15), composing
+  additively alongside the councillor/mayoral repair bonus
+  (`ElectionSystem.repairChanceBonus`) added in the same file around the
+  same time, clamped overall to 0.02–0.35 — a well-regarded family gets
+  tradespeople to their door a little faster; a poorly-regarded one waits a
+  little longer.
+- **First impressions.** `InteractionSystem.interact`'s "pleasant exchange"
+  branch now adds a small trust nudge (`FIRST_MEETING_TRUST_SWING`, ±3.0 for
+  each side) on a resident's **first-ever** meeting with someone
+  (`rel.familiarity < 5.0`) — a family's reputation precedes them, but only
+  until the two people actually get to know each other themselves, at which
+  point their own shared history takes over exactly as before.
+
+**Era summary.** When the resident the player is actually *following*
+(`WorldState.followedResidentId`) dies, the existing death-of-followed flow
+(`WorldRepository.detectFollowedDeath`, which already built a `DeathSummary`
+— family left behind, a one-line life summary, whose lives to follow next —
+surfaced via the existing `DeathSummaryDialog`) now also builds a genuine
+retrospective of the era that life spanned, attached as `DeathSummary.era:
+EraSummary?` (`null` for anyone who wasn't being followed — this is
+deliberately not computed for every death in the log, only the one the
+player was actually watching). Built entirely at the UI/repository layer,
+not inside `LifecycleSystem.die` — the engine doesn't keep queryable event
+history in `WorldState` itself, only the append-only event log the database
+layer already indexes by time (`EventDao.eventsBetween`) — so `die()`'s only
+change is a new `payload["bornAt"]` on the `PERSON_DIED` event, letting the
+repository know what time range to query. `WorldRepository.buildEraSummary`
+then:
+- Queries every `PUBLIC` event between birth and death and counts how many
+  clear the *same* `ImportanceScorer.HISTORY_THRESHOLD` (30.0) the History
+  timeline itself already uses for "notable" — no second bar invented — then
+  keeps the 4 highest-importance descriptions as `witnessed`.
+- Reads the resident's own `memories` (already ranked by `importance` then
+  `emotionalIntensity`, the same ordering `passDownBeliefs` above already
+  uses) and keeps the top 4 as `definingMemories`.
+- Counts current relationships at `FRIEND`/`CLOSE_FRIEND`/`PARTNER`/
+  `SPOUSE`/`FAMILY` kind as `relationshipsFormed` — genuine closeness, not
+  mere acquaintance.
+- `years` is simply `(deathTime − bornAt) / MINUTES_PER_YEAR`.
+
+  Surfaced minimally, per scope — no new screen: `DeathSummaryDialog`
+  (`feature/town/TownSheets.kt`) gains a "Their era" section listing the
+  town events lived through and the memories they'll be remembered for,
+  directly under the existing life summary, only rendered when `era` is
+  non-null.
 
 ## Health
 

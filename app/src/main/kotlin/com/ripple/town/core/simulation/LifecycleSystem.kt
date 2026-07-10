@@ -186,7 +186,10 @@ object LifecycleSystem {
             sourceResidentId = r.id,
             targetResidentIds = listOfNotNull(partner?.id) + r.childIds.filter { state.resident(it)?.alive == true },
             severity = 0.85,
-            payload = mapOf("cause" to cause, "age" to age.toString()),
+            // "bornAt" lets a UI-side era summary (see WorldRepository.detectFollowedDeath)
+            // query the full span of events/memories the deceased's life covered, without the
+            // engine itself needing to read back through history it doesn't keep in WorldState.
+            payload = mapOf("cause" to cause, "age" to age.toString(), "bornAt" to r.bornAt.toString()),
             causeIds = causeIds
         )
         state.deathsToday += 1

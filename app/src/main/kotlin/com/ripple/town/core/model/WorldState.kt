@@ -12,6 +12,20 @@ enum class PetitionSubject {
 enum class PetitionStatus { ACTIVE, SUCCEEDED, FAILED }
 
 /**
+ * A candidate's standing during a live campaign window, tracked between
+ * `ELECTION_CALLED` and the vote itself. See
+ * [com.ripple.town.core.simulation.ElectionSystem].
+ */
+@Serializable
+data class Candidacy(
+    val residentId: Long,
+    /** Accumulated campaign support built up day by day; the deciding factor at the vote. */
+    var support: Double = 0.0,
+    /** How many campaigning actions have landed — bounded per campaign, see MAX_CAMPAIGN_ACTIONS. */
+    var actionsTaken: Int = 0
+)
+
+/**
  * Grassroots local politics, short of a council seat: a resident personally affected by
  * noise or rent burden starts a petition, sympathetic townsfolk sign it daily, and it
  * resolves — with a real, bounded policy effect — once it hits its signature threshold or
@@ -81,6 +95,18 @@ data class WorldState(
     var mayorId: Long? = null,
     /** The resident currently serving as constable; kept up by [CrimeSystem.ensureConstable]. */
     var constableResidentId: Long? = null,
+    /**
+     * Council seats: up to `ElectionSystem.COUNCIL_SEATS` residents (runners-up from the
+     * same election that decided the mayor) who hold a lesser civic role alongside them.
+     * Distinct from `mayorId` — the mayor is never also listed here.
+     */
+    val councillorIds: MutableList<Long> = mutableListOf(),
+    /**
+     * Live campaign, if one is running: set when `ELECTION_CALLED` fires
+     * (`ElectionSystem.callElection`), cleared once the vote resolves. `null` between elections.
+     */
+    var campaignEndsAt: Long? = null,
+    val candidacies: MutableList<Candidacy> = mutableListOf(),
 
     // Local politics
     /** Active/recently resolved petitions; run by `PetitionSystem`. Bounded, see its MAX_ACTIVE_PETITIONS. */

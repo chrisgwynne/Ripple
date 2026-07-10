@@ -23,6 +23,9 @@ object InteractionSystem {
 
     const val MAX_INTERACTIONS_PER_TICK = 8
 
+    /** Bounded trust swing a family's reputation can lend (or cost) a first meeting. */
+    private const val FIRST_MEETING_TRUST_SWING = 3.0
+
     fun update(ctx: TickContext) {
         var budget = MAX_INTERACTIONS_PER_TICK
         val byBuilding = ctx.state.detailedResidents()
@@ -72,6 +75,13 @@ object InteractionSystem {
                 rel.respect += 0.4
                 a.needs.social += 4.0
                 b.needs.social += 4.0
+                // A well-regarded family's name travels ahead of them: a small trust
+                // head start (or handicap) on a genuinely first meeting only — once two
+                // people actually know each other, their own history takes over.
+                if (firstMeeting) {
+                    rel.trust += FamilyReputationSystem.standingModifier(ctx.state, a, FIRST_MEETING_TRUST_SWING)
+                    rel.trust += FamilyReputationSystem.standingModifier(ctx.state, b, FIRST_MEETING_TRUST_SWING)
+                }
                 val social = (a.skill(SkillType.SOCIAL) + b.skill(SkillType.SOCIAL)) / 2.0
                 if (social < 100.0) {
                     a.skills[SkillType.SOCIAL] = (a.skill(SkillType.SOCIAL) + 0.1).coerceAtMost(100.0)

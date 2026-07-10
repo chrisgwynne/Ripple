@@ -4,6 +4,176 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-10 — Phase 3: generational play — family reputation, era summary
+
+Closes out the "Generational play" Phase 3 item's last two open pieces
+(inherited beliefs and heirlooms were already implemented in an earlier
+pass) — family reputation and the death-of-followed flow growing into an
+"era summary." Another agent was concurrently building council-seats/
+elections in the same checkout, touching new files and `SimulationCoordinator
+.kt`; this pass deliberately avoided that file entirely (neither feature
+needed pipeline wiring) and, where it landed in the same file the other
+agent was also editing (`BuildingLifecycleSystem.kt`), the two changes
+composed additively without conflict — confirmed by re-reading the file
+after the other agent's concurrent edit landed a `ElectionSystem
+.repairChanceBonus(state)` term in the very same `repairChance` expression.
+No `./gradlew` or `git` commands run, per the parallel-work constraint —
+code-only, ready for the orchestrating session to build/test/commit.
+
+- **Family reputation.** New `FamilyReputationSystem.kt` — deliberately
+  *not* a new persisted running total. `Resident.reputation` already exists
+  and already reacts to exactly the kind of collective family deeds that
+  should feed a lineage's name (petitions, crime, business fortune, affairs,
+  elections — all already move it via `ConsequenceEngine`/`PetitionSystem`/
+  `CrimeSystem`/`ElectionSystem`), so a second hand-maintained figure would
+  either duplicate that bookkeeping or silently drift out of sync with it.
+  Instead `familyReputationOf(state, resident)` computes a weighted mean **at
+  read time**: the resident's own reputation at full weight, every other
+  living member of their current household at 0.7 (households already
+  persist and merge across marriages via `ConsequenceEngine`'s existing
+  "households merge" rule), and up to two generations of direct ancestors
+  (`motherId`/`fatherId`, alive or dead) at a weight decaying ×0.4 per
+  generation — a family's name outlives the people who built it, but fades.
+  Falls back to the 50.0 town-wide default for anyone with no traceable
+  family. `standingModifier(state, resident, maxSwing)` turns that into a
+  small, bounded, centred-on-zero modifier for composing into existing rolls.
+  Given two genuine, small, bounded effects — checked `ConsequenceEngine`'s
+  marriage household-merge logic first to confirm households were the right
+  persistence unit, and `BuildingLifecycleSystem`/`InteractionSystem` for
+  natural, low-risk hook points that didn't require touching
+  `SimulationCoordinator`:
+  - `BuildingLifecycleSystem.updateDaily`'s home-repair chance (not
+    business — family standing is a personal-name effect) now adds
+    `standingModifier(…, 0.05)` on top of the existing 0.15 base chance,
+    clamped overall to 0.02–0.35.
+  - `InteractionSystem.interact`'s pleasant-exchange branch now adds a small
+    ±3.0 trust nudge from each side's family standing, but *only* on a
+    resident's first-ever meeting with someone (`familiarity < 5.0`) — a
+    reputation precedes a first impression, then gets out of the way once
+    real shared history exists.
+  See `docs/simulation-rules.md#family--generations`.
+- **Era summary.** The death-of-followed UI flow already existed in full
+  (`WorldRepository.detectFollowedDeath` builds a `DeathSummary` — family
+  left behind, a life-summary line, follow suggestions — surfaced via the
+  pre-existing `DeathSummaryDialog`), so this extends it rather than
+  building anything new. `LifecycleSystem.die`'s only change: `PERSON_DIED`'s
+  payload gains `"bornAt"` (the deceased's `bornAt` sim-minutes), since the
+  engine itself has no queryable event history inside `WorldState` — only
+  the database-layer event log does (`EventDao.eventsBetween`, pre-existing,
+  previously used only for newspaper-buffer priming). `WorldRepository`
+  gains `EraSummary` (years lived, notable-town-event count + the top 4
+  descriptions, the resident's own top 4 memories by importance, and a warm-
+  relationship count) and `buildEraSummary`, computed **only** for the
+  resident actually being followed (`DeathSummary.era: EraSummary?`, null
+  otherwise — deliberately not computed for every death in the log).
+  Reuses `ImportanceScorer.HISTORY_THRESHOLD` (30.0) as the "notable" bar —
+  the same one the History timeline itself uses — rather than inventing a
+  second one. No new screen: `DeathSummaryDialog` (`feature/town/
+  TownSheets.kt`) gained a "Their era" section directly under the existing
+  life summary, only rendered when `era` is non-null. See
+  `docs/simulation-rules.md#family--generations`.
+
+Deliberately scoped out: no UI surface for family reputation itself (no
+"family reputation" number shown anywhere in the app yet — it only acts as
+an invisible modifier on the two hooks above); no further consequence-rule
+integration (e.g. family reputation is not yet read by `PetitionSystem` or
+`ElectionSystem`'s candidate scoring — left alone specifically to avoid any
+risk of touching files the concurrent elections work was actively changing);
+no era-summary UI beyond the two new text blocks in the existing dialog (no
+dedicated "era" screen, no illustrated timeline); `EraSummary` is built once
+at death and not persisted anywhere (recomputed from the DB/state each time
+`detectFollowedDeath` runs, cheap enough not to need caching).
+
+### 2026-07-10 — Phase 3: local politics — council seats & campaign-driven elections
+
+Seventh Phase 3 backlog item and, with this, the "Local politics" bullet is
+now fully closed (petitions were already done; this closes out council
+seats, campaigns, and a policy effect). Another agent was working
+family/generational simulation files (`LifecycleSystem.kt` explicitly
+off-limits this round) in the same checkout, so this was code-only — no
+`./gradlew` or `git` calls made, and `LifecycleSystem.kt` was read but never
+edited.
+
+- **New `ElectionSystem.updateDaily`**, wired into `SimulationCoordinator`'s
+  `if (newDay)` block directly after `LifecycleSystem.updateDaily` (so it
+  always sees that call's same-day `nextElectionAt`/`mayorId` result), same
+  bounded-`object` pattern as every other daily system. Deliberately layers
+  on top of the pre-existing, unmodified `LifecycleSystem.election()` rather
+  than replacing it — that function already existed, already read
+  `nextElectionAt`/`mayorId`, and already factored `reputation` into who
+  wins; rewriting it would have meant touching the one file explicitly ruled
+  out this round anyway, so the scoped design turned that constraint into
+  the actual shape of the feature: campaigns work *by* nudging the same
+  `reputation` field the untouched vote logic already reads, rather than a
+  second, parallel outcome rule.
+  - **Calling.** 20 days ahead of `nextElectionAt`, the same candidate pool
+    shape `LifecycleSystem.election()` will independently re-derive at the
+    vote gets declared early and given a campaign (`Candidacy(residentId,
+    support, actionsTaken)` per candidate, new `WorldState.candidacies`
+    list). `EventType.ELECTION_CALLED` fires here — it already existed in
+    `EventType` and was already fully wired into `ImportanceScorer` (30.0
+    base importance) and `NewspaperGenerator` (`StoryCategory.TOWN_NEWS`,
+    falls through cleanly to its existing `else -> e.type.label` headline
+    case) but nothing had ever actually emitted it before now; checked both
+    first, as instructed, before adding anything.
+  - **Campaigning.** A bounded daily roll per candidate (30% chance, capped
+    at 10 campaigning days total — a short push, not a sub-simulation).
+    Support gained isn't a coin flip: a base amount plus a **track record**
+    bonus (petitions the candidate personally started *and won*, via
+    `PetitionSystem`'s own success list — reusing that system's existing
+    data rather than inventing a parallel "political achievements" stat)
+    plus a **familiarity** bonus (mean `Relationship.familiarity` across
+    everyone the candidate already knows — a stranger with no relationships
+    gets nothing here) plus a small `ctx.rng` wobble. Each landed campaign
+    day also nudges the candidate's own `reputation` up — the actual
+    mechanism by which campaigning influences the vote, since
+    `LifecycleSystem.election()`'s existing scoring already reads
+    `reputation` — and sends them to the town hall for a visible `COMMUNITY`
+    campaign stop via the existing `ctx.sendTo`.
+  - **Council seats — the genuinely new piece.** The day the vote lands
+    (detected by watching `nextElectionAt` advance past the campaign's
+    `campaignEndsAt`, which `LifecycleSystem.election()` always does once it
+    fires), runners-up (everyone in the race except the winning `mayorId`)
+    are ranked by accumulated campaign `support` and the top 2 seated as
+    councillors in a new `WorldState.councillorIds` list — replaced each
+    election, not additive. Each new councillor gets an occupation label
+    (if previously unemployed), a small reputation/purpose lift, and an
+    `ACHIEVEMENT` memory; a `TOWN_MILESTONE` event announces the seated
+    council.
+  - **Policy effect.** While `mayorId` is non-null,
+    `ElectionSystem.repairChanceBonus` adds a small, fixed bonus to
+    `BuildingLifecycleSystem`'s per-building daily repair-chance roll —
+    discovered mid-session that `BuildingLifecycleSystem.kt` had already
+    grown a `FamilyReputationSystem`-driven repair-chance modifier since this
+    session started reading it (the other agent's concurrent
+    family/generational work), so the mayoral bonus was wired to compose
+    additively with that existing modifier rather than the flat
+    `REPAIR_THRESHOLD` originally sketched — same file, same roll, both
+    sources add together, still clamped to that system's existing
+    `0.02..0.35` bounds. `BuildingLifecycleSystem.kt` is a different file
+    from the off-limits `LifecycleSystem.kt`, so editing it stayed within
+    this session's constraints.
+- Modelled with a new `Candidacy` data class (`core/model/WorldState.kt`)
+  plus `WorldState.campaignEndsAt: Long?` and
+  `WorldState.councillorIds: MutableList<Long>` — plain new fields with safe
+  defaults, no schema migration. `WorldUi`/`WorldSnapshot.kt` also threads
+  `councillorIds` through to the UI layer alongside the pre-existing
+  `mayorId`, for parity (only construction site updated). All randomness
+  through `ctx.rng`.
+- Docs: new "Local politics: elections" section in `docs/simulation-rules.md`
+  right after "Local politics: petitions"; `docs/backlog.md`'s Local
+  politics bullet marked `[x]` — this closes the entire bullet (petitions,
+  council seats, campaigns, and a policy effect are all now implemented).
+  Deliberately out of scope, called out explicitly in both docs: policy
+  platforms/issue positions for candidates, individual voter ballots (the
+  vote itself is still the existing aggregate scoring, unchanged),
+  councillor-specific powers beyond the shared repair bonus, recall
+  elections/resignations, negative campaigning between rivals.
+
+Not run this session (per the parallel-work constraint, and the explicit
+`LifecycleSystem.kt` no-touch rule): `./gradlew` build/test and any `git`
+commands. Code-only, ready for the orchestrating session to build/test/commit.
+
 ### 2026-07-10 — Phase 3: Economy v2 — property market (households buying homes)
 
 Sixth Phase 3 backlog item, closing out Economy v2's fourth and last piece —
@@ -930,18 +1100,37 @@ rather than duplicating it wholesale into this doc.
 
 ## Phase 3 — A town with a memory (systems that compound)
 
-- [~] Generational play: family reputation, inherited trauma/beliefs from
+- [x] Generational play: family reputation, inherited trauma/beliefs from
   memories, heirlooms; the death-of-followed flow grows into an "era summary".
   *Implemented: inherited beliefs (top 2 significant `beliefFormed` memories,
   `importance ≥ 65`, passed to surviving children as diminished-intensity
   `CHILDHOOD` "family story" memories) and heirlooms (one heir receives a
   trade-themed heirloom via `ideaSeeds` + an `INSPIRATION` memory, gated on
   a positive memory with `importance ≥ 75`), both in `LifecycleSystem.die`.
-  Still open: family reputation (a lineage-level reputation stat/effect) and
-  the death-of-followed flow growing into an "era summary" — not attempted.*
-- [~] Local politics: council seats, petitions (noise, rents), policy effects
+  *Implemented — family reputation: new `FamilyReputationSystem`, a lineage
+  standing computed **at read time** from existing `Resident.reputation`
+  values (self, living household members, two generations of ancestors,
+  decayed) rather than a second persisted running total — deliberately, so
+  it can never drift out of sync with the individual reputation changes
+  that already happen all over the simulation. Given real, bounded effect
+  in two places: a small nudge on `BuildingLifecycleSystem`'s daily home-
+  repair chance, and a small first-meeting trust nudge in
+  `InteractionSystem.interact` (a family's name precedes them, until two
+  people actually get to know each other). See
+  `docs/simulation-rules.md#family--generations`.*
+  *Implemented — era summary: the existing death-of-followed flow
+  (`WorldRepository.detectFollowedDeath` / `DeathSummary` /
+  `DeathSummaryDialog`, all pre-existing) gains a new `EraSummary` — years
+  lived, notable public town events witnessed (same `ImportanceScorer
+  .HISTORY_THRESHOLD` bar the History timeline uses), the resident's own
+  top memories, and a count of warm relationships formed — built only for
+  the resident actually being followed, from the full-lifetime event log
+  (`EventDao.eventsBetween`, keyed off a new `payload["bornAt"]` on
+  `PERSON_DIED`). No new screen: surfaced as an extra "Their era" section
+  inside the existing death dialog.*
+- [x] Local politics: council seats, petitions (noise, rents), policy effects
   on the economy; elections become campaigns influenced by reputation events.
-  *Implemented (petitions only): `PetitionSystem`, run daily. Politically-
+  *Implemented — petitions: `PetitionSystem`, run daily. Politically-
   interested residents personally affected by noise or rent burden can start
   a petition; sympathetic townsfolk sign it over following days; it resolves
   — with a real, bounded policy effect (noise cut, rent cut) on success, a
@@ -949,10 +1138,28 @@ rather than duplicating it wholesale into this doc.
   population-scaled signature threshold or its 21-day deadline lapses.
   `PETITION_STARTED`/`PETITION_RESOLVED` events, `PUBLIC` visibility, causally
   linked, through `ConsequenceEngine`. See
-  `docs/simulation-rules.md#local-politics-petitions`. Council seats,
-  campaign mechanics and reputation-driven elections (the rest of this
-  bullet) are still open — a substantially larger item, deliberately not
-  attempted here.*
+  `docs/simulation-rules.md#local-politics-petitions`.
+  *Implemented — council seats & campaign-driven elections: `ElectionSystem`,
+  run daily right after `LifecycleSystem.updateDaily`. Layers on top of the
+  pre-existing (untouched) `LifecycleSystem.election()` rather than replacing
+  it: a `CAMPAIGN_WINDOW_DAYS` (20) campaign opens ahead of the vote
+  (`ELECTION_CALLED` — the event type already existed and was already fully
+  wired into `ImportanceScorer`/`NewspaperGenerator` but had never actually
+  been fired by anything before this), each candidate gets a bounded daily
+  chance to campaign (support gained from a track record of *won* petitions
+  plus mean relationship familiarity with the town, not personality alone),
+  and campaigning nudges the candidate's own `reputation` — the same field
+  the existing vote logic already scores candidates on, so campaigns
+  genuinely influence who wins without a second, competing outcome rule.
+  Runners-up who don't win the mayoralty fill `COUNCIL_SEATS` (2) council
+  seats, ranked by accumulated campaign support. Policy effect: a sitting
+  mayor's term adds a small bonus to `BuildingLifecycleSystem`'s per-building
+  repair-chance roll, town-wide. See
+  `docs/simulation-rules.md#local-politics-elections`. Deliberately out of
+  scope: policy platforms/issue positions, individual voter ballots (the
+  vote itself is still the existing aggregate scoring), councillor-specific
+  powers beyond the shared repair bonus, recall elections, negative
+  campaigning.*
 - [x] Economy v2: prices that move, property market (residents actually
   buy/sell homes), business succession and rivalries.
   *Implemented (price competition + rivalries + price-drift slices):

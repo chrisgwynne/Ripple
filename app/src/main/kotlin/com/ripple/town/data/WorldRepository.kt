@@ -15,6 +15,7 @@ import com.ripple.town.core.database.DbJson
 import com.ripple.town.core.database.FollowedResidentEntity
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.InterventionVerb
+import com.ripple.town.core.model.RelationshipKind
 import com.ripple.town.core.model.SimSpeed
 import com.ripple.town.core.model.SimTime
 import com.ripple.town.core.model.TileType
@@ -68,7 +69,29 @@ data class DeathSummary(
     val cause: String,
     val lifeSummary: String,
     val familyLeft: List<Pair<Long, String>>,
-    val suggestions: List<Pair<Long, String>>
+    val suggestions: List<Pair<Long, String>>,
+    /** Present only for the resident the player was actually following — see [EraSummary]. */
+    val era: EraSummary? = null
+)
+
+/**
+ * A retrospective of the era a *followed* resident's life spanned — built only when the
+ * player was actually watching that life (an untracked background resident's death stays
+ * a plain [DeathSummary], no era summary computed). Deliberately backend/data-focused, not
+ * a new screen: surfaced today as extra text inside the existing death dialog
+ * ([com.ripple.town.feature.town.DeathSummaryDialog]).
+ */
+data class EraSummary(
+    /** How many in-game years the followed life spanned, town-side. */
+    val years: Int,
+    /** Count of PUBLIC town events at/above the History threshold during their lifetime. */
+    val notableTownEventCount: Int,
+    /** A few of the biggest public happenings witnessed, most important first. */
+    val witnessed: List<String>,
+    /** Their own most significant memories, most important first (already on Resident.memories). */
+    val definingMemories: List<String>,
+    /** Warm relationships (friend/close friend/partner/spouse/family) formed across their life. */
+    val relationshipsFormed: Int
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -477,7 +500,7 @@ class WorldRepository @Inject constructor(
         val followed = withContext(engineDispatcher) { coordinator?.state?.followedResidentId } ?: return
         val death = events.firstOrNull { it.type == EventType.PERSON_DIED && it.sourceResidentId == followed }
             ?: return
-        val summary = withContext(engineDispatcher) {
+        val built = withContext(engineDispatcher) {
             val state = coordinator!!.state
             val r = state.resident(followed) ?: return@withContext null
             val family = (listOfNotNull(r.partnerId) + r.childIds)
@@ -494,7 +517,7 @@ class WorldRepository @Inject constructor(
                 .take(4)
                 .map { it.id to "${it.fullName} — ${it.occupation}" }
             val worked = r.occupation
-            DeathSummary(
+            val base = DeathSummary(
                 residentId = r.id,
                 name = r.fullName,
                 age = r.ageAt(state.time),
@@ -509,8 +532,52 @@ class WorldRepository @Inject constructor(
                 familyLeft = family,
                 suggestions = suggestions
             )
-        }
-        if (summary != null) _followedDeath.value = summary
+            // Era summary inputs that live on the engine-confined WorldState — the resident's
+            // own memories and their current relationship kinds — are read here, on the same
+            // dispatcher as everything else touching WorldState, rather than handing the live
+            // Resident reference out for a caller-thread read later.
+            val definingMemories = r.memories
+                .sortedWith(compareByDescending<com.ripple.town.core.model.Memory> { it.importance }
+                    .thenByDescending { it.emotionalIntensity })
+                .take(4)
+                .map { it.description }
+            val relationshipsFormed = state.relationshipsOf(r.id).count { it.kind in WARM_RELATIONSHIP_KINDS }
+            Triple(base, definingMemories, relationshipsFormed)
+        } ?: return
+        val (base, definingMemories, relationshipsFormed) = built
+        val era = buildEraSummary(death, definingMemories, relationshipsFormed)
+        _followedDeath.value = base.copy(era = era)
+    }
+
+    /**
+     * Generational play: an "era summary" for the resident the player was actually
+     * following, built from what already exists — the full-lifetime event log (queried
+     * from [PERSON_DIED]'s new `bornAt` payload field, see `LifecycleSystem.die`) plus the
+     * resident's own memories/relationships already gathered by [detectFollowedDeath] on the
+     * engine-confined dispatcher. Deliberately reuses `ImportanceScorer.HISTORY_THRESHOLD`
+     * for "notable" rather than inventing a second bar, and caps every list it returns — this
+     * is a retrospective, not a full replay of the log.
+     */
+    private suspend fun buildEraSummary(
+        death: WorldEvent,
+        definingMemories: List<String>,
+        relationshipsFormed: Int
+    ): EraSummary? {
+        val bornAt = death.payload["bornAt"]?.toLongOrNull() ?: return null
+        val lifetime = db.eventDao().eventsBetween(bornAt, death.time + 1)
+            .map { it.toDomain() }
+            .filter { it.visibility == com.ripple.town.core.model.EventVisibility.PUBLIC }
+        val notable = lifetime.filter { it.importance >= ImportanceScorer.HISTORY_THRESHOLD }
+        val years = ((death.time - bornAt) / SimTime.MINUTES_PER_YEAR).toInt()
+        return EraSummary(
+            years = years,
+            notableTownEventCount = notable.size,
+            witnessed = notable.sortedByDescending { it.importance }
+                .take(4)
+                .map { it.description },
+            definingMemories = definingMemories,
+            relationshipsFormed = relationshipsFormed
+        )
     }
 
     companion object {
@@ -521,6 +588,11 @@ class WorldRepository @Inject constructor(
             EventType.PERSON_BORN, EventType.PERSON_DIED, EventType.JOB_LOST, EventType.JOB_STARTED,
             EventType.MARRIAGE, EventType.SEPARATION, EventType.DIVORCE, EventType.ILLNESS_DIAGNOSED,
             EventType.RELATIONSHIP_STARTED, EventType.BUSINESS_OPENED, EventType.BUSINESS_CLOSED
+        )
+        /** What counts as a "relationship formed" for an era summary — mirrors real closeness, not mere acquaintance. */
+        val WARM_RELATIONSHIP_KINDS = setOf(
+            RelationshipKind.FRIEND, RelationshipKind.CLOSE_FRIEND, RelationshipKind.PARTNER,
+            RelationshipKind.SPOUSE, RelationshipKind.FAMILY
         )
     }
 }

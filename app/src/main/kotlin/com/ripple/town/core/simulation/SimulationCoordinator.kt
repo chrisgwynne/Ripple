@@ -76,8 +76,9 @@ class SimulationCoordinator(
         DelayedEffectSystem.update(ctx)
         // 9b. Private events may leak into public rumour.
         RumourSystem.update(ctx)
-        // 10-12. Daily passes: health, lifecycle (births/deaths/election), goals, building
-        // repairs, seasonal events (harvest fair / winter market / river floods), local
+        // 10-12. Daily passes: health, lifecycle (births/deaths/election), council seats &
+        // campaign-driven elections (layers on top of the same-day election result above), goals,
+        // building repairs, seasonal events (harvest fair / winter market / river floods), local
         // politics (petitions over noise / rent), business rivalries (same-type price/
         // reputation competition, owner resentment), town-wide price drift (independent,
         // slow inflation/deflation on top of rivalry-driven demand shifts), business
@@ -86,6 +87,7 @@ class SimulationCoordinator(
         if (newDay) {
             HealthSystem.updateDaily(ctx)
             LifecycleSystem.updateDaily(ctx)
+            ElectionSystem.updateDaily(ctx)
             GoalSystem.updateDaily(ctx)
             BuildingLifecycleSystem.updateDaily(ctx)
             SeasonalEventSystem.updateDaily(ctx)

@@ -36,6 +36,7 @@ data class WorldUi(
     val favouriteIds: List<Long>,
     val discoveredIds: List<Long>,
     val mayorId: Long?,
+    val councillorIds: List<Long>,
     val residents: List<ResidentUi>,
     val buildings: List<BuildingUi>,
     val map: TownMap
@@ -204,6 +205,7 @@ object SnapshotBuilder {
             favouriteIds = state.favouriteResidentIds.toList(),
             discoveredIds = state.discoveredResidentIds.toList(),
             mayorId = state.mayorId,
+            councillorIds = state.councillorIds.toList(),
             residents = residents,
             buildings = buildings,
             map = state.map
