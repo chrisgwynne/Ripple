@@ -26,6 +26,12 @@ enum class ExternalPressureKind {
     FUEL_PRICES_RISE,
     /** The same pressure easing back off. */
     FUEL_PRICES_EASE,
+    /** National tax-rate pressure rising — the "national layer" addition, mapped to a small
+     *  hit on resident `financialSecurity` at daily settlement. See
+     *  [com.ripple.town.core.simulation.WorldPressureMechanicMapper]. */
+    TAX_RATE_RISES,
+    /** The same pressure easing back off — a small relief on resident `financialSecurity`. */
+    TAX_RATE_EASES,
     /** Flavour-only pressures: currently recorded and reported on, but not yet mapped to any
      *  mechanical effect — deliberately scoped down, see `docs/simulation-rules.md`. */
     POOR_HARVEST,
@@ -35,6 +41,20 @@ enum class ExternalPressureKind {
     CONFIDENCE_DIPS,
     CONFIDENCE_RISES
 }
+
+/**
+ * A short, read-only record of a pressure that has already started (and, once resolved, when
+ * it ended) — the "trends" half of the national-layer addition. Deliberately minimal: just
+ * enough for a town to have a sense of "how things have been going nationally" (a rolling
+ * history, surfaced later by UI/newspaper work) without duplicating [ExternalPressure] itself
+ * as the live/authoritative record. See [com.ripple.town.core.simulation.CuratedWorldPressureFeed].
+ */
+@Serializable
+data class PressureHistoryEntry(
+    val kind: ExternalPressureKind,
+    val startedAt: Long,   // sim minutes
+    val endsAt: Long?      // sim minutes — null while still active
+)
 
 /**
  * One active (or just-resolved) national-scale pressure, town-wide, at most one at a time
@@ -156,6 +176,24 @@ data class WorldState(
      * `com.ripple.town.core.simulation.CuratedWorldPressureFeed`. `null` most of the time.
      */
     var externalPressure: ExternalPressure? = null,
+    /**
+     * A short rolling history of past national pressures (most recent last), capped at
+     * [com.ripple.town.core.simulation.CuratedWorldPressureFeed.PRESSURE_HISTORY_LIMIT] entries —
+     * the "trends" half of the national-layer backlog item. Gives the town a sense of "how
+     * things have been going nationally" beyond just the single live pressure slot above; not
+     * yet surfaced anywhere in UI/newspaper, just modelled and maintained here.
+     */
+    val pressureHistory: MutableList<PressureHistoryEntry> = mutableListOf(),
+    /**
+     * A simple national tax-rate multiplier, nudged slowly by [ExternalPressureKind.TAX_RATE_RISES]/
+     * [ExternalPressureKind.TAX_RATE_EASES] pressures — the "taxes" half of the national-layer
+     * backlog item. `1.0` is neutral; bounded to
+     * `WorldPressureMechanicMapper.NATIONAL_TAX_RATE_MIN`..`NATIONAL_TAX_RATE_MAX` (0.9–1.1).
+     * Read by [com.ripple.town.core.simulation.WorldPressureMechanicMapper] and applied through
+     * [com.ripple.town.core.simulation.EconomySystem]'s existing daily settlement — never a second,
+     * parallel settlement path.
+     */
+    var nationalTaxRate: Double = 1.0,
 
     // Id counters (all state needed for deterministic continuation)
     var nextResidentId: Long = 1L,

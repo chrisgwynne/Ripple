@@ -46,7 +46,10 @@ implemented in `core/simulation`.
    `BusinessSuccessionSystem.updateDaily` (voluntary owner-to-child handoff),
    `PropertyMarketSystem.updateDaily` (households buying the home they live in),
    `CuratedWorldPressureFeed.updateDaily` (Phase 4: a single curated,
-   abstract national-scale pressure, mapped through `WorldPressureMechanicMapper`).
+   abstract national-scale pressure, mapped through `WorldPressureMechanicMapper`
+   to business overhead and, for the tax-rate pair, resident living costs;
+   also drifts `WorldState.nationalTaxRate` and records rolling pressure
+   trend history).
 9. Nudge regeneration.
 10. Newspaper when due (weekly, 08:00).
 11. Daily statistics; checkpoint flag every 36 ticks (6 in-game hours).
@@ -440,6 +443,35 @@ then:
   directly under the existing life summary, only rendered when `era` is
   non-null.
 
+**Shareable chronicles (added 2026-07-10).** A text export of a family's
+saga, sharable via Android's standard share sheet — the Phase 4 backlog
+item. Distinct from era summary above in one key way: it works for **any**
+resident, living or dead, not only the one being followed at the moment of
+death. `ChronicleBuilder` (`data/ChronicleBuilder.kt`) walks the same
+two-generations-each-way family graph `FamilyTreeScreen.kt` already draws
+(grandparents/parents/self/children/grandchildren via `motherId`/`fatherId`/
+`childIds`) and renders one fixed-template paragraph per traceable person:
+alive/dead status and cause, age, occupation, child count, relationship
+status, up to 4 quoted memories (the same cap `EraSummary.definingMemories`
+uses), and up to 3 notable public events they personally lived through
+(`WorldRepository.buildChronicle` sources these per-person via the same
+birth-to-death `EventDao.eventsBetween` windowing and
+`ImportanceScorer.HISTORY_THRESHOLD` bar `buildEraSummary` already
+established, just run once per person in the graph rather than once for a
+single death). **Deliberately template sentence construction, not generated
+prose** — the same "facts in, fixed templates out" discipline
+`NewspaperGenerator`/`buildEraSummary` already use, kept explicitly distinct
+from the still-open `NarrativeTextProvider`/`DialogueProvider` LLM-prose
+item. Surfaced via a "📜 Share saga" button on the existing resident sheet
+(`ResidentSheetContent`, `feature/town/TownSheets.kt`), which launches a
+plain `text/plain` `Intent.ACTION_SEND` through `ShareCompat.IntentBuilder`
+— the app's first share-intent usage. **Text-only by deliberate choice**:
+image export (Compose bitmap capture) was considered and scoped out, stated
+explicitly in the backlog session log, since no device/emulator was
+available in this environment to verify either the capture or the share
+flow itself, and stacking two independently-unverifiable mechanisms was
+judged the wrong trade.
+
 ## Health
 
 Conditions: cold, flu, injury, exhaustion, back trouble (chronic), weak heart
@@ -736,11 +768,13 @@ family — promotion assigns housing when available.
 The first Phase 4 item — "the outside world" starting to press in on the
 town. Deliberately the smallest honest slice of the backlog's much larger
 vision (see `docs/backlog.md`'s Phase 4 section): the `NarrativeTextProvider`/
-`DialogueProvider` LLM layer, the richer "national layer" context, and
-shareable town chronicles are all separate, unattempted items. This is not a
-real-world news feed and never will be — every pressure is entirely
-fictional/abstract, consistent with the rest of Ripple's fictional town: no
-real place names, no real companies, no real politics or current events.
+`DialogueProvider` LLM layer and shareable town chronicles remain separate,
+unattempted items. The **national layer** ("lightweight country context —
+taxes, trends — as pressures") was added on top of this same system on
+2026-07-10 — see its own subsection below. This is not a real-world news feed
+and never will be — every pressure is entirely fictional/abstract, consistent
+with the rest of Ripple's fictional town: no real place names, no real
+companies, no real politics or current events.
 
 **Naming note.** The backlog names this item `ExternalWorldEventProvider` /
 `WorldPressureMapper`, but those exact identifiers were already claimed by
@@ -808,9 +842,7 @@ scoped-down instruction:
   handful of lines each), not generated text. The genuinely generative
   `NarrativeTextProvider`/`DialogueProvider` layer remains a separate,
   unattempted backlog item.
-- No richer "national layer" context (taxes, broader trends) beyond this one
-  pressure slot, and no shareable chronicles export — both separate,
-  unattempted Phase 4 items.
+- No shareable chronicles export — a separate, unattempted Phase 4 item.
 
 Modelled with a new `ExternalPressureKind` enum and `ExternalPressure` data
 class (`core/model/WorldState.kt`) plus a single new
@@ -818,6 +850,76 @@ class (`core/model/WorldState.kt`) plus a single new
 time) — a plain new field with a safe default, no schema migration. All
 randomness (whether a pressure starts, which kind, how long it runs) goes
 through `ctx.rng`, never `Math.random()`.
+
+### National layer: taxes and trends (added 2026-07-10)
+
+A small, additive extension of the pressure system above, not a parallel
+mechanic — the backlog's own "national layer... taxes, trends" item, scoped
+as two small pieces built directly on `CuratedWorldPressureFeed`/
+`WorldPressureMechanicMapper`'s existing shape rather than a new
+orchestration system.
+
+**Taxes — a new pressure pair with a genuine mechanical effect.** Two more
+curated kinds, `TAX_RATE_RISES`/`TAX_RATE_EASES`, added to the same
+`ExternalPressureKind` enum and the same matched rise/ease convention —
+picked, timed and resolved by the *exact* unchanged `CuratedWorldPressureFeed`
+daily-roll/duration machinery every other kind already uses (still at most
+one active pressure town-wide; a tax pressure and a fuel-price pressure can
+never both be active at once). What's new is a standing national-context
+value, `WorldState.nationalTaxRate` (`Double`, default `1.0`, bounded to
+`WorldPressureMechanicMapper.NATIONAL_TAX_RATE_MIN`..`NATIONAL_TAX_RATE_MAX`
+= 0.9–1.1 — genuinely small, per the brief, never more than a ±10% swing):
+
+- Every day, regardless of which pressure (if any) is currently active,
+  `WorldPressureMechanicMapper.nudgeNationalTaxRate` walks the rate by
+  `TAX_RATE_STEP_PER_DAY` (0.004) towards a target — `NATIONAL_TAX_RATE_MAX`
+  while `TAX_RATE_RISES` is active, `NATIONAL_TAX_RATE_MIN` while
+  `TAX_RATE_EASES` is active, or back towards the neutral `1.0` the rest of
+  the time (including once the pressure resolves) — so the rate is a slow
+  multi-week drift, not an instant jump, and never stays stuck at an old
+  high/low once the pressure that caused it has passed.
+- **Mechanical hook — one clean line, same principle as fuel prices.**
+  `WorldPressureMechanicMapper.livingCostMultiplier` simply returns
+  `nationalTaxRate` (already bounded), and `EconomySystem.dailySettlement`
+  composes it directly into each detailed adult resident's existing daily
+  living-cost deduction: `LIVING_COST_PER_DAY *
+  WorldPressureMechanicMapper.livingCostMultiplier(state)` — landing on the
+  one place in the codebase that already models a resident's unavoidable
+  daily outgoings, mirroring exactly how the fuel-price pair lands on
+  `EconomySystem`'s existing overhead-expense line. No second settlement
+  path, no touching business `balance`/`priceLevel`/`demand` — a resident's
+  own wealth is the one place this pressure is felt, kept traceable to this
+  single line.
+
+**Trends — a short rolling pressure history.** A new
+`WorldState.pressureHistory: MutableList<PressureHistoryEntry>` (kind,
+`startedAt`, `endsAt` — null while a pressure is still active), capped at
+`CuratedWorldPressureFeed.PRESSURE_HISTORY_LIMIT` (5, oldest dropped first).
+`CuratedWorldPressureFeed.start`/`resolve` append/close an entry alongside
+the existing `externalPressure` start/resolve logic — one entry per pressure,
+covering its full start-to-end span, not a second copy of the live pressure.
+This gives the town a standing sense of "how things have been going
+nationally" (the last few pressures, not just the single current one) for
+later surfacing — deliberately **not** yet wired into the newspaper or any
+town-overview UI this pass; it's modelled and maintained, ready for a UI/
+newspaper pass to read from, matching how `EraSummary`/`FamilyReputation`
+above were also built data-first before any UI surfaced them.
+
+**Deliberately out of scope for this addition:**
+
+- No UI surface anywhere yet — `nationalTaxRate` and `pressureHistory` are
+  both invisible to the player today, exactly like `externalPressure` was
+  before any newspaper/town-sheet work read it.
+- No compounding/multiplicative stacking with the fuel-price overhead
+  multiplier — they're two different mechanical hooks (business overhead vs.
+  resident living cost) that simply can't both be non-1.0 at once anyway,
+  since only one pressure is ever active town-wide.
+- `pressureHistory` is a read-only trend record, not itself an input to any
+  mechanical system — it doesn't (yet) make future pressures more or less
+  likely, cause "tax fatigue," or feed any other consequence chain.
+- Still no LLM-authored prose anywhere in this system — the two new
+  descriptions are small, hand-written, fixed strings, same as every other
+  kind.
 
 ## Offline catch-up
 

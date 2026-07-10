@@ -4,6 +4,7 @@ import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.EventVisibility
 import com.ripple.town.core.model.ExternalPressure
 import com.ripple.town.core.model.ExternalPressureKind
+import com.ripple.town.core.model.PressureHistoryEntry
 import com.ripple.town.core.model.SimTime
 import com.ripple.town.core.model.WorldState
 
@@ -30,9 +31,17 @@ import com.ripple.town.core.model.WorldState
  * input to something like this system, not replace it.
  *
  * This is explicitly **not** the `NarrativeTextProvider`/`DialogueProvider` LLM
- * layer, the richer "national layer" context, or shareable town chronicles —
- * all three remain separate, unattempted Phase 4 items (see `docs/backlog.md`).
- * This is also not a real-world news feed of any kind: every pressure kind is
+ * layer or shareable town chronicles — both remain separate, unattempted Phase
+ * 4 items (see `docs/backlog.md`). The **national layer** ("lightweight
+ * country context — taxes, trends — as pressures") is a small, additive
+ * extension built directly on top of this same feed, added 2026-07-10: a new
+ * `TAX_RATE_RISES`/`TAX_RATE_EASES` curated pressure pair (mapped to
+ * `WorldState.nationalTaxRate`, a bounded 0.9x–1.1x multiplier applied through
+ * `EconomySystem`'s existing daily settlement — see [WorldPressureMechanicMapper]
+ * below), plus a short rolling history of past pressures
+ * (`WorldState.pressureHistory`) so the town has a sense of "how things have
+ * been going nationally," not just the single live pressure slot. This is
+ * still not a real-world news feed of any kind: every pressure kind is
  * entirely fictional/abstract framing, matching the rest of Ripple's fictional
  * town — no real place names, no real companies, no real politics or current
  * events, ever.
@@ -61,12 +70,18 @@ object CuratedWorldPressureFeed {
     /**
      * The curated pressure list. Each entry is entirely fictional/abstract — no real names,
      * companies or current events — and comes in matched rise/ease pairs so a resolving
-     * pressure always has an obvious opposite-flavoured successor possibility later.
+     * pressure always has an obvious opposite-flavoured successor possibility later. Includes
+     * the `TAX_RATE_RISES`/`TAX_RATE_EASES` national-layer pair added 2026-07-10.
      */
     private val CURATED_KINDS = ExternalPressureKind.entries.toList()
 
+    /** Cap on [WorldState.pressureHistory] — enough for a short "how things have been going
+     *  nationally" sense (last few pressures) without growing an unbounded list forever. */
+    const val PRESSURE_HISTORY_LIMIT = 5
+
     fun updateDaily(ctx: TickContext) {
         val state = ctx.state
+        WorldPressureMechanicMapper.nudgeNationalTaxRate(state)
         val active = state.externalPressure
         if (active != null) {
             if (ctx.now >= active.endsAt) resolve(ctx, active)
@@ -93,6 +108,7 @@ object CuratedWorldPressureFeed {
             endsAt = endsAt,
             startEventId = event.id
         )
+        recordHistory(ctx.state, PressureHistoryEntry(kind = kind, startedAt = ctx.now, endsAt = null))
     }
 
     private fun resolve(ctx: TickContext, pressure: ExternalPressure) {
@@ -105,6 +121,22 @@ object CuratedWorldPressureFeed {
             causeIds = listOf(pressure.startEventId)
         )
         ctx.state.externalPressure = null
+        // Close out the matching in-progress history entry (started, not yet ended) rather than
+        // appending a second row for the same pressure — the trend record is one entry per
+        // pressure, start-to-end, not a start row and a separate end row.
+        val idx = ctx.state.pressureHistory.indexOfLast { it.startedAt == pressure.startedAt && it.endsAt == null }
+        if (idx >= 0) {
+            ctx.state.pressureHistory[idx] = ctx.state.pressureHistory[idx].copy(endsAt = ctx.now)
+        }
+    }
+
+    /** Appends to the rolling trend history, trimming from the front once past
+     *  [PRESSURE_HISTORY_LIMIT] — oldest entries drop off first. */
+    private fun recordHistory(state: WorldState, entry: PressureHistoryEntry) {
+        state.pressureHistory.add(entry)
+        while (state.pressureHistory.size > PRESSURE_HISTORY_LIMIT) {
+            state.pressureHistory.removeAt(0)
+        }
     }
 
     private fun startDescription(kind: ExternalPressureKind): String = when (kind) {
@@ -124,6 +156,10 @@ object CuratedWorldPressureFeed {
             "There is talk of economic confidence dipping nationally."
         ExternalPressureKind.CONFIDENCE_RISES ->
             "There is talk of economic confidence rising nationally."
+        ExternalPressureKind.TAX_RATE_RISES ->
+            "Word has reached the town that national taxes are rising."
+        ExternalPressureKind.TAX_RATE_EASES ->
+            "There is talk of national taxes easing back."
     }
 
     private fun resolveDescription(kind: ExternalPressureKind): String = when (kind) {
@@ -135,6 +171,8 @@ object CuratedWorldPressureFeed {
         ExternalPressureKind.TRADE_FLOURISHING -> "The talk of flourishing trade has moved on."
         ExternalPressureKind.CONFIDENCE_DIPS -> "Confidence is said to have steadied again."
         ExternalPressureKind.CONFIDENCE_RISES -> "The talk of rising confidence has moved on."
+        ExternalPressureKind.TAX_RATE_RISES -> "The talk of rising taxes has settled down."
+        ExternalPressureKind.TAX_RATE_EASES -> "The talk of easing taxes has passed."
     }
 }
 
@@ -170,4 +208,44 @@ object WorldPressureMechanicMapper {
         ExternalPressureKind.FUEL_PRICES_EASE -> FUEL_EASE_OVERHEAD_MULTIPLIER
         else -> 1.0
     }
+
+    // --- National layer: tax rate (added 2026-07-10) ---------------------------------------
+
+    /** Genuinely bounded, per the brief — a national tax rate never swings more than ±10%
+     *  from neutral, however long a rise/ease pressure runs. */
+    const val NATIONAL_TAX_RATE_MIN = 0.9
+    const val NATIONAL_TAX_RATE_MAX = 1.1
+
+    /** How far `nationalTaxRate` moves per day while a `TAX_RATE_RISES`/`TAX_RATE_EASES`
+     *  pressure is active — a slow multi-week drift towards the bound, not an instant jump,
+     *  matching the "slow, background rhythm" every other pressure in this feed already uses. */
+    const val TAX_RATE_STEP_PER_DAY = 0.004
+
+    /** Daily nudge of `WorldState.nationalTaxRate`, called once per day from
+     *  `CuratedWorldPressureFeed.updateDaily` regardless of which (if any) pressure kind is
+     *  currently active — a tax pressure walks the rate away from 1.0 towards its bound; any
+     *  other pressure (or no pressure at all) lets it drift back towards 1.0, so the rate
+     *  doesn't stay stuck at an old high/low forever after the pressure that caused it resolves. */
+    fun nudgeNationalTaxRate(state: WorldState) {
+        val target = when (state.externalPressure?.kind) {
+            ExternalPressureKind.TAX_RATE_RISES -> NATIONAL_TAX_RATE_MAX
+            ExternalPressureKind.TAX_RATE_EASES -> NATIONAL_TAX_RATE_MIN
+            else -> 1.0
+        }
+        val rate = state.nationalTaxRate
+        state.nationalTaxRate = when {
+            rate < target -> minOf(target, rate + TAX_RATE_STEP_PER_DAY)
+            rate > target -> maxOf(target, rate - TAX_RATE_STEP_PER_DAY)
+            else -> rate
+        }.coerceIn(NATIONAL_TAX_RATE_MIN, NATIONAL_TAX_RATE_MAX)
+    }
+
+    /** The multiplier `EconomySystem.dailySettlement` composes into each detailed adult
+     *  resident's daily living-cost expense — the "taxes" half of the national-layer addition,
+     *  landing on the one place in the codebase that already models a resident's unavoidable
+     *  daily outgoings (`EconomySystem.LIVING_COST_PER_DAY`), the same "one clean traceable
+     *  hook" principle the fuel-price/overhead mapping above already established. Simply
+     *  `WorldState.nationalTaxRate` itself — already bounded 0.9x-1.1x by [nudgeNationalTaxRate] —
+     *  read here rather than duplicated. */
+    fun livingCostMultiplier(state: WorldState): Double = state.nationalTaxRate
 }

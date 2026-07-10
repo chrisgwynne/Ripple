@@ -81,7 +81,10 @@ object EconomySystem {
             if (!r.inTown || r.detailLevel != com.ripple.town.core.model.DetailLevel.DETAILED) continue
             val stage = r.lifeStageAt(state.time)
             if (stage == com.ripple.town.core.model.LifeStage.CHILD) continue
-            r.wealth -= LIVING_COST_PER_DAY
+            // National-layer tax pressure (Phase 4): a bounded 0.9x-1.1x multiplier on daily
+            // living costs, the one clean hook `WorldPressureMechanicMapper` maps
+            // TAX_RATE_RISES/TAX_RATE_EASES pressures onto — see docs/simulation-rules.md.
+            r.wealth -= LIVING_COST_PER_DAY * WorldPressureMechanicMapper.livingCostMultiplier(state)
             if (r.debt > 0) {
                 r.debt *= 1.0005 // gentle daily interest
                 val repayment = minOf(r.debt, maxOf(0.0, (r.wealth - 100.0) * 0.05))

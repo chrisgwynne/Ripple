@@ -117,6 +117,18 @@ class TownViewModel @Inject constructor(
         viewModelScope.launch { repository.toggleFavourite(residentId) }
     }
 
+    /**
+     * Phase 4 backlog item: shareable town chronicles. Builds the chronicle text off the main
+     * thread and hands it to [onReady] (called on the main dispatcher, since `viewModelScope`
+     * defaults to `Dispatchers.Main.immediate`) — the caller is expected to be a Composable that
+     * turns the string into an `Intent.ACTION_SEND` share sheet; this ViewModel deliberately
+     * stays free of Android UI/Intent concerns, matching how `SettingsSheet.kt` keeps its own
+     * `ActivityResultContracts` launcher entirely in the Composable rather than the ViewModel.
+     */
+    fun requestChronicle(residentId: Long, onReady: (String?) -> Unit) {
+        viewModelScope.launch { onReady(repository.buildChronicle(residentId)) }
+    }
+
     fun jumpToResident(residentId: Long) {
         val r = world.value?.resident(residentId) ?: return
         if (r.visibleOnMap) _jumpTo.value = r.x to r.y

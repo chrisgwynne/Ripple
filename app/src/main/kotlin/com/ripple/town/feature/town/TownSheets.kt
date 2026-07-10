@@ -29,7 +29,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import android.content.Intent
+import androidx.core.app.ShareCompat
 import com.ripple.town.core.model.SimTime
 import com.ripple.town.core.ui.CauseConnector
 import com.ripple.town.core.ui.EmptyNote
@@ -57,6 +60,7 @@ fun ResidentSheetContent(
     var tab by remember { mutableIntStateOf(0) }
     val isFollowed = world.followedResidentId == r.id
     val isFavourite = r.id in world.favouriteIds
+    val context = LocalContext.current
 
     Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -99,6 +103,27 @@ fun ResidentSheetContent(
                     label = { Text("✨ Nudge") }
                 )
             }
+            // Phase 4 backlog item: shareable town chronicles. Builds the text off-thread
+            // (WorldRepository.buildChronicle, via ChronicleBuilder) then launches the
+            // standard Android share sheet — text/plain, ShareCompat.IntentBuilder, the
+            // same well-established pattern the task brief asked for. This is the app's
+            // first ACTION_SEND usage; no FileProvider/manifest changes were needed since
+            // this is a plain text share, not a file attachment.
+            FilterChip(
+                selected = false,
+                onClick = {
+                    viewModel.requestChronicle(r.id) { chronicle ->
+                        if (chronicle.isNullOrBlank()) return@requestChronicle
+                        val intent = ShareCompat.IntentBuilder(context)
+                            .setType("text/plain")
+                            .setSubject("${r.name}'s family chronicle — ${world.townName}")
+                            .setText(chronicle)
+                            .intent
+                        context.startActivity(Intent.createChooser(intent, "Share ${r.firstName}'s chronicle"))
+                    }
+                },
+                label = { Text("📜 Share saga") }
+            )
         }
         if (r.alive && r.inTown && r.activityReason.isNotBlank()) {
             Spacer(Modifier.height(8.dp))

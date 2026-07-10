@@ -86,7 +86,9 @@ class SimulationCoordinator(
         // property market (households buying the home they already live in, cash only),
         // external world pressure (Phase 4: a single curated, abstract national-scale
         // pressure that may start or resolve, mapped through WorldPressureMechanicMapper to a
-        // small nudge on EconomySystem's overhead expenses).
+        // small nudge on EconomySystem's overhead expenses; the national layer adds a slow-
+        // moving national tax rate, nudged daily and mapped to living-cost expense, plus a
+        // rolling history of past pressures for a sense of national "trends").
         if (newDay) {
             HealthSystem.updateDaily(ctx)
             LifecycleSystem.updateDaily(ctx)

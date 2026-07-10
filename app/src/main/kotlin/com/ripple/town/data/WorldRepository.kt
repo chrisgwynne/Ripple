@@ -461,6 +461,51 @@ class WorldRepository @Inject constructor(
     fun statistics(limit: Int = 60): Flow<List<com.ripple.town.core.database.TownStatisticEntity>> =
         db.statisticsDao().latest(limit)
 
+    /**
+     * Phase 4 backlog item: shareable town chronicles. Builds a readable, multi-generation
+     * text narrative for [subjectId] via [ChronicleBuilder] — see that file's header for the
+     * full design rationale (template-based, not LLM prose; reuses `FamilyTreeScreen`'s
+     * generation-traversal shape). Unlike [buildEraSummary] this works for *any* resident,
+     * living or dead, not only the one currently followed at the moment of death, so it needs
+     * its own lightweight per-person "notable events witnessed" lookup here rather than reusing
+     * [detectFollowedDeath]'s single-death-triggered path.
+     *
+     * For each person in the (bounded, 2-generations-each-way) family graph, queries that
+     * person's own lifetime span — birth to death, or birth to "now" if still alive — for
+     * PUBLIC events at/above `ImportanceScorer.HISTORY_THRESHOLD`, the same "notable" bar
+     * [buildEraSummary] already uses, and keeps the top few by importance. Capped to the
+     * current [worldUi] snapshot only — the caller (UI layer) supplies which resident to
+     * chronicle; this never walks beyond what `ChronicleBuilder` itself bounds.
+     */
+    suspend fun buildChronicle(subjectId: Long): String? {
+        val world = _worldUi.value ?: return null
+        val subject = world.resident(subjectId) ?: return null
+
+        val maternalGrandparents = listOfNotNull(world.resident(subject.motherId)?.motherId, world.resident(subject.motherId)?.fatherId)
+        val paternalGrandparents = listOfNotNull(world.resident(subject.fatherId)?.motherId, world.resident(subject.fatherId)?.fatherId)
+        val children = subject.childIds
+        val grandchildren = children.mapNotNull { world.resident(it) }.flatMap { it.childIds }
+        val everyone = (
+            listOf(subject.id) +
+                listOfNotNull(subject.motherId, subject.fatherId) +
+                maternalGrandparents + paternalGrandparents +
+                children + grandchildren
+            ).distinct()
+
+        val witnessedById = everyone.associateWith { id ->
+            val r = world.resident(id) ?: return@associateWith emptyList<String>()
+            val bornAt = r.age.let { world.time - it.toLong() * SimTime.MINUTES_PER_YEAR }
+            val to = r.diedAt ?: world.time
+            val lifetime = db.eventDao().eventsBetween(bornAt, to + 1)
+                .map { it.toDomain() }
+                .filter { it.visibility == com.ripple.town.core.model.EventVisibility.PUBLIC }
+                .filter { it.importance >= ImportanceScorer.HISTORY_THRESHOLD }
+            lifetime.sortedByDescending { it.importance }.take(4).map { it.description }
+        }
+
+        return ChronicleBuilder.build(world, subjectId, witnessedById)
+    }
+
     // ------------------------------------------------------------ internals
 
     private fun WorldEventEntity.toUi(): EventUi = EventUi(
