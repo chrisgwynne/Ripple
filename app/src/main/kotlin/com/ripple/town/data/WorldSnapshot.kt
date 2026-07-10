@@ -7,6 +7,7 @@ import com.ripple.town.core.model.BuildingType
 import com.ripple.town.core.model.DetailLevel
 import com.ripple.town.core.model.LifeStage
 import com.ripple.town.core.model.Mood
+import com.ripple.town.core.model.Personality
 import com.ripple.town.core.model.SimSpeed
 import com.ripple.town.core.model.SimTime
 import com.ripple.town.core.model.SpriteConfig
@@ -122,6 +123,13 @@ data class ResidentUi(
     val safety: Double,
     val financialSecurity: Double,
     val skills: Map<String, Double>,
+    /**
+     * Premium profile redesign (2026-07-10): the Personality tab needs the resident's own
+     * trait values, which — despite already existing on the engine-side [Resident] model —
+     * were never carried onto the UI-facing snapshot before. Exposed as-is (0.0..1.0 per
+     * trait), no new simulation fields invented.
+     */
+    val personality: Personality,
     val activeGoalLabels: List<String>,
     val conditionLabels: List<String>,
     val memories: List<MemoryUi>,
@@ -273,6 +281,7 @@ object SnapshotBuilder {
             safety = r.needs.safety,
             financialSecurity = r.needs.financialSecurity,
             skills = r.skills.entries.associate { (k, v) -> k.label to v },
+            personality = r.personality,
             activeGoalLabels = r.goals
                 .filter { it.status == com.ripple.town.core.model.GoalStatus.ACTIVE }
                 .map { "${it.type.label} — ${it.motivation}" },

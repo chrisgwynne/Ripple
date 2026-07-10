@@ -4,6 +4,115 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-10 — Living Conversation Engine: topics, knowledge, and opportunity (extends existing systems, no rewrite)
+
+The brief asked for conversations that "carry real content" and only surface
+to the player when something meaningful happens — and set an explicit ground
+rule: extend `InteractionSystem`/`RumourSystem`/`Resident`/`GoalSystem`
+incrementally, do not build a parallel engine. Read all five named files in
+full before writing anything. Verdict: most of the target philosophy already
+existed (bounded sampling, real relationship dimensions, kind transitions at
+thresholds, a leak-based rumour propagation system with accuracy/distortion,
+importance-gated notifications) — it just had no topic/knowledge content on
+top. This session added that content, not a new engine.
+
+**What already existed (verified, not rebuilt):**
+- `InteractionSystem`'s bounded (8/tick) co-located sociable-residents
+  sampler, 8-dimension relationship updates, pleasant-exchange/kindness/
+  argument branches, `RelationshipKind` transitions at real thresholds,
+  and the full romance arc (dating → engagement → marriage, affairs,
+  separation, divorce, reconciliation) — all present and correct.
+- `RumourSystem`'s private→public leak mechanism: gossip-worthy `PRIVATE`
+  events leak via high-familiarity exposure, ~55 % accurate (real cause
+  link), the rest distorted (no cause link, so the cause viewer never shows
+  a false lineage). Already almost exactly the "information propagation"
+  system the brief asked for.
+- `Resident.ideaSeeds` + `GoalSystem.generateFromCircumstance`'s
+  `START_BUSINESS` condition already form a working "an idea leads to an
+  opportunity" pipeline, fed today by `LifecycleSystem.passDownHeirloom`
+  (inherited heirlooms) and `WorldGenerator`'s bootstrap seed.
+- Notification/newspaper gating already does the right thing: confirmed by
+  reading `ImportanceScorer`, `FollowedResidentNotifier`, and
+  `NewspaperGenerator` together — `InteractionSystem`'s pleasant-exchange
+  branch (the bulk of what runs every tick) emits **no event at all**; the
+  only event it emits is `MEETING` on a genuine first meeting, and that
+  scores ~5 importance against a 30-point History/notification threshold.
+  Real consequences (`FRIENDSHIP_FORMED`, `RIVALRY_FORMED`, `ARGUMENT`,
+  `RUMOUR_SPREAD`) already have their own distinct, appropriately-scored
+  `EventType`s. This was the brief's own suspected bug ("check if
+  InteractionSystem emits a generic event for every interaction") — it
+  doesn't; nothing needed fixing here.
+
+**Genuine gap found and fixed — RumourSystem had no per-resident knowledge
+state at all.** `RumourSystem.leak` computed a leak's `targetResidentIds` by
+copying the originating event's own targets, and there was no way to ask
+"does this resident already know?" anywhere in the codebase — so nothing
+stopped a rumour from theoretically "informing" someone who was already
+directly involved in the original event. Fixed with the smallest addition
+that closes it: `Resident.knownFacts` (`MutableList<Long>` of event ids,
+capped at 60 like the memories list) plus `Resident.knows(id)`/`learn(id)`.
+`RumourSystem.markInvolvedAsKnowing` now runs every tick over every new
+event (not just gossip-worthy ones) so source/target residents know their
+own events automatically; `leakRecipients` computes the real bystanders
+(high-familiarity edges to those involved, not already involved, not
+already knowing) and the leak is skipped outright if that set is empty —
+there being nobody left to tell is now a real, checked condition, not an
+unmodelled possibility. Deliberately just event ids rather than a richer
+`KnownFact` type — see `docs/simulation-rules.md`'s "Knowledge gating"
+subsection for the full reasoning.
+
+**Built — conversation topics.** `ConversationTopic` (9 values — WEATHER,
+WORK, FAMILY, GOSSIP, LOCAL_NEWS, HEALTH, HOBBIES, MONEY, RELATIONSHIP,
+deliberately short of the brief's own 40-item taxonomy) and
+`InteractionSystem.topicFor`, picked from the pair's actual shared context
+(charged relationships talk about themselves; ~5 building types bias the
+topic — pub → gossip, café → local news, school → family, clinic → health,
+town hall → local news; shared occupation → work talk; family → family talk;
+personality otherwise picks a flavour). Surfaces purely through the existing
+`activityReason` "Why this?" panel — no new event, no new persisted state on
+`Relationship`.
+
+**Built — secrets can now leak, not just be discovered.**
+`EventVisibility.HIDDEN` events were already this codebase's "secret" model
+(confirmed by reading the enum's own doc comment and `AFFAIR_BEGAN`'s usage)
+— but `RumourSystem` only ever scanned `PRIVATE` events, so a `HIDDEN` fact's
+only path to the open was direct discovery. Extended `RumourSystem` with a
+small curated `HIDDEN_GOSSIP_WORTHY` set (`AFFAIR_BEGAN` only) leaked at 15 %
+of the normal chance, so gossip becomes a second, rare route to the open
+alongside — not replacing — the existing discovery mechanic.
+
+**Built — conversation → opportunity hook.** The pleasant-exchange branch,
+when warm (`rel.warmth() > 40`) and on-topic (WORK/MONEY/GOSSIP), has a
+bounded 4 % chance to add an `ideaSeeds` entry (`job_tip:`/`business_tip:`/
+`encouragement:` prefixed, capped at 3 per resident) on the less socially
+forward party, plus a low-intensity `INSPIRATION` memory — reusing
+`GoalSystem.generateFromCircumstance`'s existing `ideaSeeds`-gated
+`START_BUSINESS` condition verbatim. No new goal type, no new consumption
+path.
+
+**Explicitly deferred (per the brief's own admission this is a huge space,
+matching the "extend, don't rewrite" ground rule):**
+- Per-resident "gossip personality" traits beyond `Personality`'s existing
+  kindness/sociability/honesty/empathy/impulsiveness — mapped onto those
+  directly (e.g. the opportunity-hook "sharer" is whoever scores higher on
+  sociability+kindness) rather than inventing gossipLikelihood/discretion/
+  influence fields.
+- A full location→topic taxonomy beyond the ~5 building-type biases shipped
+  (pub, café, school, clinic, town hall) — the rest fall through to
+  occupation/relationship/personality defaults, which is enough texture for
+  the game's actual building roster.
+- Conversation "goals" as a separate tracked mechanic — the existing
+  interaction-outcome branches (pleasant exchange, kindness, argument,
+  spark) already *are* the goals of a conversation, just not reified as a
+  distinct data structure, which the brief itself notes is optional.
+- Multi-hop "conversation chains" as an explicit tracked structure — already
+  implicit via `causeIds` whenever a rumour/goal/relationship-change
+  references its origin event; a new structure would duplicate that.
+
+Full mechanism writeup (thresholds, formulas, gating) lives in
+`docs/simulation-rules.md` under "Relationships" (conversation topics +
+idea-seed opportunities) and "Rumours" (knowledge gating + HIDDEN leaks).
+
 ### 2026-07-10 — Severity-graded incident system (shoplifting, burglary, mugging, domestic disturbance, missing person, vandalism, and more)
 
 Extended `CrimeSystem`'s existing motive-weighted-suspect + constable pattern

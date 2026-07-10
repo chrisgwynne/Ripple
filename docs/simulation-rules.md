@@ -105,6 +105,35 @@ Interactions are sampled from co-located sociable residents, max 8 per tick:
   reconciliation all follow value thresholds plus daily probability.
 - Absence > 7 days decays affection −0.15/day; shared history barely fades.
 
+### Conversation topics & idea-seed opportunities (added 2026-07-10)
+
+`InteractionSystem`'s pleasant-exchange branch now picks a
+`ConversationTopic` (`topicFor`) — one of WEATHER, WORK, FAMILY, GOSSIP,
+LOCAL_NEWS, HEALTH, HOBBIES, MONEY, RELATIONSHIP — from the pair's actual
+shared context: a charged relationship (resentment > 45 or attraction > 40)
+talks about itself; a handful of building types bias the topic (pub →
+gossip, café → local news, school → family, clinic → health, town hall →
+local news); shared occupation defaults to shop talk; family relationships
+default to family talk; otherwise personality (curiosity → gossip,
+sociability → hobbies, low financial security → money) picks a flavour, with
+a plain small-talk fallback. This is deliberately **flavour only**: the topic
+sets `activityReason` (the existing "Why this?" panel text — see
+`TownSheets.kt`) on both residents and nothing else — no new event, no new
+persisted state on `Relationship`.
+
+On top of that, a sufficiently warm (`rel.warmth() > 40`) exchange about
+WORK, MONEY, or GOSSIP has a small (4 %) chance to seed an idea on the less
+socially/kind-forward party, via the *exact same* `ideaSeeds` mechanism
+`LifecycleSystem.passDownHeirloom` (inherited heirlooms) and the
+`WorldGenerator` bootstrap (Ash Thistle's `furniture_workshop` seed) already
+feed into `GoalSystem.generateFromCircumstance`'s `START_BUSINESS`
+condition — a job tip (`job_tip:<name>`), a business tip
+(`business_tip:<name>`), or plain encouragement (`encouragement:<name>`),
+plus a low-intensity `INSPIRATION` memory. Bounded to 3 idea seeds per
+resident and gated on the receiver being an adult, so this cannot spam
+goals — it's a rare nudge on top of goal generation's own existing gates
+(ambition, skill, a vacant building), not a parallel goal-formation path.
+
 ## Affairs & jealousy
 
 A committed resident can still feel a rare spark outside their partnership —
@@ -141,6 +170,57 @@ distorted (a wrong resident dragged in, the story downplayed or inflated) and
 carry **no** cause link at all — the cause viewer, reading only known history,
 never shows a false lineage for something that didn't really happen that way.
 Bounded to 2 leaks per tick.
+
+### Knowledge gating (fixed 2026-07-10)
+
+Before this date, `RumourSystem` had no notion of what a specific resident
+already knew: a leak's `targetResidentIds` was just copied from the
+originating private event, and there was no per-resident state to check
+against at all — so nothing actually stopped the *same* rumour from
+theoretically "informing" someone who was already directly involved in the
+original event (the paper trail existed, but nobody's personal awareness
+did). This was a genuine gap, confirmed by reading `RumourSystem.leak` and
+`Resident.kt` in full before making any change — not something already
+solved elsewhere in the codebase.
+
+Fixed with a minimal addition: `Resident.knownFacts` (`MutableList<Long>` of
+event ids, capped at 60 like the memories list) plus `Resident.knows(id)` /
+`Resident.learn(id)`. Deliberately just event ids rather than a richer
+`KnownFact` data class — the `WorldEvent` already carries description,
+accuracy (via its rumour payload), and cause-chain, so a resident's own
+knowledge state only ever needs to answer "have they heard this one yet?".
+Every tick, before leaking anything, `RumourSystem.markInvolvedAsKnowing`
+records that a new event's source/target residents now know it — this is
+automatic and doesn't wait for a leak (you don't need gossip to know about
+your own argument). `leakRecipients` then computes the real bystanders (high-
+familiarity edges to those involved, not already involved, and not already
+knowing) who could plausibly hear it; if that set is empty — everyone who
+could have heard it already knows — the leak is skipped entirely rather than
+rolling a chance that goes nowhere. When a leak does happen, the recipients
+who actually heard it are marked as knowing the new `RUMOUR_SPREAD` event
+(not the original — a bystander who got the distorted version now "knows"
+the distorted story, which is the correct behaviour).
+
+### Secrets: HIDDEN events can now leak too (added 2026-07-10)
+
+`EventVisibility.HIDDEN` events were already this codebase's model of a
+secret (affairs begin `HIDDEN` via `AFFAIR_BEGAN`; see "Affairs & jealousy"
+above). Previously `RumourSystem` only ever scanned `PRIVATE` events for
+gossip-worthiness, so a `HIDDEN` fact had exactly one path to becoming known:
+`InteractionSystem.progressAffair`'s own direct discovery roll. That's a
+real, if narrow, gap in the "secrets get out" story the brief asks for — an
+affair could never be *gossiped about* into the open, only caught directly.
+
+Extended `RumourSystem` with a small, curated `HIDDEN_GOSSIP_WORTHY` set
+(currently just `AFFAIR_BEGAN` — deliberately not every `HIDDEN` event; a
+hidden health condition the resident hasn't even self-diagnosed yet has no
+one to gossip with about it) and a `HIDDEN_LEAK_CHANCE_FACTOR` of 0.15 that
+scales `shouldLeak`'s usual chance down heavily, so a fresh affair doesn't
+routinely gossip itself into the open before the existing discovery mechanic
+(which scales with the affair's own shared history and the deceived
+partner's vigilance) gets a chance to fire first. A gossiped-out affair still
+goes through the same accurate/distorted 55/45 split and the same
+`leakRecipients` knowledge gate as any other rumour.
 
 ## Building lifecycle
 
@@ -980,6 +1060,28 @@ Importance = type base × (0.6 + 0.8×severity) × reach factor, and **+4 per
 later event that cites it as a cause**. Events ≥ 30 importance appear in the
 History timeline. Cause chains are read straight from the log — only known
 history, never futures.
+
+**Confirmed (2026-07-10), not a gap:** routine social contact never
+over-notifies. `InteractionSystem`'s pleasant-exchange branch — which is the
+bulk of what `InteractionSystem.update` actually runs, capped at 8 pairs/tick
+— emits **no event at all** for an ordinary chat; the only event it ever
+emits is `MEETING`, and only on a pair's genuine first meeting
+(`firstMeeting`, `familiarity < 5`), at `severity = 0.1`. `ImportanceScorer`
+scores `MEETING` at base 8.0 (there's no explicit case for it, so it falls to
+the `else -> 8.0` default), which at severity 0.1 computes to roughly 5 —
+nowhere near the 30-point History threshold or `FollowedResidentNotifier`'s
+`ImportanceScorer.HISTORY_THRESHOLD` floor, so it never reaches the History
+timeline or a push notification. Real consequences — a friendship forming
+(`FRIENDSHIP_FORMED`), a rivalry forming (`RIVALRY_FORMED`), an argument
+(`ARGUMENT`), a rumour spreading (`RUMOUR_SPREAD`) — already have their own
+distinct `EventType`s with their own, higher severities, and were confirmed
+to already exist rather than needing to be added. The 2026-07-10 topic/
+idea-seed additions above (see "Relationships") keep this property: topic
+flavour only ever writes `activityReason` text, never emits an event, and the
+idea-seed opportunity hook reuses the existing `ideaSeeds` list with no event
+of its own — `GoalSystem.seedGoal`, which *does* emit `GOAL_FORMED`, is what
+actually surfaces an opportunity once (if ever) the receiving resident's own
+circumstance turns the seed into a real goal.
 
 ## Consequence rules & delayed effects
 

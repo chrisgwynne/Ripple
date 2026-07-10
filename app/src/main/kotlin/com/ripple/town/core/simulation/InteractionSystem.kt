@@ -1,6 +1,7 @@
 package com.ripple.town.core.simulation
 
 import com.ripple.town.core.model.Activity
+import com.ripple.town.core.model.BuildingType
 import com.ripple.town.core.model.DetailLevel
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.EventVisibility
@@ -14,6 +15,25 @@ import com.ripple.town.core.model.SimTime
 import com.ripple.town.core.model.SkillType
 
 /**
+ * What two residents' chat is actually about — flavour on top of the existing
+ * interaction resolution, not a parallel mechanic. Deliberately a small, fixed
+ * set rather than an exhaustive taxonomy: enough to make [InteractionSystem]'s
+ * generated `activityReason` text feel grounded in *this* pair, *this*
+ * building, without tracking topics as real persisted state anywhere.
+ */
+enum class ConversationTopic(val label: String) {
+    WEATHER("the weather"),
+    WORK("work"),
+    FAMILY("family"),
+    GOSSIP("the goings-on around town"),
+    LOCAL_NEWS("the latest news"),
+    HEALTH("health"),
+    HOBBIES("what they've been up to"),
+    MONEY("making ends meet"),
+    RELATIONSHIP("each other")
+}
+
+/**
  * Resolves social contact between residents who share a location, and the
  * slower romantic arcs (dating, engagement, marriage, separation, divorce).
  *
@@ -25,6 +45,61 @@ object InteractionSystem {
 
     /** Bounded trust swing a family's reputation can lend (or cost) a first meeting. */
     private const val FIRST_MEETING_TRUST_SWING = 3.0
+
+    /**
+     * Picks a plausible conversation topic from the pair's shared context: who they are
+     * (occupation, personality), where they are (building type biases the topic the way a
+     * pub biases toward gossip and a school biases toward family talk), and how they feel
+     * about each other (rivals are more likely to be talking about each other, tensely).
+     * Deliberately building on the same occupation-string matching
+     * [com.ripple.town.core.ui.SpriteProvider] already does for sprite accessory cues,
+     * rather than introducing a second occupation taxonomy.
+     */
+    fun topicFor(ctx: TickContext, a: Resident, b: Resident, buildingId: Long?): ConversationTopic {
+        val building = buildingId?.let { ctx.state.building(it) }
+        val rel = ctx.state.relationship(a.id, b.id)
+
+        // A charged relationship: the conversation is often about the relationship itself.
+        if (rel != null && (rel.resentment > 45.0 || rel.attraction > 40.0)) return ConversationTopic.RELATIONSHIP
+
+        // Location bias: a handful of building types nudge the topic the way people
+        // actually talk differently in a pub than a school gate.
+        val locationTopic = when (building?.type) {
+            BuildingType.PUB -> if (ctx.rng.nextBoolean(0.5)) ConversationTopic.GOSSIP else null
+            BuildingType.CAFE -> if (ctx.rng.nextBoolean(0.35)) ConversationTopic.LOCAL_NEWS else null
+            BuildingType.SCHOOL -> if (ctx.rng.nextBoolean(0.5)) ConversationTopic.FAMILY else null
+            BuildingType.CLINIC -> if (ctx.rng.nextBoolean(0.5)) ConversationTopic.HEALTH else null
+            BuildingType.TOWN_HALL -> if (ctx.rng.nextBoolean(0.4)) ConversationTopic.LOCAL_NEWS else null
+            else -> null
+        }
+        if (locationTopic != null) return locationTopic
+
+        // Shared occupation: workmates default to talking shop.
+        if (a.occupation != "Unemployed" && a.occupation == b.occupation && ctx.rng.nextBoolean(0.5)) {
+            return ConversationTopic.WORK
+        }
+
+        // Family relationship: talk skews to family matters.
+        if (isFamily(rel?.kind ?: RelationshipKind.STRANGER) && ctx.rng.nextBoolean(0.5)) {
+            return ConversationTopic.FAMILY
+        }
+
+        // Personality-flavoured defaults: curious/sociable people gossip more, ambitious
+        // or financially strained people talk money, the rest fall back to small talk.
+        return when {
+            (a.needs.financialSecurity < 35.0 || b.needs.financialSecurity < 35.0) && ctx.rng.nextBoolean(0.3) ->
+                ConversationTopic.MONEY
+            (a.personality.curiosity + b.personality.curiosity) / 2.0 > 0.6 && ctx.rng.nextBoolean(0.35) ->
+                ConversationTopic.GOSSIP
+            (a.personality.sociability + b.personality.sociability) / 2.0 > 0.6 && ctx.rng.nextBoolean(0.3) ->
+                ConversationTopic.HOBBIES
+            else -> ctx.rng.pick(FALLBACK_TOPICS)
+        }
+    }
+
+    private val FALLBACK_TOPICS = listOf(
+        ConversationTopic.WEATHER, ConversationTopic.LOCAL_NEWS, ConversationTopic.HOBBIES
+    )
 
     fun update(ctx: TickContext) {
         var budget = MAX_INTERACTIONS_PER_TICK
@@ -102,6 +177,26 @@ object InteractionSystem {
                 }
                 // Spark? Only for single adults with mutual availability.
                 maybeSpark(ctx, a, b, rel)
+
+                // Topic flavour: what this exchange was actually about, surfaced purely
+                // through the existing "Why this?" activityReason panel — no new event,
+                // no new persisted state, just grounding the interaction in this pair and
+                // this place. Does not run on an argument (argue() sets its own reason).
+                val topic = topicFor(ctx, a, b, buildingId)
+                val reason = "Caught up with ${b.firstName} over ${topic.label}."
+                a.activityReason = reason
+                b.activityReason = "Caught up with ${a.firstName} over ${topic.label}."
+
+                // Conversation -> opportunity: a sufficiently warm, trusting exchange has a
+                // small, bounded chance to seed an idea — reusing the exact ideaSeeds ->
+                // GoalSystem plumbing LifecycleSystem.passDownHeirloom and the WorldGenerator
+                // bootstrap already use, not a parallel mechanic. Gated on warmth (this has to
+                // be a good conversation) and the sharer's own personality (kind/sociable
+                // people are the ones who pass on tips), and only when GOSSIP/WORK/MONEY was
+                // actually the topic — a chat about the weather doesn't yield a business idea.
+                if (topic in OPPORTUNITY_TOPICS && rel.warmth() > 40.0 && ctx.rng.nextBoolean(OPPORTUNITY_CHANCE)) {
+                    maybeSeedOpportunity(ctx, a, b, topic)
+                }
             }
         }
 
@@ -128,6 +223,45 @@ object InteractionSystem {
         val warmth = (pa.kindness + pb.kindness + pa.empathy + pb.empathy) / 4.0
         return (closeness * 0.5 + warmth * 0.5).coerceIn(0.0, 1.0)
     }
+
+    /** Topics under which a conversation could plausibly turn into a tip, a lead, or
+     *  encouragement worth acting on — not every topic makes sense as an "opportunity". */
+    private val OPPORTUNITY_TOPICS = setOf(ConversationTopic.WORK, ConversationTopic.MONEY, ConversationTopic.GOSSIP)
+
+    /** Bounded and rare: this is meant to occasionally seed a goal, not routinely mint one
+     *  every warm chat — GoalSystem's own idea-seed gating (ambition, skill, a vacant
+     *  building) does the rest of the filtering on the receiving end. */
+    private const val OPPORTUNITY_CHANCE = 0.04
+
+    /**
+     * A sufficiently warm, on-topic exchange occasionally hands one party something to act
+     * on — a job lead, a business tip, plain encouragement — via the exact `ideaSeeds`
+     * mechanism [LifecycleSystem.passDownHeirloom] and the [GoalSystem.START_BUSINESS]
+     * condition already consume. No new plumbing: this just gives conversation a second way
+     * (alongside inheritance and Inspire interventions) to plant the same seed.
+     */
+    private fun maybeSeedOpportunity(ctx: TickContext, a: Resident, b: Resident, topic: ConversationTopic) {
+        // The more sociable/kind party is the one doing the tipping-off; the other receives it.
+        val sharer = if (a.personality.sociability + a.personality.kindness >=
+            b.personality.sociability + b.personality.kindness) a else b
+        val receiver = if (sharer === a) b else a
+        if (receiver.lifeStageAt(ctx.now) != LifeStage.ADULT) return
+        if (receiver.ideaSeeds.size >= MAX_IDEA_SEEDS) return
+
+        val seed = when (topic) {
+            ConversationTopic.WORK -> "job_tip:${sharer.firstName}"
+            ConversationTopic.MONEY -> "business_tip:${sharer.firstName}"
+            else -> "encouragement:${sharer.firstName}"
+        }
+        receiver.ideaSeeds += seed
+        ctx.addMemory(
+            receiver, MemoryType.INSPIRATION,
+            "${sharer.firstName} mentioned something worth thinking about, over ${topic.label}.",
+            intensity = 30.0, associated = listOf(sharer.id)
+        )
+    }
+
+    private const val MAX_IDEA_SEEDS = 3
 
     private fun tension(a: Resident, b: Resident, rel: Relationship): Double {
         val stress = (a.needs.stress + b.needs.stress) / 200.0

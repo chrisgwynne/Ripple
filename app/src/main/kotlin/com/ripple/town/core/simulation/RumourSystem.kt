@@ -15,6 +15,14 @@ import com.ripple.town.core.model.WorldEvent
  * only known history) never shows a false lineage for something that never
  * really happened that way.
  *
+ * Knowledge-gated (2026-07-10): a resident directly involved in an event
+ * (source/target) already knows it the moment it happens — [markInvolvedAsKnowing]
+ * records that on [Resident.knownFacts]. A leak only actually "tells" the
+ * bystanders who don't already know; if everyone with a high-familiarity edge to
+ * those involved already knows, there is nobody left to surprise and the leak is
+ * skipped. This is what stops the same rumour from theoretically "breaking the
+ * news" a second time to someone who was there for the original event.
+ *
  * Bounded: at most [MAX_RUMOURS_PER_TICK] leaks per tick.
  */
 object RumourSystem {
@@ -29,19 +37,67 @@ object RumourSystem {
         EventType.JOB_QUIT, EventType.FRIENDSHIP_ENDED
     )
 
+    /**
+     * HIDDEN events that are genuinely "secrets getting out" candidates. Deliberately a
+     * short, curated list (not every HIDDEN event — e.g. a hidden health condition a
+     * resident hasn't even self-diagnosed yet has no gossip channel) and leaked at a much
+     * lower rate than PRIVATE events via [HIDDEN_LEAK_CHANCE_FACTOR], since these are
+     * meant to stay secret far longer than an argument stays quiet.
+     */
+    private val HIDDEN_GOSSIP_WORTHY = setOf(EventType.AFFAIR_BEGAN)
+
+    /** HIDDEN secrets leak far more rarely than PRIVATE gossip — this scales [shouldLeak]'s
+     *  usual chance down heavily so an affair beginning doesn't routinely out itself before
+     *  [InteractionSystem.progressAffair]'s own discovery mechanic ever gets a say. */
+    private const val HIDDEN_LEAK_CHANCE_FACTOR = 0.15
+
     fun update(ctx: TickContext) {
+        // Anyone directly involved in a new event already knows it happened — this has to
+        // run for *every* new event (not just gossip-worthy ones), since it's what lets the
+        // leak-eligibility check below tell "already knew" apart from "just heard".
+        for (event in ctx.newEvents) {
+            markInvolvedAsKnowing(ctx, event)
+        }
+
         var budget = MAX_RUMOURS_PER_TICK
         // ctx.newEvents grows as this loop runs (leaks append to it); snapshot first
         // so a leak is never itself scanned as a leak candidate in the same pass.
         val candidates = ctx.newEvents
-            .filter { it.visibility == EventVisibility.PRIVATE && it.type in GOSSIP_WORTHY }
+            .filter {
+                (it.visibility == EventVisibility.PRIVATE && it.type in GOSSIP_WORTHY) ||
+                    (it.visibility == EventVisibility.HIDDEN && it.type in HIDDEN_GOSSIP_WORTHY)
+            }
             .sortedBy { it.id }
         for (event in candidates) {
             if (budget <= 0) break
+            val recipients = leakRecipients(ctx, event)
+            if (recipients.isEmpty()) continue
             if (!shouldLeak(ctx, event)) continue
-            leak(ctx, event)
+            leak(ctx, event, recipients)
             budget--
         }
+    }
+
+    private fun markInvolvedAsKnowing(ctx: TickContext, event: WorldEvent) {
+        for (id in event.involvedResidentIds()) {
+            ctx.state.resident(id)?.learn(event.id)
+        }
+    }
+
+    /**
+     * Bystanders who could plausibly hear this from a high-familiarity edge to someone
+     * involved, and who don't already know. An empty result means either nobody's close
+     * enough to have heard it, or everyone who could have heard it already knows — either
+     * way, there's no news left to spread.
+     */
+    private fun leakRecipients(ctx: TickContext, event: WorldEvent): List<Resident> {
+        val involved = event.involvedResidentIds()
+        return involved
+            .flatMap { id -> ctx.state.relationshipsOf(id).filter { it.familiarity > 60.0 } }
+            .map { rel -> if (rel.aId in involved) rel.bId else rel.aId }
+            .distinct()
+            .mapNotNull { ctx.state.resident(it) }
+            .filter { it.inTown && it.id !in involved && !it.knows(event.id) }
     }
 
     private fun shouldLeak(ctx: TickContext, event: WorldEvent): Boolean {
@@ -50,11 +106,12 @@ object RumourSystem {
         val exposure = event.involvedResidentIds()
             .sumOf { id -> ctx.state.relationshipsOf(id).count { it.familiarity > 60.0 } }
             .coerceAtMost(6)
-        val chance = (event.severity * 0.12 + exposure * 0.02).coerceIn(0.0, 0.3)
+        var chance = (event.severity * 0.12 + exposure * 0.02).coerceIn(0.0, 0.3)
+        if (event.visibility == EventVisibility.HIDDEN) chance *= HIDDEN_LEAK_CHANCE_FACTOR
         return ctx.rng.nextBoolean(chance)
     }
 
-    private fun leak(ctx: TickContext, event: WorldEvent) {
+    private fun leak(ctx: TickContext, event: WorldEvent, recipients: List<Resident>) {
         val state = ctx.state
         val accurate = ctx.rng.nextBoolean(0.55)
         val subject = event.sourceResidentId?.let { state.resident(it) }
@@ -63,7 +120,7 @@ object RumourSystem {
         } else {
             distortedDescription(ctx, event, subject)
         }
-        ctx.emit(
+        val rumourEvent = ctx.emit(
             EventType.RUMOUR_SPREAD,
             description,
             sourceResidentId = event.sourceResidentId,
@@ -74,6 +131,9 @@ object RumourSystem {
             payload = mapOf("accurate" to accurate.toString(), "sourceEventId" to event.id.toString()),
             causeIds = if (accurate) listOf(event.id) else emptyList()
         )
+        // The bystanders who actually heard it now know it too — accurate or distorted,
+        // they're no longer in the dark, so they won't be "told" this one again.
+        for (r in recipients) r.learn(rumourEvent.id)
     }
 
     private fun distortedDescription(ctx: TickContext, event: WorldEvent, subject: Resident?): String {

@@ -187,7 +187,15 @@ data class Resident(
     // Transient idea seeds planted by Inspire interventions or memories; consumed by goal generation.
     val ideaSeeds: MutableList<String> = mutableListOf(),
     // Awareness flags planted by Warn interventions; read by the decision system.
-    val awareness: MutableList<String> = mutableListOf()
+    val awareness: MutableList<String> = mutableListOf(),
+    // Ids of WorldEvents this resident is personally aware of — either because they were
+    // involved (source/target, set automatically) or because a rumour reached them
+    // (RumourSystem). Deliberately just event ids, not a richer "KnownFact" type: the
+    // event itself already carries description/accuracy/cause-chain, so a resident's
+    // knowledge state only needs to answer "have they heard this one yet?" — which is all
+    // RumourSystem's leak-eligibility check and any future dialogue/reaction logic need.
+    // Bounded like memories so it can't grow without limit over a long-running world.
+    val knownFacts: MutableList<Long> = mutableListOf()
 ) {
     val fullName: String get() = "$firstName $surname"
 
@@ -212,4 +220,18 @@ data class Resident(
     fun locationBuildingId(): Long? = currentBuildingId ?: travelToBuildingId
 
     val inTown: Boolean get() = alive && leftTownAt == null
+
+    fun knows(eventId: Long): Boolean = eventId in knownFacts
+
+    /** Records that this resident has learned of [eventId], bounded so a long-running world's
+     *  list can't grow forever (mirrors the memories list's own cap in [com.ripple.town.core.simulation.TickContext.addMemory]). */
+    fun learn(eventId: Long) {
+        if (eventId in knownFacts) return
+        knownFacts += eventId
+        if (knownFacts.size > MAX_KNOWN_FACTS) knownFacts.removeAt(0)
+    }
+
+    companion object {
+        private const val MAX_KNOWN_FACTS = 60
+    }
 }
