@@ -113,6 +113,69 @@ Full mechanism writeup (thresholds, formulas, gating) lives in
 `docs/simulation-rules.md` under "Relationships" (conversation topics +
 idea-seed opportunities) and "Rumours" (knowledge gating + HIDDEN leaks).
 
+### 2026-07-10 — Resident profile screen: hero header + tabs, then compacted to an accordion layout
+
+Built `ResidentProfileScreen.kt` (`ResidentSheetContent`) this session to
+replace the old flat tab strip on the resident sheet: a hero header (avatar,
+name, status line, Follow/Favourite/Nudge/Share actions, a "why this?" panel,
+a home/workplace/status/means summary card) plus six `ScrollableTabRow` tabs
+— Overview, Relationships, Timeline, Memories, Personality, Stats. Every
+value shown is read from `ResidentUi`/`WorldRepository.eventsForResident`;
+nothing new was tracked. Two additions needed to expose data the UI-facing
+snapshot didn't carry yet: `ResidentUi.personality` (the engine-side
+`Resident.personality` wasn't previously projected onto the snapshot) for
+the new Personality tab, and there is no historical needs time-series
+anywhere in the codebase, so the requested sparkline trend charts were
+explicitly skipped rather than faked — Stats shows current values only.
+
+**Same-session follow-up pass — compacted the tab layout into a scannable
+mobile profile** (the tab-strip version read as a long scrolling page, not
+a compact premium profile):
+- **Header compressed**: avatar 64dp → 48dp, tighter spacing, and the loose
+  `FilterChip` action row replaced with four equal-width `CompactActionButton`
+  cards (Follow/Favourite/Nudge/Share) in one row.
+- **New "living summary" card** above the accordion: current activity +
+  mood, the "why this?" reason, the existing `TemplateDialogueProvider`
+  quote line, the top entry of `activeGoalLabels` (reused as the "what
+  they're working towards" line — `ResidentUi`/`Resident` have no distinct
+  "next planned activity" concept, so nothing was invented for it), and a
+  new `financialSituationPhrase()` display-only helper that buckets the
+  existing `financialSecurity`/`debt` values into a short phrase
+  ("financially comfortable" / "managing, but money is tight" / "bills are
+  becoming difficult" / "in real financial trouble").
+- **Tab row replaced with a single-open accordion** of `ExpandableCard`s
+  (`Modifier.animateContentSize()` + a chevron toggle, `ProfileCard` enum
+  tracks which one is open): Summary, Relationships, Needs, Skills (only
+  shown when non-empty), Household (only shown when non-empty), Story,
+  Timeline, Personality. Summary is open by default. Each card's body is
+  the same composable logic the old tabs used (`RelationshipsTab`,
+  `MemoriesTab`, `TimelineTab`, `PersonalityTab` bodies carried over
+  verbatim) — this pass changed the navigation/container, not the
+  underlying data logic.
+- **Needs card is readable-first**: a new `needPhrases()` helper turns the
+  existing hunger/energy/health/safety/social/comfort/purposeNeed/stress/
+  financialSecurity values into short phrases only for needs below/above
+  threshold (e.g. hunger < 30 → "Hungry — needs food soon", stress > 70 →
+  "Under a lot of stress"), with a "Show numbers" toggle that reveals the
+  original `StatBar` bars underneath — no numeric data was removed, just
+  reordered behind one tap.
+- **Timeline card** now renders each event as `"HH:MM — description"` using
+  the event's own `timeLabel`/`description` fields (same `NewspaperGenerator`-
+  produced text as before), one line per event instead of a two-line block.
+- **Memories tab relabelled "Story"** — label-only change; the
+  importance-sorted memory list and sort order are untouched.
+- **Dead-space pass**: outer horizontal padding 20dp → 16dp, several fixed
+  spacers reduced (10dp → 8dp, 8dp → 6dp), `SectionTitle`'s built-in 14dp
+  top padding no longer sits inside every card body since headings were
+  consolidated, and per-need/per-memory row vertical padding tightened
+  (6dp → 4dp) now that phrases replace bars as the default view.
+
+Not verified on a device or emulator — this environment has none available,
+so the layout, `animateContentSize()` behaviour, and the accordion's single-
+open toggle logic were checked by compilation and careful reading only, not
+by seeing it render. Should be visually QA'd on a real screen before
+shipping, same caveat as the original tab-strip build.
+
 ### 2026-07-10 — Severity-graded incident system (shoplifting, burglary, mugging, domestic disturbance, missing person, vandalism, and more)
 
 Extended `CrimeSystem`'s existing motive-weighted-suspect + constable pattern

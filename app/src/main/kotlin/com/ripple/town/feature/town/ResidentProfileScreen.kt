@@ -4,7 +4,6 @@ import android.content.Intent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,32 +12,29 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.unit.dp
@@ -57,13 +53,15 @@ import com.ripple.town.data.WorldUi
 import com.ripple.town.feature.people.FamilyTreeDialog
 
 /**
- * Premium Edition resident profile (2026-07-10 session). Replaces the previous flat
- * `ResidentSheetContent` tab strip with a hero header + proper tabbed information
- * architecture. Every data point below is read from something the simulation already
- * computes (`ResidentUi`, `WorldRepository.eventsForResident`, the existing template
- * text/dialogue providers) — see the accompanying docs/backlog.md entry for the full
- * inventory of what was reused vs. genuinely new, and for what was deliberately skipped
- * because it would require fabricating data or unverifiable custom rendering.
+ * Premium Edition resident profile (2026-07-10 session; compacted 2026-07-10 follow-up pass).
+ * Replaces the original flat `ResidentSheetContent` tab strip with a compact hero header + a
+ * "living summary" + a set of collapsible cards (Summary/Relationships/Needs/Skills/
+ * Household/Story/Timeline) instead of a `ScrollableTabRow`. Every data point below is read
+ * from something the simulation already computes (`ResidentUi`, `WorldRepository
+ * .eventsForResident`, the existing template text/dialogue providers) — see the accompanying
+ * docs/backlog.md entry for the full inventory of what was reused vs. genuinely new, and for
+ * what was deliberately skipped because it would require fabricating data or unverifiable
+ * custom rendering.
  */
 @Composable
 fun ResidentSheetContent(
@@ -81,7 +79,7 @@ fun ResidentSheetContent(
     var showTree by remember(residentId) { mutableStateOf(false) }
 
     // DialogueProvider: the resident's current "living quote" — same mechanism as before,
-    // relocated into the hero header rather than the old flat layout.
+    // now surfaced directly inside the living-summary card.
     val situation = situationFor(r)
     var dialogueLine by remember(residentId, situation) { mutableStateOf<String?>(null) }
     LaunchedEffect(residentId, situation) {
@@ -91,18 +89,20 @@ fun ResidentSheetContent(
         }
     }
 
+    // Which card is expanded — only one open by default (Summary), like an accordion. Reset
+    // per resident so switching profiles doesn't carry over an unrelated expanded section.
+    var expandedCard by remember(residentId) { mutableStateOf<ProfileCard?>(ProfileCard.SUMMARY) }
+
     Column(
         Modifier
-            .padding(horizontal = 20.dp)
-            .padding(bottom = 24.dp)
+            .padding(horizontal = 16.dp)
+            .padding(bottom = 20.dp)
             .heightIn(max = 620.dp)
             .verticalScroll(rememberScrollState())
     ) {
         HeroHeader(
-            world = world,
             r = r,
             sprites = sprites,
-            dialogueLine = dialogueLine,
             isFollowed = isFollowed,
             isFavourite = isFavourite,
             onFollow = { viewModel.follow(r.id) },
@@ -121,27 +121,89 @@ fun ResidentSheetContent(
             }
         )
 
-        var tab by remember(residentId) { mutableIntStateOf(0) }
-        val tabs = listOf("Overview", "Relationships", "Timeline", "Memories", "Personality", "Stats")
-        ScrollableTabRow(
-            selectedTabIndex = tab,
-            edgePadding = 0.dp,
-            containerColor = androidx.compose.ui.graphics.Color.Transparent
-        ) {
-            tabs.forEachIndexed { i, label ->
-                Tab(selected = tab == i, onClick = { tab = i }, text = { Text(label) })
-            }
+        Spacer(Modifier.height(8.dp))
+
+        LivingSummaryCard(r, dialogueLine)
+
+        Spacer(Modifier.height(10.dp))
+
+        val household = world.residents.filter {
+            it.householdId != null && it.householdId == r.householdId && it.id != r.id
         }
 
-        Column(Modifier.animateContentSize()) {
-            when (tab) {
-                0 -> OverviewTab(world, r, viewModel)
-                1 -> RelationshipsTab(world, r, viewModel, onOpenTree = { showTree = true })
-                2 -> TimelineTab(residentEvents, viewModel)
-                3 -> MemoriesTab(r)
-                4 -> PersonalityTab(r)
-                5 -> StatsTab(r)
+        ExpandableCard(
+            title = "Summary",
+            expanded = expandedCard == ProfileCard.SUMMARY,
+            onToggle = { expandedCard = toggle(expandedCard, ProfileCard.SUMMARY) }
+        ) {
+            SummaryCardBody(world, r, viewModel)
+        }
+        ExpandableCard(
+            title = "Relationships",
+            subtitle = if (r.relationships.isNotEmpty()) "${r.relationships.size}" else null,
+            expanded = expandedCard == ProfileCard.RELATIONSHIPS,
+            onToggle = { expandedCard = toggle(expandedCard, ProfileCard.RELATIONSHIPS) }
+        ) {
+            RelationshipsTab(world, r, viewModel, onOpenTree = { showTree = true })
+        }
+        ExpandableCard(
+            title = "Needs",
+            expanded = expandedCard == ProfileCard.NEEDS,
+            onToggle = { expandedCard = toggle(expandedCard, ProfileCard.NEEDS) }
+        ) {
+            NeedsCardBody(r)
+        }
+        if (r.skills.isNotEmpty()) {
+            ExpandableCard(
+                title = "Skills",
+                expanded = expandedCard == ProfileCard.SKILLS,
+                onToggle = { expandedCard = toggle(expandedCard, ProfileCard.SKILLS) }
+            ) {
+                r.skills.entries.sortedByDescending { it.value }.forEach { (label, value) ->
+                    StatBar(label, value)
+                }
             }
+        }
+        if (household.isNotEmpty()) {
+            ExpandableCard(
+                title = "Household",
+                subtitle = "${household.size}",
+                expanded = expandedCard == ProfileCard.HOUSEHOLD,
+                onToggle = { expandedCard = toggle(expandedCard, ProfileCard.HOUSEHOLD) }
+            ) {
+                household.forEach { member ->
+                    Text(
+                        "• ${member.name} (${member.age})",
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { viewModel.openResident(member.id) }
+                            .padding(vertical = 4.dp)
+                    )
+                }
+            }
+        }
+        ExpandableCard(
+            title = "Story",
+            subtitle = if (r.memories.isNotEmpty()) "${r.memories.size}" else null,
+            expanded = expandedCard == ProfileCard.STORY,
+            onToggle = { expandedCard = toggle(expandedCard, ProfileCard.STORY) }
+        ) {
+            MemoriesTab(r)
+        }
+        ExpandableCard(
+            title = "Timeline",
+            expanded = expandedCard == ProfileCard.TIMELINE,
+            onToggle = { expandedCard = toggle(expandedCard, ProfileCard.TIMELINE) }
+        ) {
+            TimelineTab(residentEvents, viewModel)
+        }
+        ExpandableCard(
+            title = "Personality",
+            expanded = expandedCard == ProfileCard.PERSONALITY,
+            onToggle = { expandedCard = toggle(expandedCard, ProfileCard.PERSONALITY) }
+        ) {
+            PersonalityTab(r)
         }
     }
 
@@ -155,6 +217,13 @@ fun ResidentSheetContent(
         )
     }
 }
+
+/** Which of the accordion cards is currently expanded (single-open accordion). */
+private enum class ProfileCard { SUMMARY, RELATIONSHIPS, NEEDS, SKILLS, HOUSEHOLD, STORY, TIMELINE, PERSONALITY }
+
+/** Tapping an already-open card's header collapses it; tapping a closed one opens it (and closes the rest). */
+private fun toggle(current: ProfileCard?, target: ProfileCard): ProfileCard? =
+    if (current == target) null else target
 
 /**
  * Maps a resident's current activity/mood onto one of `TemplateDialogueProvider`'s closed
@@ -182,14 +251,25 @@ private fun wealthBandLabel(wealth: Double): String = when {
     else -> "Well-off"
 }
 
-// ------------------------------------------------------------------ hero header
+/**
+ * Short, readable financial-situation phrase derived from the existing `financialSecurity`
+ * need, `wealth` and `debt` fields — a display-layer helper, not a new tracked field. Debt is
+ * checked first since owing money is the clearest signal of trouble regardless of the
+ * financialSecurity score.
+ */
+private fun financialSituationPhrase(r: ResidentUi): String = when {
+    r.debt > 0 && r.financialSecurity < 25 -> "in real financial trouble"
+    r.financialSecurity < 25 -> "bills are becoming difficult"
+    r.financialSecurity < 55 -> "managing, but money is tight"
+    else -> "financially comfortable"
+}
+
+// ------------------------------------------------------------------ hero header (compact)
 
 @Composable
 private fun HeroHeader(
-    world: WorldUi,
     r: ResidentUi,
     sprites: SpriteProvider,
-    dialogueLine: String?,
     isFollowed: Boolean,
     isFavourite: Boolean,
     onFollow: () -> Unit,
@@ -198,71 +278,213 @@ private fun HeroHeader(
     onShareSaga: () -> Unit
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        PixelAvatar(r.sprite, sprites, size = 64.dp, pose = poseFor(r), lifeStage = r.lifeStage, occupation = r.occupation)
-        Spacer(Modifier.width(12.dp))
+        PixelAvatar(r.sprite, sprites, size = 48.dp, pose = poseFor(r), lifeStage = r.lifeStage, occupation = r.occupation)
+        Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            Text(r.name, style = MaterialTheme.typography.headlineSmall)
+            Text(r.name, style = MaterialTheme.typography.titleLarge)
             Text(
                 if (!r.alive) "Died aged ${r.age} — ${r.causeOfDeath ?: ""}"
                 else if (!r.inTown) "Away — ${r.occupation}"
                 else "${r.age} · ${r.occupation}" + (r.employerName?.let { " at $it" } ?: ""),
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
+
+    Spacer(Modifier.height(8.dp))
+
+    // Compact equal-width action row instead of the previous loose FilterChip row.
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+        CompactActionButton(
+            label = if (isFollowed) "Following" else "Follow",
+            active = isFollowed,
+            onClick = { if (!isFollowed) onFollow() },
+            modifier = Modifier.weight(1f)
+        )
+        CompactActionButton(
+            label = if (isFavourite) "★ Fav" else "☆ Fav",
+            active = isFavourite,
+            onClick = onToggleFavourite,
+            modifier = Modifier.weight(1f)
+        )
+        if (r.alive && r.inTown) {
+            CompactActionButton(label = "✨ Nudge", active = false, onClick = onNudge, modifier = Modifier.weight(1f))
+        }
+        CompactActionButton(label = "📜 Share", active = false, onClick = onShareSaga, modifier = Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun CompactActionButton(label: String, active: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = if (active) {
+        CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+    } else {
+        CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    }
+    Card(colors = colors, modifier = modifier.clickable(onClick = onClick)) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
+        )
+    }
+}
+
+// ------------------------------------------------------------------ living summary
+
+/**
+ * The "living summary": current activity + mood, current thought (the existing
+ * `TemplateDialogueProvider` quote line), the top active goal (used as the "next planned
+ * activity" stand-in — `ResidentUi`/`Resident` expose no dedicated "next planned activity"
+ * concept, so rather than inventing one this reuses the existing goal list, already ordered
+ * with the most relevant goal first), the "why this?" activity reason, and a short readable
+ * financial-situation phrase.
+ */
+@Composable
+private fun LivingSummaryCard(r: ResidentUi, dialogueLine: String?) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp)) {
             if (r.alive && r.inTown) {
                 Text(
                     "${r.activity.label} · feeling ${r.mood.label.lowercase()}",
-                    style = MaterialTheme.typography.bodySmall,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = RippleColors.SoftInk
+                )
+                if (r.activityReason.isNotBlank()) {
+                    Text(
+                        "Why: ${r.activityReason}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+            } else if (!r.alive) {
+                Text("Passed away", style = MaterialTheme.typography.bodyMedium, color = RippleColors.SoftInk)
+            } else {
+                Text("Currently away from town", style = MaterialTheme.typography.bodyMedium, color = RippleColors.SoftInk)
+            }
+
+            if (!dialogueLine.isNullOrBlank()) {
+                Text(
+                    "“$dialogueLine”",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontStyle = FontStyle.Italic,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
+            }
+
+            r.activeGoalLabels.firstOrNull()?.let { topGoal ->
+                Text(
+                    "Working towards: $topGoal",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
+            }
+
+            if (r.alive) {
+                Text(
+                    "Money: ${financialSituationPhrase(r)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp)
                 )
             }
         }
     }
+}
 
-    if (!dialogueLine.isNullOrBlank()) {
-        Spacer(Modifier.height(8.dp))
-        Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceVariant) {
-            Text(
-                "“$dialogueLine”",
-                style = MaterialTheme.typography.bodyMedium,
-                fontStyle = FontStyle.Italic,
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
-            )
+// ------------------------------------------------------------------ generic expandable card
+
+/**
+ * Shared accordion-card container used by every section below. `animateContentSize()` on the
+ * body column gives a smooth low-risk expand/collapse (no custom easing/physics), and the
+ * chevron icon reflects state. Content is only composed when expanded is true isn't required
+ * here since these bodies are cheap list renders reading already-loaded `ResidentUi` data —
+ * kept simple rather than adding lazy-composition machinery for content this small.
+ */
+@Composable
+private fun ExpandableCard(
+    title: String,
+    subtitle: String? = null,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .animateContentSize(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+    ) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 4.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggle)
+                    .padding(vertical = 10.dp)
+            ) {
+                Text(title, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                if (!subtitle.isNullOrBlank()) {
+                    Text(
+                        subtitle,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(end = 6.dp)
+                    )
+                }
+                Icon(
+                    imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+                    contentDescription = if (expanded) "Collapse" else "Expand",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            if (expanded) {
+                Column(Modifier.padding(bottom = 10.dp)) {
+                    content()
+                }
+            }
         }
     }
+}
 
-    Spacer(Modifier.height(10.dp))
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        FilterChip(selected = isFollowed, onClick = { if (!isFollowed) onFollow() }, label = { Text(if (isFollowed) "Following" else "Follow") })
-        FilterChip(selected = isFavourite, onClick = onToggleFavourite, label = { Text(if (isFavourite) "★ Favourite" else "☆ Favourite") })
-        if (r.alive && r.inTown) {
-            FilterChip(selected = false, onClick = onNudge, label = { Text("✨ Nudge") })
-        }
-        FilterChip(selected = false, onClick = onShareSaga, label = { Text("📜 Share saga") })
+// ------------------------------------------------------------------ summary card body
+
+/**
+ * Body of the "Summary" card: home, workplace, relationship status, means, top relationships,
+ * top personality traits, and health notes — a condensed merge of what the old Overview tab
+ * showed, reusing the same fields.
+ */
+@Composable
+private fun SummaryCardBody(world: WorldUi, r: ResidentUi, viewModel: TownViewModel) {
+    SummaryLine("Home", r.homeName ?: "No fixed home in town")
+    SummaryLine("Workplace", r.employerName ?: (if (r.occupation.isNotBlank()) r.occupation else "Unemployed"))
+    SummaryLine("Status", r.relationshipStatusLabel)
+    SummaryLine("Means", wealthBandLabel(r.wealth) + if (r.debt > 0) " (in debt)" else "")
+
+    val topRelationships = r.relationships.take(3)
+    if (topRelationships.isNotEmpty()) {
+        SectionTitle("Closest relationships")
+        topRelationships.forEach { rel -> RelationshipInsightRow(rel, viewModel) }
     }
 
-    if (r.alive && r.inTown && r.activityReason.isNotBlank()) {
-        Spacer(Modifier.height(8.dp))
-        Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceVariant) {
-            Text(
-                "Why this? ${r.activityReason}",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-            )
-        }
+    val topTraits = traitList(r.personality).sortedByDescending { it.second }.take(3)
+    if (topTraits.isNotEmpty()) {
+        SectionTitle("Personality at a glance")
+        Text(
+            topTraits.joinToString(" · ") { it.first },
+            style = MaterialTheme.typography.bodyMedium,
+            color = RippleColors.SoftInk
+        )
     }
 
-    // Summary card: home, workplace, relationship status, wealth band. Reputation isn't a
-    // tracked simulation field (checked ResidentUi/Resident — no such value exists), so it's
-    // left out rather than invented.
-    Spacer(Modifier.height(10.dp))
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp)) {
-            SummaryLine("Home", r.homeName ?: "No fixed home in town")
-            SummaryLine("Workplace", r.employerName ?: (if (r.occupation.isNotBlank()) r.occupation else "Unemployed"))
-            SummaryLine("Status", r.relationshipStatusLabel)
-            SummaryLine("Means", wealthBandLabel(r.wealth) + if (r.debt > 0) " (in debt)" else "")
-        }
+    if (r.conditionLabels.isNotEmpty()) {
+        SectionTitle("Health notes")
+        Text(r.conditionLabels.joinToString(), style = MaterialTheme.typography.bodyMedium, color = RippleColors.DeepBrick)
     }
 }
 
@@ -274,70 +496,13 @@ private fun SummaryLine(label: String, value: String) {
     }
 }
 
-// ------------------------------------------------------------------ overview tab
-
-@Composable
-private fun OverviewTab(world: WorldUi, r: ResidentUi, viewModel: TownViewModel) {
-    if (r.activeGoalLabels.isNotEmpty()) {
-        SectionTitle("Current goals")
-        r.activeGoalLabels.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium) }
-    }
-
-    val topRelationships = r.relationships.take(3)
-    if (topRelationships.isNotEmpty()) {
-        SectionTitle("Closest relationships")
-        topRelationships.forEach { rel ->
-            RelationshipInsightRow(r, rel, viewModel)
-        }
-    }
-
-    if (r.memories.isNotEmpty()) {
-        SectionTitle("Recent highlights")
-        r.memories.take(3).forEach { m ->
-            Text("• ${m.description}", style = MaterialTheme.typography.bodyMedium)
-        }
-    }
-
-    SectionTitle("Personality at a glance")
-    val topTraits = traitList(r.personality).sortedByDescending { it.second }.take(3)
-    Text(
-        topTraits.joinToString(" · ") { "${it.first}" },
-        style = MaterialTheme.typography.bodyMedium,
-        color = RippleColors.SoftInk
-    )
-
-    SectionTitle("Needs")
-    StatBar("Hunger", r.hunger)
-    StatBar("Energy", r.energy)
-    StatBar("Health", r.health)
-    StatBar("Social", r.social)
-    StatBar("Stress", r.stress, good = false)
-    StatBar("Purpose", r.purposeNeed)
-    StatBar("Comfort", r.comfort)
-    StatBar("Financial security", r.financialSecurity)
-
-    val household = world.residents.filter { it.householdId != null && it.householdId == r.householdId && it.id != r.id }
-    if (household.isNotEmpty()) {
-        SectionTitle("Household")
-        household.forEach { Text("• ${it.name} (${it.age})", style = MaterialTheme.typography.bodyMedium) }
-    }
-    if (r.conditionLabels.isNotEmpty()) {
-        SectionTitle("Health notes")
-        Text(r.conditionLabels.joinToString(), style = MaterialTheme.typography.bodyMedium, color = RippleColors.DeepBrick)
-    }
-}
-
 /**
  * "AI-generated relationship insight": a one-line templated sentence for a single
- * relationship, built from the same `TemplateDialogueProvider`/situation mechanism already
- * used for the hero quote — reworded to describe the *relationship* by asking for a
- * "socialising" line themed around the other person, since there's no dedicated
- * relationship-insight provider method. This deliberately reuses the existing generator
- * rather than inventing new text-generation logic; if a resident has no eligible situation
- * (not currently socialising/etc.) it simply omits the insight line rather than faking one.
+ * relationship — a warmth dot + name + kind + trust bar, reusing the same rows the old
+ * Overview tab rendered.
  */
 @Composable
-private fun RelationshipInsightRow(r: ResidentUi, rel: RelationUi, viewModel: TownViewModel) {
+private fun RelationshipInsightRow(rel: RelationUi, viewModel: TownViewModel) {
     Column(
         Modifier
             .fillMaxWidth()
@@ -355,10 +520,9 @@ private fun RelationshipInsightRow(r: ResidentUi, rel: RelationUi, viewModel: To
 }
 
 /**
- * Low-risk "connection colour" affordance from the brief: a small coloured dot per
- * relationship row (green/amber/red by warmth), not a proportional-edge-width graph — that
- * already exists in `FamilyTreeScreen.kt`'s relationship map and is linked to, not
- * duplicated.
+ * Low-risk "connection colour" affordance: a small coloured dot per relationship row
+ * (green/amber/red by warmth), not a proportional-edge-width graph — that already exists in
+ * `FamilyTreeScreen.kt`'s relationship map and is linked to, not duplicated.
  */
 @Composable
 private fun WarmthDot(warmth: Double) {
@@ -370,7 +534,7 @@ private fun WarmthDot(warmth: Double) {
     Surface(shape = CircleShape, color = colour, modifier = Modifier.width(10.dp).height(10.dp)) {}
 }
 
-// ------------------------------------------------------------------ relationships tab
+// ------------------------------------------------------------------ relationships card body
 
 @Composable
 private fun RelationshipsTab(
@@ -403,9 +567,70 @@ private fun RelationshipsTab(
     }
 }
 
-// ------------------------------------------------------------------ timeline tab
+// ------------------------------------------------------------------ needs card body
 
-/** Chronological life events for this resident, grouped by year like `HistoryScreen.kt`. */
+/**
+ * Readable-first needs: each need becomes a short human phrase built from the same 0..100
+ * values `StatBar` already renders (display-layer reinterpretation, no new state). Numeric
+ * `StatBar`s are still available — one tap reveals them — so no data is lost, just
+ * reprioritised so the headline is legible at a glance instead of eight bars up front.
+ */
+@Composable
+private fun NeedsCardBody(r: ResidentUi) {
+    var showBars by remember { mutableStateOf(false) }
+
+    val phrases = needPhrases(r)
+    if (phrases.isEmpty()) {
+        Text("Doing fine — no pressing needs.", style = MaterialTheme.typography.bodyMedium, color = RippleColors.SoftInk)
+    } else {
+        phrases.forEach { phrase ->
+            Text("• $phrase", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 2.dp))
+        }
+    }
+
+    TextButton(onClick = { showBars = !showBars }, modifier = Modifier.animateContentSize()) {
+        Text(if (showBars) "Hide numbers" else "Show numbers")
+    }
+
+    if (showBars) {
+        Column(Modifier.animateContentSize()) {
+            StatBar("Hunger", r.hunger)
+            StatBar("Energy", r.energy)
+            StatBar("Health", r.health)
+            StatBar("Safety", r.safety)
+            StatBar("Social", r.social)
+            StatBar("Comfort", r.comfort)
+            StatBar("Purpose", r.purposeNeed)
+            StatBar("Stress", r.stress, good = false)
+            StatBar("Financial security", r.financialSecurity)
+        }
+    }
+}
+
+/**
+ * Short readable phrases for needs that need attention (low value, or high for "bad-when-high"
+ * stats like stress). Needs comfortably in range are simply omitted rather than padded out
+ * with filler "doing fine" lines per-need — the calmer overall phrase above covers that case.
+ */
+private fun needPhrases(r: ResidentUi): List<String> {
+    val out = mutableListOf<String>()
+    if (r.hunger < 30) out += "Hungry — needs food soon"
+    if (r.energy < 30) out += "Exhausted — needs rest"
+    if (r.health < 30) out += "In poor health"
+    if (r.safety < 30) out += "Feeling unsafe"
+    if (r.social < 30) out += "Lonely — craving company"
+    if (r.comfort < 30) out += "Uncomfortable living conditions"
+    if (r.purposeNeed < 30) out += "Searching for direction"
+    if (r.stress > 70) out += "Under a lot of stress"
+    if (r.financialSecurity < 30) out += financialSituationPhrase(r).replaceFirstChar { it.uppercase() }
+    return out
+}
+
+// ------------------------------------------------------------------ timeline card body
+
+/** Chronological life events for this resident, grouped by year like `HistoryScreen.kt`, each
+ * formatted as "HH:MM — description" using the event's own human-readable `description` text
+ * (already produced by `NewspaperGenerator`/event emission — not new copy). */
 @Composable
 private fun TimelineTab(events: List<EventUi>, viewModel: TownViewModel) {
     if (events.isEmpty()) { EmptyNote("A quiet life, so far."); return }
@@ -415,31 +640,32 @@ private fun TimelineTab(events: List<EventUi>, viewModel: TownViewModel) {
             "Year $year",
             style = MaterialTheme.typography.titleSmall,
             color = RippleColors.DeepGreen,
-            modifier = Modifier.padding(top = 10.dp, bottom = 2.dp)
+            modifier = Modifier.padding(top = 8.dp, bottom = 2.dp)
         )
         byYear[year]!!.sortedByDescending { it.time }.forEach { e ->
-            Column(
-                Modifier
+            Text(
+                "${e.timeLabel} — ${e.description}",
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier
                     .fillMaxWidth()
                     .clickable { viewModel.openEvent(e.id) }
-                    .padding(vertical = 5.dp)
-            ) {
-                Text(e.description, style = MaterialTheme.typography.bodyMedium)
-                Text(e.timeLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+                    .padding(vertical = 4.dp)
+            )
         }
     }
 }
 
-// ------------------------------------------------------------------ memories tab
+// ------------------------------------------------------------------ story (memories) card body
 
+/** Renamed from "Memories" to "Story" per the redesign brief — label change only, the
+ * underlying importance-sorted memory list is unchanged. */
 @Composable
 private fun MemoriesTab(r: ResidentUi) {
     if (r.memories.isEmpty()) { EmptyNote("Nothing has marked them deeply yet."); return }
     // Already importance-ranked (SnapshotBuilder sorts by importance and caps at 10) — shown
     // in that order rather than re-sorted, so the most defining memories read first.
     r.memories.forEach { m ->
-        Column(Modifier.padding(vertical = 6.dp)) {
+        Column(Modifier.padding(vertical = 4.dp)) {
             Text("“${m.description}”", style = MaterialTheme.typography.bodyMedium)
             Text(
                 "${m.typeLabel} · ${SimTime.formatDate(m.createdAt)}",
@@ -450,7 +676,7 @@ private fun MemoriesTab(r: ResidentUi) {
     }
 }
 
-// ------------------------------------------------------------------ personality tab
+// ------------------------------------------------------------------ personality card body
 
 private fun traitList(p: com.ripple.town.core.model.Personality): List<Pair<String, Double>> = listOf(
     "Kindness" to p.kindness, "Ambition" to p.ambition, "Curiosity" to p.curiosity,
@@ -460,15 +686,14 @@ private fun traitList(p: com.ripple.town.core.model.Personality): List<Pair<Stri
 )
 
 /**
- * Labeled horizontal bars, not a radar chart — the safe alternative called for in the brief.
- * `Personality` values are 0.0..1.0, so each is scaled to the 0..100 range `StatBar` expects.
- * A radar/spider chart was considered but skipped: with no device to verify polygon math on,
- * a wrong-but-plausible-looking chart is a worse outcome than a set of bars this app's
- * existing `StatBar` already renders correctly everywhere else.
+ * Labeled horizontal bars, not a radar chart — the safe alternative called for in the original
+ * brief. `Personality` values are 0.0..1.0, so each is scaled to the 0..100 range `StatBar`
+ * expects. A radar/spider chart was considered but skipped: with no device to verify polygon
+ * math on, a wrong-but-plausible-looking chart is a worse outcome than a set of bars this
+ * app's existing `StatBar` already renders correctly everywhere else.
  */
 @Composable
 private fun PersonalityTab(r: ResidentUi) {
-    SectionTitle("Traits")
     traitList(r.personality).forEach { (label, value) ->
         StatBar(label, value * 100.0)
     }
@@ -477,44 +702,6 @@ private fun PersonalityTab(r: ResidentUi) {
             "needs do — they shape how ${r.firstName} tends to react, not how they currently feel.",
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(top = 8.dp)
-    )
-}
-
-// ------------------------------------------------------------------ stats tab
-
-/**
- * Needs/health as compact cards. Sparkline trend charts were explicitly requested in the
- * brief but are skipped here: there is no historical time-series store for `Needs` values
- * anywhere in the codebase (checked `WorldRepository`/`core/database` — only current-tick
- * needs are persisted, no per-tick or daily snapshot log exists), so a trend line would have
- * to be invented data. Showing only the current, real values instead.
- */
-@Composable
-private fun StatsTab(r: ResidentUi) {
-    SectionTitle("Needs")
-    StatBar("Hunger", r.hunger)
-    StatBar("Energy", r.energy)
-    StatBar("Health", r.health)
-    StatBar("Safety", r.safety)
-    StatBar("Social", r.social)
-    StatBar("Comfort", r.comfort)
-    StatBar("Purpose", r.purposeNeed)
-    StatBar("Stress", r.stress, good = false)
-    StatBar("Financial security", r.financialSecurity)
-
-    if (r.skills.isNotEmpty()) {
-        SectionTitle("Skills")
-        r.skills.entries.sortedByDescending { it.value }.forEach { (label, value) ->
-            StatBar(label, value)
-        }
-    }
-
-    Text(
-        "No trend history is tracked by the simulation yet, so this shows current values only " +
-            "— not fabricated day-over-day change.",
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(top = 8.dp)
+        modifier = Modifier.padding(top = 6.dp)
     )
 }
