@@ -3,6 +3,8 @@ package com.ripple.town.core.simulation
 import com.ripple.town.core.model.BuildingType
 import com.ripple.town.core.model.Business
 import com.ripple.town.core.model.BusinessType
+import com.ripple.town.core.model.DelayedEffect
+import com.ripple.town.core.model.DelayedEffectType
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.Goal
 import com.ripple.town.core.model.GoalStatus
@@ -248,6 +250,14 @@ object GoalSystem {
             ctx.addMemory(parent, MemoryType.LOSS, "${r.firstName} left for college. The house feels bigger.", 60.0, e.id, listOf(r.id))
         }
         ConsequenceEngine.onEvent(ctx, e)
+        // They don't vanish from the town's story — they come back, eventually, changed.
+        val day = SimTime.MINUTES_PER_DAY
+        ctx.state.delayedEffects += DelayedEffect(
+            id = ctx.state.nextEffectId++, sourceEventId = e.id,
+            targetResidentId = r.id, type = DelayedEffectType.GOAL_SEED, strength = 1.0,
+            earliestAt = ctx.now + 640 * day, latestAt = ctx.now + 1400 * day,
+            note = LifecycleSystem.RETURNING_STUDENT_NOTE
+        )
     }
 
     private fun moveHome(ctx: TickContext, r: Resident, newHomeId: Long, goal: Goal) {

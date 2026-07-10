@@ -4,6 +4,7 @@ import com.ripple.town.core.model.Activity
 import com.ripple.town.core.model.DetailLevel
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.Gender
+import com.ripple.town.core.model.GoalType
 import com.ripple.town.core.model.Household
 import com.ripple.town.core.model.LifeStage
 import com.ripple.town.core.model.MemoryType
@@ -14,6 +15,7 @@ import com.ripple.town.core.model.RelationshipKind
 import com.ripple.town.core.model.RelationshipStatus
 import com.ripple.town.core.model.Resident
 import com.ripple.town.core.model.SimTime
+import com.ripple.town.core.model.SkillType
 import com.ripple.town.core.model.SpriteConfig
 
 /**
@@ -308,6 +310,78 @@ object LifecycleSystem {
         ConsequenceEngine.onEvent(ctx, e)
     }
 
+    /** A `LEAVE_FOR_EDUCATION` leaver (see [GoalSystem.leaveForEducation]) comes home, changed. */
+    fun studentReturns(ctx: TickContext, r: Resident) {
+        val state = ctx.state
+        if (!r.alive || r.leftTownAt == null) return
+        r.leftTownAt = null
+        r.occupation = "Unemployed"
+
+        // Back into the old household if it kept a home; otherwise in with a parent
+        // still in town; otherwise whatever's free.
+        val oldHousehold = r.householdId?.let { state.households[it] }
+        val targetHousehold = when {
+            oldHousehold?.homeBuildingId != null -> oldHousehold
+            else -> listOfNotNull(r.motherId, r.fatherId)
+                .mapNotNull { state.resident(it) }
+                .firstOrNull { it.inTown }
+                ?.householdId?.let { state.households[it] }
+                ?: run {
+                    val home = state.homes().firstOrNull { h ->
+                        state.households.values.none { it.homeBuildingId == h.id && it.memberIds.isNotEmpty() }
+                    } ?: return@run null
+                    Household(
+                        id = state.nextHouseholdId++, name = "${r.surname} household",
+                        homeBuildingId = home.id
+                    ).also { state.households[it.id] = it }
+                }
+        }
+        if (targetHousehold != null && r.id !in targetHousehold.memberIds) {
+            oldHousehold?.memberIds?.remove(r.id)
+            targetHousehold.memberIds += r.id
+            r.householdId = targetHousehold.id
+        }
+        val home = targetHousehold?.homeBuildingId
+        r.homeBuildingId = home
+        r.currentBuildingId = home
+
+        // Changed: years away studying leave a mark.
+        val gained = ctx.rng.nextDouble(20.0, 40.0)
+        r.skills[SkillType.TEACHING] = (r.skill(SkillType.TEACHING) + gained).coerceAtMost(100.0)
+        val secondary = secondarySkillFor(r)
+        r.skills[secondary] = (r.skill(secondary) + ctx.rng.nextDouble(10.0, 25.0)).coerceAtMost(100.0)
+
+        val e = ctx.emit(
+            EventType.RESIDENT_ARRIVED,
+            "${r.fullName} has come back to ${state.townName}, changed by years away studying.",
+            sourceResidentId = r.id, buildingId = home, severity = 0.4
+        )
+        GoalSystem.seedGoal(ctx, r, GoalType.FIND_JOB, "Home again, and it's time to find my feet.", e.id)
+        for (pid in listOfNotNull(r.motherId, r.fatherId)) {
+            val parent = state.resident(pid) ?: continue
+            if (!parent.inTown) continue
+            parent.needs.social += 12.0
+            val rel = state.relationshipOrCreate(parent.id, r.id)
+            rel.affection += 10.0; rel.familiarity += 15.0
+            rel.clampAll()
+            ctx.addMemory(parent, MemoryType.ACHIEVEMENT, "${r.firstName} came home, grown up.", 70.0, e.id, listOf(r.id))
+        }
+        ConsequenceEngine.onEvent(ctx, e)
+    }
+
+    /** Which subject stuck: whichever trait a resident leans into hardest. */
+    private fun secondarySkillFor(r: Resident): SkillType {
+        val p = r.personality
+        return listOf(
+            p.ambition to SkillType.BUSINESS,
+            p.curiosity to SkillType.CREATIVITY,
+            p.empathy to SkillType.MEDICINE,
+            p.courage to SkillType.POLITICS,
+            p.discipline to SkillType.REPAIR,
+            p.kindness to SkillType.COOKING
+        ).maxByOrNull { it.first }?.second ?: SkillType.SOCIAL
+    }
+
     // ------------------------------------------------------------- election
 
     private fun election(ctx: TickContext) {
@@ -359,4 +433,6 @@ object LifecycleSystem {
             }
         }
     }
+
+    const val RETURNING_STUDENT_NOTE = "returning_student"
 }

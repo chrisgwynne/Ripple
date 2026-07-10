@@ -179,6 +179,10 @@ object DelayedEffectSystem {
                     LifecycleSystem.newFamilyArrives(ctx, e.sourceEventId.takeIf { it > 0 })
                     return
                 }
+                if (e.note == LifecycleSystem.RETURNING_STUDENT_NOTE) {
+                    target?.let { LifecycleSystem.studentReturns(ctx, it) }
+                    return
+                }
                 val r = target ?: return
                 val type = runCatching { GoalType.valueOf(e.note) }.getOrNull() ?: return
                 GoalSystem.seedGoal(ctx, r, type, "An idea that wouldn't let go.", e.sourceEventId.takeIf { it > 0 })

@@ -4,6 +4,7 @@ import com.ripple.town.core.model.Activity
 import com.ripple.town.core.model.BuildingType
 import com.ripple.town.core.model.DetailLevel
 import com.ripple.town.core.model.SimTime
+import com.ripple.town.core.model.SkillType
 import com.ripple.town.core.model.Weather
 
 /**
@@ -48,7 +49,12 @@ object NeedsSystem {
                 Activity.SLEEPING -> { n.energy += 1.6; n.stress -= 0.35; n.comfort += 0.2 }
                 Activity.EATING -> { n.hunger += 5.5; n.comfort += 0.4 }
                 Activity.WORKING -> { n.purpose += 0.35; n.stress += 0.12; n.financialSecurity += 0.03 }
-                Activity.AT_SCHOOL -> { n.purpose += 0.3; n.social += 0.25 }
+                Activity.AT_SCHOOL -> {
+                    n.purpose += 0.3; n.social += 0.25
+                    // Schooling builds general grounding, faster for the more disciplined.
+                    val gain = 0.02 + r.personality.discipline * 0.02
+                    r.skills[SkillType.TEACHING] = (r.skill(SkillType.TEACHING) + gain).coerceAtMost(100.0)
+                }
                 Activity.SOCIALISING, Activity.COMMUNITY -> { n.social += 1.4; n.stress -= 0.25 }
                 Activity.VISITING -> { n.social += 1.1; n.stress -= 0.2 }
                 Activity.SHOPPING -> { n.comfort += 0.5 }

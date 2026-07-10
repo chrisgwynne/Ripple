@@ -140,6 +140,25 @@ is emitted. Bounded to 3 repairs per day. A home below condition 40 also
 chips at its residents' comfort, the same way persistent noise does — repairs
 aren't just cosmetic.
 
+## Education & returning students
+
+Children and teens at school (`Activity.AT_SCHOOL`, weekdays 8–14) build
+`SkillType.TEACHING` slowly — `0.02 + discipline × 0.02`/tick — general
+grounding rather than a trade. Curious, ambitious teens (`curiosity > 0.7`,
+`ambition > 0.6`) can form a `LEAVE_FOR_EDUCATION` goal; once it's 80 % along
+and they've turned 18, they leave town (`RESIDENT_LEFT_TOWN`,
+`leftTownAt` set, parents get a `LOSS` memory) — but they aren't gone for
+good. Leaving schedules a `GOAL_SEED` delayed effect (note
+`"returning_student"`) with a 640–1400 day window (roughly 1.8–3.9 years).
+When it fires, `LifecycleSystem.studentReturns` brings them home changed: a
+large `TEACHING` boost (20–40) plus a secondary skill matching whichever
+personality trait runs strongest (ambition → business, curiosity →
+creativity, empathy → medicine, courage → politics, discipline → repair,
+kindness → cooking), rehoused with their old household if it kept a home
+or with an in-town parent otherwise, a fresh `FIND_JOB` goal, a warm
+`RESIDENT_ARRIVED`-flavoured event, and an `ACHIEVEMENT` memory for any
+parent still in town.
+
 ## Family & generations
 
 Births to fertile couples (both 20–44, affection ≥ 55) at

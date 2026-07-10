@@ -71,9 +71,32 @@ rather than scope-creeping into this pass):
   exported Room schema-v1 JSON the test reads was never generated or
   committed (`copyRoomSchemas` shows `NO-SOURCE`).
 
-All work is committed on `claude/ripple-android-prototype-a0gsi8` (not
-pushed): gradle wrapper + `.gitignore` cleanup, the three feature commits,
-and the test fix.
+*(Update: this work was pushed, then merged into `main` and the feature
+branch deleted — see the entry below. `main` is now the repo's only branch.)*
+
+### 2026-07-10 — Merge to `main`; education/skill pipeline + returning students
+
+Merged `claude/ripple-android-prototype-a0gsi8` into `main` (clean, no
+conflicts), pushed, set `main` as the GitHub default branch, and deleted the
+now-redundant feature branch both locally and on origin — `main` is the only
+branch left.
+
+Continued with a fourth Phase 2 **Simulation** item, same rigour as above
+(implementation + `docs/simulation-rules.md` section + full local test pass):
+
+- [x] **Education & returning students.** Children/teens at school now
+  build `SkillType.TEACHING` slowly (`NeedsSystem`, gated by `discipline`).
+  Teens who form `LEAVE_FOR_EDUCATION` and leave town at 18 aren't gone for
+  good: leaving schedules a `GOAL_SEED` delayed effect (note
+  `"returning_student"`, 640–1400 day window) that
+  `LifecycleSystem.studentReturns` resolves — a large `TEACHING` boost plus
+  a secondary skill matching whichever personality trait runs strongest,
+  rehoused (old household if it kept a home, an in-town parent's otherwise),
+  a fresh `FIND_JOB` goal, and an `ACHIEVEMENT` memory for any parent still
+  around. See `docs/simulation-rules.md#education--returning-students`.
+
+Verified via the full local unit test suite: same 3 pre-existing failures
+as before, nothing new. Committed and pushed directly to `main`.
 
 **Not attempted this session:** everything else below. The remaining Phase
 2 **Product** items need Compose/UI work or external art/audio assets;
@@ -92,8 +115,13 @@ local politics, an LLM narrative layer, etc.).
   accuracy loss; the newspaper can then be *wrong* (public understanding ≠
   facts, as designed). *Implemented: `RumourSystem`, `RUMOUR_SPREAD` events.
   See `docs/simulation-rules.md#rumours`.*
-- Education/skill pipeline for children and teens; returning students
-  (Kit-style leavers can come back changed).
+- [x] Education/skill pipeline for children and teens; returning students
+  (Kit-style leavers can come back changed). *Implemented: school builds
+  `TEACHING` slowly for children/teens (`NeedsSystem`); `LEAVE_FOR_EDUCATION`
+  leavers schedule a 1.8–3.9 year `GOAL_SEED` return
+  (`LifecycleSystem.studentReturns`) — rehoused, a large skill boost plus a
+  personality-matched secondary skill, fresh `FIND_JOB` goal, parent reunion
+  memory. See `docs/simulation-rules.md#education--returning-students`.*
 - Richer crime: motives, suspicion, constable NPC role, false accusations.
 - [~] Building lifecycle: repairs, renovation choices by owners, new
   construction on empty lots, demolition. *Repairs implemented
