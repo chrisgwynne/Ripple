@@ -1,5 +1,6 @@
 ﻿package com.ripple.town.core.simulation
 
+import com.ripple.town.core.model.Building
 import com.ripple.town.core.model.DistrictCharacter
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.EventVisibility
@@ -554,7 +555,7 @@ object CrimeSystem {
             building?.let {
                 it.condition = (it.condition - ctx.rng.nextDouble(15.0, 30.0)).coerceAtLeast(5.0)
                 it.visibleChanges += "${SimTime.formatDate(ctx.now)} — Scorch marks by the door"
-                if (it.visibleChanges.size >= 6) it.visibleChanges.removeAt(0)
+                if (it.visibleChanges.size >= Building.MAX_VISIBLE_CHANGES) it.visibleChanges.removeAt(0)
             }
             val rivalryEvent = mostRecentEventOfType(ctx, EventType.RIVALRY_FORMED, aggressor.id, null)
             val dayStart = ctx.now - com.ripple.town.core.model.SimTime.minuteOfDay(ctx.now)

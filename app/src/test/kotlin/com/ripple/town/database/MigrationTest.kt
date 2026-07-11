@@ -30,13 +30,15 @@ class MigrationTest {
     )
 
     @Test
-    fun `schema v1 matches the exported schema and opens cleanly`() {
+    fun `schema v1 matches the exported schema and opens cleanly after migration`() {
         // Creates the database from the exported 1.json and validates it.
         helper.createDatabase(DB_NAME, 1).close()
 
-        // Opening with the current entities must not require any migration.
+        // Opening with the current entities requires migrating from v1 to v2.
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val db = Room.databaseBuilder(context, RippleDatabase::class.java, DB_NAME).build()
+        val db = Room.databaseBuilder(context, RippleDatabase::class.java, DB_NAME)
+            .addMigrations(RippleDatabase.MIGRATION_1_2)
+            .build()
         runBlocking {
             assertThat(db.eventDao().count()).isEqualTo(0)
             assertThat(db.worldDao().world(1L)).isNull()

@@ -45,13 +45,19 @@ enum class Mood(val label: String) {
     DESPAIRING("Despairing"), LOW("Low"), FLAT("Flat"), CONTENT("Content"), HAPPY("Happy"), JOYFUL("Joyful");
 
     companion object {
+        const val THRESHOLD_DESPAIRING = 15.0
+        const val THRESHOLD_LOW        = 32.0
+        const val THRESHOLD_FLAT       = 48.0
+        const val THRESHOLD_CONTENT    = 65.0
+        const val THRESHOLD_HAPPY      = 82.0
+
         fun fromScore(score: Double): Mood = when {
-            score < 15 -> DESPAIRING
-            score < 32 -> LOW
-            score < 48 -> FLAT
-            score < 65 -> CONTENT
-            score < 82 -> HAPPY
-            else -> JOYFUL
+            score < THRESHOLD_DESPAIRING -> DESPAIRING
+            score < THRESHOLD_LOW        -> LOW
+            score < THRESHOLD_FLAT       -> FLAT
+            score < THRESHOLD_CONTENT    -> CONTENT
+            score < THRESHOLD_HAPPY      -> HAPPY
+            else                         -> JOYFUL
         }
     }
 }

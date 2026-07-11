@@ -52,7 +52,7 @@ object BuildingLifecycleSystem {
             building.condition = (building.condition + restored).coerceAtMost(100.0)
             building.visibleChanges.removeAll { it.endsWith("Storm damage") }
             building.visibleChanges += "${SimTime.formatDate(ctx.now)} — Freshly repaired"
-            if (building.visibleChanges.size >= 6) building.visibleChanges.removeAt(0)
+            if (building.visibleChanges.size >= Building.MAX_VISIBLE_CHANGES) building.visibleChanges.removeAt(0)
             ctx.emit(
                 EventType.BUILDING_REPAIRED,
                 "${building.name} has had some much-needed repairs done.",

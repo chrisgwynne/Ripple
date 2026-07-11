@@ -77,7 +77,12 @@ object RumourSystem {
             budget--
         }
 
-        // Second pass: inaccurate rumours can mutate and re-spread up to 3 hops from the original
+        // Second pass: inaccurate rumours can mutate and re-spread up to 3 hops from the original.
+        // RUMOUR_SPREAD is intentionally reused here (rather than a dedicated RUMOUR_MUTATED type)
+        // because mutated rumours are indistinguishable from ordinary leaks from the town's
+        // perspective — both are public gossip events, both are scored by ImportanceScorer and
+        // picked up by NewspaperGenerator the same way. The generationDepth payload field is the
+        // only internal distinction.
         val spreadableRumours = ctx.newEvents
             .filter {
                 it.type == EventType.RUMOUR_SPREAD &&

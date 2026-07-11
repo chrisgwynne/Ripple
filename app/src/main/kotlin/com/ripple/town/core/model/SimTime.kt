@@ -62,12 +62,22 @@ object SimTime {
 
     fun formatDateTime(minutes: Long): String = "${formatDate(minutes)} · ${formatClock(minutes)}"
 
+    // Time-of-day hour boundaries
+    const val DAWN_START_HOUR      = 5
+    const val DAWN_END_HOUR        = 7
+    const val MORNING_START_HOUR   = 8
+    const val MORNING_END_HOUR     = 11
+    const val AFTERNOON_START_HOUR = 12
+    const val AFTERNOON_END_HOUR   = 16
+    const val EVENING_START_HOUR   = 17
+    const val EVENING_END_HOUR     = 20
+
     fun timeOfDay(minutes: Long): TimeOfDay {
         return when (hourOfDay(minutes)) {
-            in 5..7 -> TimeOfDay.DAWN
-            in 8..11 -> TimeOfDay.MORNING
-            in 12..16 -> TimeOfDay.AFTERNOON
-            in 17..20 -> TimeOfDay.EVENING
+            in DAWN_START_HOUR..DAWN_END_HOUR           -> TimeOfDay.DAWN
+            in MORNING_START_HOUR..MORNING_END_HOUR     -> TimeOfDay.MORNING
+            in AFTERNOON_START_HOUR..AFTERNOON_END_HOUR -> TimeOfDay.AFTERNOON
+            in EVENING_START_HOUR..EVENING_END_HOUR     -> TimeOfDay.EVENING
             else -> TimeOfDay.NIGHT
         }
     }

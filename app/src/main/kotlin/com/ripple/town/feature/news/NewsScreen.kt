@@ -51,6 +51,16 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/**
+ * Resolved navigation targets for a single news story — sourced from the linked WorldEvent
+ * once stories are loaded. Null fields mean the linked event had no resident or building context.
+ */
+data class StoryNavTarget(
+    val storyId: Long,
+    val residentId: Long?,
+    val buildingId: Long?
+)
+
 @HiltViewModel
 class NewsViewModel @Inject constructor(
     private val repository: WorldRepository
@@ -69,9 +79,32 @@ class NewsViewModel @Inject constructor(
     private val _stories = MutableStateFlow<List<NewspaperStoryEntity>>(emptyList())
     val stories: StateFlow<List<NewspaperStoryEntity>> = _stories.asStateFlow()
 
+    /** Keyed by storyId — populated alongside [stories] when a story has a linked event. */
+    private val _storyNavTargets = MutableStateFlow<Map<Long, StoryNavTarget>>(emptyMap())
+    val storyNavTargets: StateFlow<Map<Long, StoryNavTarget>> = _storyNavTargets.asStateFlow()
+
     fun select(issueId: Long) {
         _selectedIssueId.value = issueId
-        viewModelScope.launch { _stories.value = repository.storiesOf(issueId) }
+        viewModelScope.launch {
+            val loaded = repository.storiesOf(issueId)
+            _stories.value = loaded
+            // Resolve resident/building IDs from linked events so story rows can navigate
+            // directly to a resident profile or building sheet when those are available.
+            val navTargets = mutableMapOf<Long, StoryNavTarget>()
+            loaded.forEach { story ->
+                val eventId = story.eventId ?: return@forEach
+                val event = repository.event(eventId) ?: return@forEach
+                val firstResidentId = event.involvedResidentIds.firstOrNull()
+                if (firstResidentId != null || event.buildingId != null) {
+                    navTargets[story.id] = StoryNavTarget(
+                        storyId = story.id,
+                        residentId = firstResidentId,
+                        buildingId = event.buildingId
+                    )
+                }
+            }
+            _storyNavTargets.value = navTargets
+        }
     }
 }
 
@@ -79,12 +112,15 @@ class NewsViewModel @Inject constructor(
 @Composable
 fun NewsScreen(
     onOpenEvent: (Long) -> Unit = {},
+    onResidentClick: (Long) -> Unit = {},
+    onBuildingClick: (Long) -> Unit = {},
     viewModel: NewsViewModel = hiltViewModel()
 ) {
     val issues by viewModel.issues.collectAsState()
     val selectedId by viewModel.selectedIssueId.collectAsState()
     val stories by viewModel.stories.collectAsState()
     val worldTime by viewModel.worldTime.collectAsState()
+    val storyNavTargets by viewModel.storyNavTargets.collectAsState()
 
     val current = issues.firstOrNull { it.id == selectedId } ?: issues.firstOrNull()
     androidx.compose.runtime.LaunchedEffect(issues.firstOrNull()?.id, selectedId) {
@@ -190,9 +226,14 @@ fun NewsScreen(
                 }
             }
             items(catStories, key = { "story${it.id}" }) { story ->
-                val storyClickable = story.eventId?.let { eid ->
-                    Modifier.clickable { onOpenEvent(eid) }
-                } ?: Modifier
+                val navTarget = storyNavTargets[story.id]
+                val storyClickable = when {
+                    // Prefer direct resident/building navigation when available, fall back to event.
+                    navTarget?.residentId != null -> Modifier.clickable { onResidentClick(navTarget.residentId) }
+                    navTarget?.buildingId != null -> Modifier.clickable { onBuildingClick(navTarget.buildingId) }
+                    story.eventId != null -> Modifier.clickable { onOpenEvent(story.eventId) }
+                    else -> Modifier
+                }
                 if (isHeadline) {
                     // Front-page treatment: distinct tinted block, bigger type, sits
                     // right under the masthead so it reads as the paper's lead story.

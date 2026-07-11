@@ -314,8 +314,7 @@ object PressureBridgeSystem {
      * `ConsequenceEngine`'s `JOB_LOST` rule), never a targeted relationship-dimension effect. This
      * adds exactly that: a small, bounded `resentment`/`dependency` shift on the couple's
      * `Relationship`, gated to at most once per [PARTNER_NUDGE_COOLDOWN_DAYS] days per couple via
-     * `state.lastIncidentAt`-style tracking (reusing the resident's own crisis-onset timestamp
-     * bucket rather than adding a new cooldown map) so this never compounds daily while a crisis
+     * `state.lastFinancialStrainNudgeAt` so this never compounds daily while a crisis
      * drags on for weeks.
      */
     fun onSustainedFinancialTrouble(ctx: TickContext) {

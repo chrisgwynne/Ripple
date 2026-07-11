@@ -31,6 +31,7 @@ object AppModule {
     @Singleton
     fun provideDatabase(@ApplicationContext context: Context): RippleDatabase =
         Room.databaseBuilder(context, RippleDatabase::class.java, RippleDatabase.NAME)
+            .addMigrations(RippleDatabase.MIGRATION_1_2)
             .fallbackToDestructiveMigrationOnDowngrade()
             .build()
 

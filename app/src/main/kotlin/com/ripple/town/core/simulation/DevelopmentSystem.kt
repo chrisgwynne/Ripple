@@ -43,6 +43,11 @@ object DevelopmentSystem {
     const val DAYS_PER_10K = 1.0
     /** Maximum municipal debt load before new projects are deferred. */
     const val MAX_DEBT = 150_000.0
+    /** Daily probability that a condemned low-value site triggers opportunistic renovation.
+     *  ~0.8% per day ≈ expected wait ~125 days before a derelict parcel attracts a developer. */
+    const val REGENERATION_DAILY_PROBABILITY = 0.008
+    /** Land value ceiling below which opportunistic regeneration can fire. */
+    const val REGENERATION_MAX_VALUE = 15_000.0
 
     fun updateDaily(ctx: TickContext) {
         val projects = ctx.state.developmentProjects.values.toList()
@@ -77,8 +82,8 @@ object DevelopmentSystem {
         }
         for (building in condemned) {
             // Only renovate when land value is genuinely depressed.
-            if (building.value > 15_000.0) continue
-            if (!ctx.rng.nextBoolean(0.008)) continue
+            if (building.value > REGENERATION_MAX_VALUE) continue
+            if (!ctx.rng.nextBoolean(REGENERATION_DAILY_PROBABILITY)) continue
             val devType = if (building.type.isHome) DevelopmentType.HOUSING_RESIDENTIAL
                           else DevelopmentType.COMMERCIAL_RETAIL
             val spec = when (devType) {

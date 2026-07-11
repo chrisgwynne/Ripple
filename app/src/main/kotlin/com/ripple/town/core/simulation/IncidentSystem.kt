@@ -1,5 +1,6 @@
 ﻿package com.ripple.town.core.simulation
 
+import com.ripple.town.core.model.Building
 import com.ripple.town.core.model.Activity
 import com.ripple.town.core.model.BuildingType
 import com.ripple.town.core.model.EventType
@@ -145,7 +146,7 @@ object IncidentSystem {
         building?.let {
             it.condition = (it.condition - ctx.rng.nextDouble(6.0, 16.0)).coerceAtLeast(5.0)
             it.visibleChanges += "${SimTime.formatDate(ctx.now)} — Fresh scrawl on the wall"
-            if (it.visibleChanges.size >= 6) it.visibleChanges.removeAt(0)
+            if (it.visibleChanges.size >= Building.MAX_VISIBLE_CHANGES) it.visibleChanges.removeAt(0)
         }
         val event = ctx.emit(
             EventType.VANDALISM,

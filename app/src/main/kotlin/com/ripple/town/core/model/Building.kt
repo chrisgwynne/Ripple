@@ -151,6 +151,11 @@ data class Building(
     /** Short strings describing visible changes over time ("Extension added", "Sign repainted"). */
     val visibleChanges: MutableList<String> = mutableListOf()
 ) {
+    companion object {
+        /** Maximum number of entries kept in [visibleChanges]. Older entries are evicted first. */
+        const val MAX_VISIBLE_CHANGES = 6
+    }
+
     fun containsTile(t: Tile): Boolean =
         t.x >= origin.x && t.x < origin.x + width && t.y >= origin.y && t.y < origin.y + height
 

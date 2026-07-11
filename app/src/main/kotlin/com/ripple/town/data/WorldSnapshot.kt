@@ -49,6 +49,8 @@ data class WorldUi(
     val emergenceRecords: List<EmergenceRecord> = emptyList(),
     /** Sorted list of district names + their approximate map centre. */
     val districtNav: List<DistrictNavEntry> = emptyList(),
+    /** District character panel data — sorted by name. */
+    val districts: List<DistrictSummaryUi> = emptyList(),
     /** Liveliness score from the last NarrativePlausibilityReport (0=robotic, 100=alive).
      *  Null until the engine has produced at least one report (~first month of sim time). */
     val plausibilityScore: Double? = null,
@@ -182,6 +184,22 @@ data class RelationUi(
 @Immutable
 data class DistrictNavEntry(val name: String, val cx: Float, val cy: Float)
 
+/** UI-facing summary of a single district's character and key statistics. */
+@Immutable
+data class DistrictSummaryUi(
+    val name: String,
+    /** e.g. "GENTRIFYING", "STABLE", "DECLINING" — the DistrictCharacter label uppercased. */
+    val character: String,
+    /** 0..100 composite wealth/employment score; 50 = town average. */
+    val prosperityIndex: Double,
+    /** Normalised daily crime incidence rate 0..1. */
+    val crimeRate: Double,
+    /** Rolling resident population. */
+    val population: Int,
+    /** Fraction of buildings with no active occupants (0..1). */
+    val vacancyRate: Double
+)
+
 @Immutable
 data class BuildingUi(
     val id: Long,
@@ -261,6 +279,18 @@ object SnapshotBuilder {
                 DistrictNavEntry(name, cx, cy)
             }
             .sortedBy { it.name }
+        val districts = state.districts.values
+            .sortedBy { it.name }
+            .map { d ->
+                DistrictSummaryUi(
+                    name = d.name,
+                    character = d.character.label.uppercase(),
+                    prosperityIndex = d.prosperityIndex,
+                    crimeRate = d.crimeRate,
+                    population = d.population,
+                    vacancyRate = d.vacancyRate
+                )
+            }
         return WorldUi(
             worldSeed = state.seed,
             townName = state.townName,
@@ -283,6 +313,7 @@ object SnapshotBuilder {
             buildings = buildings,
             map = state.map,
             districtNav = districtNav,
+            districts = districts,
             emergenceRecords = state.plausibilityData.emergenceRecords
                 .sortedByDescending { it.surpriseScore }.take(10),
             plausibilityScore = state.lastNarrativeReport?.overallScore,

@@ -502,6 +502,25 @@ object DecisionSystem {
             )
         }
 
+        // routineVariance: when NarrativePlausibilityEngine detects overly synchronised schedules
+        // it raises this value. We apply a very small multiplicative jitter to each scored action's
+        // needPressure term so that otherwise-identical residents make slightly different choices —
+        // deliberately tiny (variance ≤ 0.05 max spread) so it never overrides meaningful
+        // differences in need pressure or personality fit.
+        val rv = state.narrativeTuning.routineVariance
+        if (rv > 0.0) {
+            // smallNoise: a stable [-1, 1] value derived from resident id and current day so the
+            // jitter is reproducible across identical ticks (no external random call needed here —
+            // id + day already gives sufficient spread across the resident population).
+            val dayIndex = SimTime.dayIndex(now)
+            val smallNoise = ((r.id * 2654435761L + dayIndex * 40503L) and 0xFFFFL).toDouble() / 0xFFFFL * 2.0 - 1.0
+            val jitter = 1.0 + rv * smallNoise  // range: [1 - rv .. 1 + rv], rv ≤ 0.3 → at most ±0.3
+            for (i in out.indices) {
+                val a = out[i]
+                out[i] = a.copy(needPressure = (a.needPressure * jitter).coerceAtLeast(0.01))
+            }
+        }
+
         return out
     }
 

@@ -3,6 +3,7 @@ package com.ripple.town.feature.onboarding
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
@@ -73,7 +75,7 @@ class OnboardingViewModel @Inject constructor(
     }
 }
 
-/** Three quick steps: premise → pace → generate. No accounts, no forms. */
+/** Five steps: premise → pace → meet your town → you can nudge → generate. No accounts, no forms. */
 @Composable
 fun OnboardingScreen(
     onFinished: () -> Unit,
@@ -95,6 +97,10 @@ fun OnboardingScreen(
             Modifier.padding(32.dp).fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            if (step > 0) {
+                StepDots(current = step - 1, total = 4)
+                Spacer(Modifier.height(20.dp))
+            }
             when (step) {
                 0 -> {
                     RippleMark()
@@ -132,6 +138,47 @@ fun OnboardingScreen(
                     ) { Text("Next") }
                 }
                 2 -> {
+                    Text("Meet your town", style = MaterialTheme.typography.headlineSmall)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Tap any resident to follow their life. You'll see their needs, relationships, and goals.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(24.dp))
+                    ResidentTilePreview()
+                    Spacer(Modifier.height(24.dp))
+                    Button(
+                        onClick = { step = 3 },
+                        colors = ButtonDefaults.buttonColors(containerColor = RippleColors.WarmGreen)
+                    ) { Text("Got it →") }
+                }
+                3 -> {
+                    Text("You can nudge", style = MaterialTheme.typography.headlineSmall)
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "You start with 3 nudges. Tap a resident and choose an action — send them to the pub, prompt them to make amends, or push them toward a goal. Small choices echo.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(20.dp))
+                    NudgeExamples()
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "You earn nudges as time passes.",
+                        style = MaterialTheme.typography.bodySmall,
+                        textAlign = TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(20.dp))
+                    Button(
+                        onClick = { step = 4 },
+                        colors = ButtonDefaults.buttonColors(containerColor = RippleColors.WarmGreen)
+                    ) { Text("Got it →") }
+                }
+                4 -> {
                     if (!generating) {
                         Text("Name your town", style = MaterialTheme.typography.headlineSmall)
                         Spacer(Modifier.height(16.dp))
@@ -150,6 +197,101 @@ fun OnboardingScreen(
                         GenerationAnimation(townName)
                     }
                 }
+            }
+        }
+    }
+}
+
+/** Progress dots indicating which of the 5 onboarding steps is active. */
+@Composable
+private fun StepDots(current: Int, total: Int = 5) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        repeat(total) { index ->
+            Box(
+                Modifier
+                    .size(if (index == current) 10.dp else 7.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (index == current) RippleColors.WarmGreen
+                        else RippleColors.WarmGreen.copy(alpha = 0.28f)
+                    )
+            )
+        }
+    }
+}
+
+/** Illustrated resident tile preview card for the "Meet your town" step. */
+@Composable
+private fun ResidentTilePreview() {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .background(
+                color = RippleColors.PaleBlue.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(16.dp)
+            )
+            .border(
+                width = 1.dp,
+                color = RippleColors.PaleBlue,
+                shape = RoundedCornerShape(16.dp)
+            )
+            .padding(20.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // Avatar placeholder
+            Box(
+                Modifier
+                    .size(52.dp)
+                    .clip(CircleShape)
+                    .background(RippleColors.SkyBlue.copy(alpha = 0.7f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("👤", style = MaterialTheme.typography.titleLarge)
+            }
+            Spacer(Modifier.width(16.dp))
+            Column {
+                Text("Mabel Hurst", style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    "Baker  ·  😊 Content",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Goal: open her own shop",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+/** Three non-interactive nudge option pills for the "You can nudge" step. */
+@Composable
+private fun NudgeExamples() {
+    val options = listOf("Visit a friend", "Seek help", "Rest")
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        options.forEach { label ->
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .background(
+                        color = RippleColors.WarmGreen.copy(alpha = 0.12f),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = RippleColors.WarmGreen.copy(alpha = 0.4f),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    .padding(horizontal = 20.dp, vertical = 14.dp)
+            ) {
+                Text(label, style = MaterialTheme.typography.bodyMedium)
             }
         }
     }

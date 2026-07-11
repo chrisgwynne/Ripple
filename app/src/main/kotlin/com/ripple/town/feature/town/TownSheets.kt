@@ -53,6 +53,7 @@ import com.ripple.town.core.database.InterventionEntity
 import com.ripple.town.core.model.InterventionVerb
 import com.ripple.town.core.simulation.InterventionEngine
 import com.ripple.town.data.DeathSummary
+import com.ripple.town.data.DistrictSummaryUi
 import com.ripple.town.data.EventUi
 import com.ripple.town.data.TownStatsUi
 import com.ripple.town.data.WorldUi
@@ -938,6 +939,9 @@ fun TownOverviewSheetContent(world: WorldUi, viewModel: TownViewModel? = null) {
             StatBar("Health", stats.averageHealth)
             SectionTitle("Economy")
             Text("Average savings: ${stats.averageWealth.toInt()} coins", style = MaterialTheme.typography.bodyMedium)
+            if (world.districts.isNotEmpty()) {
+                DistrictsPanelContent(world)
+            }
             world.plausibilityScore?.let { score ->
                 SectionTitle("Simulation health")
                 Text(
@@ -1223,4 +1227,59 @@ fun DeathSummaryDialog(
             TextButton(onClick = onDismiss) { Text("Keep watching the town") }
         }
     )
+}
+
+// ------------------------------------------------------------ districts panel
+
+/**
+ * Compact, one-row-per-district breakdown of each district's character and key stats.
+ * Called from [TownOverviewSheetContent]'s "At a glance" tab, after the Economy section.
+ */
+@Composable
+private fun DistrictsPanelContent(world: WorldUi) {
+    SectionTitle("Districts")
+    world.districts.forEach { district ->
+        DistrictRow(district)
+    }
+}
+
+@Composable
+private fun DistrictRow(d: DistrictSummaryUi) {
+    val characterColor = when (d.character) {
+        "GENTRIFYING", "PROSPEROUS", "REGENERATING", "DEVELOPING" -> RippleColors.WarmGreen
+        "DECLINING", "DERELICT", "HIGH CRIME" -> RippleColors.DeepBrick
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        // Name + character badge
+        Column(Modifier.weight(1f)) {
+            Text(d.name, style = MaterialTheme.typography.titleSmall)
+            Text(
+                d.character,
+                style = MaterialTheme.typography.labelSmall,
+                color = characterColor
+            )
+        }
+        // Key stats
+        Column(horizontalAlignment = Alignment.End) {
+            Text(
+                "Prosperity ${d.prosperityIndex.toInt()}/100",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            val crimePct = (d.crimeRate * 100).toInt()
+            Text(
+                "Crime ${crimePct}%",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (d.crimeRate > 0.5) RippleColors.DeepBrick
+                        else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
 }

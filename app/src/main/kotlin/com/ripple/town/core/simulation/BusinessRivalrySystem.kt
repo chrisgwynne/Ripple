@@ -15,8 +15,9 @@ import com.ripple.town.core.model.RelationshipKind
  *
  * Bounded and gentle by design: nudges are small daily rolls (matching every
  * other system's `MAX_...` cap pattern), so rivalry is a slow drift over
- * weeks, not a dramatic swing, and most same-type pairs never become bitter
- * enemies — only ones that stay closely, persistently matched.
+ * ~3 months (0.6 resentment/day against a 55-point threshold ≈ 92 days from a
+ * standing start), not a dramatic swing, and most same-type pairs never become
+ * bitter enemies — only ones that stay closely, persistently matched.
  */
 object BusinessRivalrySystem {
 

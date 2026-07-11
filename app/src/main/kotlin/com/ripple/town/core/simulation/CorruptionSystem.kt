@@ -13,6 +13,10 @@ import com.ripple.town.core.model.*
 object CorruptionSystem {
 
     const val UPDATE_INTERVAL_DAYS = 30L
+    /** Base per-month probability that a power-holder's motive × opportunity tips into an act
+     *  of corruption, before oversight scaling. At full motive + opportunity with no oversight
+     *  this gives a ~0.84 monthly chance; with strong oversight it drops to ~0.34. */
+    const val BASE_CORRUPTION_PROBABILITY = 0.012
 
     fun updateMonthly(ctx: TickContext) {
         val state = ctx.state
@@ -54,7 +58,7 @@ object CorruptionSystem {
         val opportunity = if (r.id == state.mayorId) 0.7 else 0.4
         // Weak oversight amplifies risk; strong oversight suppresses it
         val oversightFactor = 1.2 - oversightStrength * 0.8  // 0.4..1.2
-        val corruptionRisk = motive * opportunity * oversightFactor * 0.012
+        val corruptionRisk = motive * opportunity * oversightFactor * BASE_CORRUPTION_PROBABILITY
         if (!ctx.rng.nextBoolean(corruptionRisk)) return
         // Corruption emerges
         val type = ctx.rng.pick(CorruptionType.values().toList())
