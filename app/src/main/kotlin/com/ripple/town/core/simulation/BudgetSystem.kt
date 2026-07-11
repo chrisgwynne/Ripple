@@ -44,7 +44,7 @@ object BudgetSystem {
         val budget = state.municipalBudget
 
         // Annual reset at the year boundary.
-        val annualMinutes = SimTime.MINUTES_PER_DAY * 365L
+        val annualMinutes = SimTime.MINUTES_PER_YEAR
         if (budget.yearStartedAt == 0L) budget.yearStartedAt = state.time
         if (state.time - budget.yearStartedAt >= annualMinutes) {
             budget.taxRevenueThisYear = 0.0
@@ -86,9 +86,9 @@ object BudgetSystem {
         budget.balance -= serviceExpenses
         budget.serviceExpensesThisYear += serviceExpenses
 
-        // 4. Debt interest (applied daily at annual rate / 365).
+        // 4. Debt interest (applied daily at annual rate / DAYS_PER_YEAR).
         if (budget.debt > 0.0) {
-            val dailyInterest = budget.debt * DEBT_INTEREST_RATE / 365.0
+            val dailyInterest = budget.debt * DEBT_INTEREST_RATE / SimTime.DAYS_PER_YEAR.toDouble()
             budget.balance -= dailyInterest
             budget.serviceExpensesThisYear += dailyInterest
         }

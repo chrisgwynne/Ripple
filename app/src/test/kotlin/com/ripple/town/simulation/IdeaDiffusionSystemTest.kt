@@ -116,7 +116,7 @@ class IdeaDiffusionSystemTest {
             )
         }
 
-        assertThat(resident.activeIdeas.size).isAtMost(IdeaDiffusionSystem.MAX_ACTIVE_IDEAS + 2)
+        assertThat(resident.activeIdeas.size).isEqualTo(IdeaDiffusionSystem.MAX_ACTIVE_IDEAS + 2)
         // Now drive the bounding behaviour the way real adoption does: adopt one more via the
         // system's own path so the eviction logic actually runs.
         val ctx = TestWorld.contextFor(state)
@@ -125,7 +125,7 @@ class IdeaDiffusionSystemTest {
         repeat(10) {
             state.time += SimTime.MINUTES_PER_DAY
             IdeaDiffusionSystem.updateDaily(TestWorld.contextFor(state, salt = it.toLong()))
-            assertThat(resident.activeIdeas.size).isAtMost(IdeaDiffusionSystem.MAX_ACTIVE_IDEAS + 2)
+            assertThat(resident.activeIdeas.size).isAtMost(IdeaDiffusionSystem.MAX_ACTIVE_IDEAS)
         }
     }
 

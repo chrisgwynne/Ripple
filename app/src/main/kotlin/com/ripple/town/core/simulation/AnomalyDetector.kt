@@ -50,12 +50,15 @@ object AnomalyDetector {
             if (r.ageAt(ctx.now) < 65) continue
             if (r.relationshipStatus != RelationshipStatus.SINGLE) continue
             if (r.partnerId != null) continue
-            // Never had a partner — check no prior DIVORCED/WIDOWED state exists
             if (r.goals.none { it.type == GoalType.FIND_PARTNER && it.status == GoalStatus.COMPLETED }) {
-                record(ctx, AnomalyType.NEVER_MARRIED,
-                    "${r.fullName} has reached the age of ${r.ageAt(ctx.now)} without ever taking a partner — by circumstance or by choice, nobody quite knows.",
-                    listOf(r.id), emptyList(), r.ageAt(ctx.now).toDouble())
-                break
+                val alreadyRecorded = ctx.state.anomalyRecords.any {
+                    it.type == AnomalyType.NEVER_MARRIED && r.id in it.relatedResidentIds
+                }
+                if (!alreadyRecorded) {
+                    record(ctx, AnomalyType.NEVER_MARRIED,
+                        "${r.fullName} has reached the age of ${r.ageAt(ctx.now)} without ever taking a partner — by circumstance or by choice, nobody quite knows.",
+                        listOf(r.id), emptyList(), r.ageAt(ctx.now).toDouble())
+                }
             }
         }
     }
@@ -251,11 +254,11 @@ object AnomalyDetector {
         if (ctx.state.anomalyRecords.size > 200) ctx.state.anomalyRecords.removeAt(0)
     }
 
-    /** Return a recently-detected anomaly (within 90 days) for the newspaper. */
+    /** Return the most interesting recently-detected anomaly (within 90 days) for the newspaper. */
     fun recentAnomaly(state: WorldState): AnomalyRecord? {
         val window = 90L * SimTime.MINUTES_PER_DAY
         return state.anomalyRecords
             .filter { state.time - it.detectedAt < window }
-            .lastOrNull()
+            .maxByOrNull { it.metric }
     }
 }

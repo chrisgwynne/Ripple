@@ -178,7 +178,7 @@ object NeedsSystem {
      * Tracks employment effects on purpose/financialSecurity and basic stress/social drift.
      * No full activity loop, no skill updates, no trauma modelling.
      */
-    private fun updateConnected(ctx: TickContext, r: com.ripple.town.core.model.Resident) {
+    private fun updateConnected(ctx: TickContext, r: Resident) {
         val n = r.needs
         n.hunger = (n.hunger - 0.35).coerceAtLeast(40.0)
         n.energy = (n.energy - 0.18).coerceAtLeast(40.0)
@@ -198,7 +198,7 @@ object NeedsSystem {
         }
     }
 
-    private fun updateBackground(ctx: TickContext, r: com.ripple.town.core.model.Resident) {
+    private fun updateBackground(ctx: TickContext, r: Resident) {
         // Lightweight residents drift gently and follow a statistical routine.
         val n = r.needs
         n.hunger = (n.hunger - 0.2).coerceAtLeast(40.0)
