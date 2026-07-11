@@ -11,6 +11,7 @@ import com.ripple.town.core.model.EmergenceRecord
 import com.ripple.town.core.model.LifeStage
 import com.ripple.town.core.model.Mood
 import com.ripple.town.core.model.Personality
+import com.ripple.town.core.model.PolicyStatus
 import com.ripple.town.core.model.SimSpeed
 import com.ripple.town.core.model.SimTime
 import com.ripple.town.core.model.SpriteConfig
@@ -56,7 +57,10 @@ data class WorldUi(
     val plausibilityScore: Double? = null,
     /** Short human-readable descriptions of the most severe plausibility issues found,
      *  capped at 3 so the UI stays scannable. Empty when none were flagged. */
-    val plausibilityIssues: List<String> = emptyList()
+    val plausibilityIssues: List<String> = emptyList(),
+    /** Political snapshot for the Town Overview "Politics" tab. Null until the
+     *  simulation has elected its first mayor (mayorId non-null). */
+    val politics: PoliticsSummaryUi? = null
 ) {
     val residentsById: Map<Long, ResidentUi> by lazy { residents.associateBy { it.id } }
     val buildingsById: Map<Long, BuildingUi> by lazy { buildings.associateBy { it.id } }
@@ -82,6 +86,35 @@ data class WorldUi(
 }
 
 private fun List<Double>.average0(): Double = if (isEmpty()) 0.0 else average()
+
+// ── Politics UI models ────────────────────────────────────────────────────────
+
+/** One party's standing in the current council snapshot. */
+@Immutable
+data class PartyStandingUi(
+    val name: String,
+    val seats: Int,
+    val approval: Int,
+    val isGoverning: Boolean
+)
+
+/**
+ * Political snapshot surfaced in the Town Overview "Politics" tab.
+ * Built once per snapshot from the mutable engine state — the UI never
+ * reads WorldState directly.
+ */
+@Immutable
+data class PoliticsSummaryUi(
+    val mayorName: String,
+    val mayorApproval: Int,             // 0–100
+    val isElectionActive: Boolean,
+    val daysUntilNextElection: Int,
+    val parties: List<PartyStandingUi>,
+    val recentPolicies: List<String>,   // last ≤3 enacted policy titles
+    val currentAdminSummary: String     // e.g. "Year 4 of the Smith administration"
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 /** Town-wide aggregate figures for the town-overview overlay. */
 @Immutable
@@ -323,7 +356,8 @@ object SnapshotBuilder {
                 ?.sortedByDescending { it.severity }
                 ?.take(3)
                 ?.map { it.description }
-                .orEmpty()
+                .orEmpty(),
+            politics = buildPoliticsUi(state)
         )
     }
 
@@ -463,6 +497,73 @@ object SnapshotBuilder {
         }
         // Background resident with no map home: not drawn.
         return Triple(0f, 0f, false)
+    }
+
+    private fun buildPoliticsUi(state: WorldState): PoliticsSummaryUi? {
+        val mayorId = state.mayorId ?: return null
+        val mayor = state.residents[mayorId] ?: return null
+
+        // ── Approval ────────────────────────────────────────────────────────
+        val approval = state.publicOpinionData.approvalRating.toInt().coerceIn(0, 100)
+
+        // ── Election countdown ──────────────────────────────────────────────
+        val isElectionActive = state.campaignEndsAt != null
+        val daysUntilNextElection = if (state.nextElectionAt > 0) {
+            ((state.nextElectionAt - state.time) / SimTime.MINUTES_PER_DAY).toInt().coerceAtLeast(0)
+        } else 0
+
+        // ── Party standings ─────────────────────────────────────────────────
+        // Governing party = the mayor's party (if any)
+        val governingPartyId = mayor.partyId
+        // Seat count: councillors + mayor, attributed by partyId
+        val allPoliticalIds = (state.councillorIds + mayorId).distinct()
+        val seatsByParty = allPoliticalIds
+            .mapNotNull { id -> state.residents[id]?.partyId }
+            .groupingBy { it }
+            .eachCount()
+
+        val parties = state.politicalParties.values
+            .filter { it.dissolvedAt == null }
+            .sortedByDescending { seatsByParty.getOrDefault(it.id, 0) * 100 + it.reputation }
+            .take(5)
+            .map { party ->
+                PartyStandingUi(
+                    name = party.name,
+                    seats = seatsByParty.getOrDefault(party.id, 0),
+                    approval = party.reputation.toInt().coerceIn(0, 100),
+                    isGoverning = party.id == governingPartyId
+                )
+            }
+
+        // ── Recent enacted policies ─────────────────────────────────────────
+        val recentPolicies = state.activePolicies.values
+            .filter { it.status == PolicyStatus.PASSED }
+            .sortedByDescending { it.passedAt ?: 0L }
+            .take(3)
+            .map { it.title }
+
+        // ── Administration summary ──────────────────────────────────────────
+        val currentAdmin = state.governmentRecords.lastOrNull { it.id == state.currentGovernmentId }
+            ?: state.governmentRecords.lastOrNull()
+        val adminSummary = if (currentAdmin != null) {
+            val yearStarted = SimTime.year(currentAdmin.startedAt)
+            val yearNow = SimTime.year(state.time)
+            val adminYears = (yearNow - yearStarted + 1).coerceAtLeast(1)
+            val surname = currentAdmin.leaderName.substringAfterLast(' ')
+            "Year $adminYears of the $surname administration"
+        } else {
+            "No administration on record"
+        }
+
+        return PoliticsSummaryUi(
+            mayorName = mayor.fullName,
+            mayorApproval = approval,
+            isElectionActive = isElectionActive,
+            daysUntilNextElection = daysUntilNextElection,
+            parties = parties,
+            recentPolicies = recentPolicies,
+            currentAdminSummary = adminSummary
+        )
     }
 
     private fun buildingUi(state: WorldState, b: Building, bizByBuilding: Map<Long, List<com.ripple.town.core.model.Business>>): BuildingUi {

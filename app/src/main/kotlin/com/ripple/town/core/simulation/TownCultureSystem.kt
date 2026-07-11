@@ -4,6 +4,7 @@ import com.ripple.town.core.model.BusinessType
 import com.ripple.town.core.model.CulturalDimension
 import com.ripple.town.core.model.IdentityLabel
 import com.ripple.town.core.model.SkillType
+import com.ripple.town.core.model.TownCultureRecord
 
 /**
  * Monthly scan that derives the town's cultural identity from what is actually
@@ -62,5 +63,14 @@ object TownCultureSystem {
             safety < 35.0 -> culture.dimensions += CulturalDimension.TROUBLED
             safety > 70.0 -> culture.dimensions += CulturalDimension.SAFE
         }
+
+        // Append a snapshot to the persistent trajectory so the town accumulates an
+        // identity over decades. Cap at 120 entries (~10 sim years) to bound memory.
+        state.townCultureHistory += TownCultureRecord(
+            tick = ctx.now,
+            dimensions = culture.dimensions.toSet(),
+            description = culture.describe()
+        )
+        if (state.townCultureHistory.size > 120) state.townCultureHistory.removeAt(0)
     }
 }

@@ -398,6 +398,14 @@ data class WorldState(
     // --- Human society evolution (2026-07-11) ---
     val legacyRecords: MutableList<LegacyRecord> = mutableListOf(),
     var townCulture: TownCulture = TownCulture(),
+    /**
+     * Rolling history of monthly culture snapshots, newest last, capped at 120 entries
+     * (~10 sim years at one snapshot per month) by [TownCultureSystem.updateMonthly].
+     * Gives the town a persistent character trajectory — the UI can show "Previously …"
+     * lines alongside the current culture rather than only the current moment. Safe
+     * default (empty list) so existing checkpoints deserialise unchanged.
+     */
+    val townCultureHistory: MutableList<TownCultureRecord> = mutableListOf(),
     var nextLegacyId: Long = 1L,
     val institutionRecords: MutableMap<Long, InstitutionRecord> = mutableMapOf(),
     val communityGroups: MutableMap<Long, CommunityGroup> = mutableMapOf(),

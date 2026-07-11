@@ -27,3 +27,20 @@ data class TownCulture(
         else -> dimensions.take(3).joinToString(", ") { it.label } + " — a community with a distinct character"
     }
 }
+
+/**
+ * A single snapshot of the town's cultural identity at a point in time — stored in
+ * [WorldState.townCultureHistory] so the town accumulates a persistent character trajectory
+ * over decades rather than only ever showing the current moment.
+ *
+ * [tick] is the sim-minute timestamp of the snapshot. [dimensions] is the full set of
+ * [CulturalDimension] values active at that moment. [description] is the human-readable
+ * sentence produced by [TownCulture.describe()] at snapshot time, cached here so the UI
+ * never has to re-derive it from an archived set.
+ */
+@Serializable
+data class TownCultureRecord(
+    val tick: Long,
+    val dimensions: Set<CulturalDimension>,
+    val description: String
+)
