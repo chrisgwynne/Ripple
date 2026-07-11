@@ -92,9 +92,11 @@ object CorruptionSystem {
             sourceResidentId = perpetrator.id,
             severity = incident.severity * 0.8 + 0.2
         )
-        // Public approval drops; corruption flag set on government record
+        // Public approval drops; corruption flag set on government record.
+        // Only apply the immediate approval drop — PublicOpinionSystem recomputes per-resident
+        // satisfaction weekly and already includes an active-corruption penalty. Direct replaceAll
+        // bypassed that weekly clamp and double-hit every resident.
         val hit = 8.0 + incident.severity * 10.0
-        state.publicOpinionData.residentSatisfaction.replaceAll { _, v -> (v - hit * 0.6).coerceAtLeast(0.0) }
         state.publicOpinionData.approvalRating = (state.publicOpinionData.approvalRating - hit).coerceAtLeast(0.0)
         state.currentGovernmentId?.let { gid ->
             state.governmentRecords.find { it.id == gid }?.corruption = true

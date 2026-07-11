@@ -32,7 +32,7 @@ object PoliticalHistorySystem {
         }
     }
 
-    private fun buildLegacy(record: GovernmentRecord, state: WorldState): String {
+    internal fun buildLegacy(record: GovernmentRecord, state: WorldState): String {
         val yrs = ((record.endedAt ?: state.time) - record.startedAt) / SimTime.MINUTES_PER_YEAR
         val delayed = record.policiesPassed.mapNotNull { id -> state.activePolicies[id] }
             .filter { it.delayDays > 0 }

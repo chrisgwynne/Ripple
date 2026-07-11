@@ -10,7 +10,8 @@ enum class TownEraType(val label: String) {
     GOLDEN_AGE("A Golden Age"),
     GREAT_FIRE("The Fire"),
     POLITICAL_UPHEAVAL("The Political Storm"),
-    FOUNDING_ERA("The Early Years")
+    FOUNDING_ERA("The Early Years"),
+    DYNASTY("The Dynasty Years")
 }
 
 /**

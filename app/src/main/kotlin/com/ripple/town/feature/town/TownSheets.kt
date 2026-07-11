@@ -451,6 +451,7 @@ private fun groupRoutineEvents(events: List<EventUi>, now: Long, isOpenAndBusy: 
 @Composable
 fun EventSheetContent(world: WorldUi, eventId: Long, sprites: SpriteProvider, viewModel: TownViewModel) {
     val chain by viewModel.causeChain.collectAsState()
+    val forward by viewModel.forwardChain.collectAsState()
     val event = chain.firstOrNull()?.firstOrNull { it.id == eventId }
         ?: chain.firstOrNull()?.firstOrNull()
     // Phase 4 backlog item: NarrativeTextProvider. A richer, templated elaboration of the
@@ -556,6 +557,27 @@ fun EventSheetContent(world: WorldUi, eventId: Long, sprites: SpriteProvider, vi
             EmptyNote("Its causes run deeper than the town remembers.")
         } else {
             EmptyNote("As far as anyone can tell, this simply happened.")
+        }
+        if (forward.isNotEmpty()) {
+            SectionTitle("What this led to")
+            forward.forEach { level ->
+                CauseConnector(Modifier.padding(start = 4.dp))
+                level.forEach { consequence ->
+                    Surface(
+                        shape = MaterialTheme.shapes.small,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp)
+                            .clickable { viewModel.openEvent(consequence.id) }
+                    ) {
+                        Column(Modifier.padding(10.dp)) {
+                            Text("→ ${consequence.description}", style = MaterialTheme.typography.bodyMedium)
+                            Text(consequence.timeLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
         }
     }
 }

@@ -66,6 +66,9 @@ class TownViewModel @Inject constructor(
     private val _causeChain = MutableStateFlow<List<List<EventUi>>>(emptyList())
     val causeChain: StateFlow<List<List<EventUi>>> = _causeChain.asStateFlow()
 
+    private val _forwardChain = MutableStateFlow<List<List<EventUi>>>(emptyList())
+    val forwardChain: StateFlow<List<List<EventUi>>> = _forwardChain.asStateFlow()
+
     private val _interventionMessage = MutableStateFlow<String?>(null)
     val interventionMessage: StateFlow<String?> = _interventionMessage.asStateFlow()
 
@@ -97,7 +100,11 @@ class TownViewModel @Inject constructor(
 
     fun openEvent(eventId: Long) {
         _sheet.value = TownSheet.EventSheet(eventId)
-        viewModelScope.launch { _causeChain.value = repository.causeChain(eventId) }
+        _forwardChain.value = emptyList()
+        viewModelScope.launch {
+            _causeChain.value = repository.causeChain(eventId)
+            _forwardChain.value = repository.forwardChain(eventId)
+        }
     }
 
     fun openIntervention(residentId: Long) {

@@ -48,6 +48,9 @@ interface EventDao {
     @Query("SELECT causeEventId FROM event_causes WHERE eventId = :eventId")
     suspend fun causeIdsOf(eventId: Long): List<Long>
 
+    @Query("SELECT eventId FROM event_causes WHERE causeEventId = :eventId")
+    suspend fun consequenceIdsOf(eventId: Long): List<Long>
+
     @Query("SELECT * FROM world_events ORDER BY time DESC, id DESC LIMIT :limit")
     fun latestEvents(limit: Int): Flow<List<WorldEventEntity>>
 

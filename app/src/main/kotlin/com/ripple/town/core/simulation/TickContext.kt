@@ -16,24 +16,34 @@ import com.ripple.town.core.model.WorldState
 interface EventIndex {
     fun depthOf(eventId: Long): Int
     fun get(eventId: Long): WorldEvent?
+    /** IDs of events that were directly caused by [eventId], in emission order. */
+    fun consequencesOf(eventId: Long): List<Long>
 }
 
 class InMemoryEventIndex : EventIndex {
     private val depths = HashMap<Long, Int>()
     private val recent = HashMap<Long, WorldEvent>()
+    // Forward-consequence index: eventId → list of event IDs that this event caused.
+    private val forward = HashMap<Long, MutableList<Long>>()
 
     fun remember(event: WorldEvent) {
         depths[event.id] = event.consequenceDepth
         recent[event.id] = event
+        // Update forward index: each cause now knows it led to this event.
+        for (causeId in event.causeIds) {
+            forward.getOrPut(causeId) { mutableListOf() } += event.id
+        }
         if (recent.size > 4000) {
-            // keep depths (tiny) but drop old bodies
+            // keep depths (tiny) and forward index (lightweight ids) but drop old bodies
             val cutoff = event.id - 2000
             recent.keys.removeAll { it < cutoff }
+            forward.keys.removeAll { it < cutoff }
         }
     }
 
     override fun depthOf(eventId: Long): Int = depths[eventId] ?: 0
     override fun get(eventId: Long): WorldEvent? = recent[eventId]
+    override fun consequencesOf(eventId: Long): List<Long> = forward[eventId] ?: emptyList()
 }
 
 /**

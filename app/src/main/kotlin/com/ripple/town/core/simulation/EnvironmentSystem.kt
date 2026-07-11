@@ -24,9 +24,11 @@ object EnvironmentSystem {
         val targetPollution = (factories * 8.0 - parks * 3.0).coerceIn(0.0, 100.0)
         env.pollution += (targetPollution - env.pollution) * 0.1
 
-        // Greenery from parks and low density
+        // Greenery from parks and low density.
+        // density = residents / buildings: high = crowded = less greenery; low = spacious = more.
         val living = state.livingResidents().size.coerceAtLeast(1)
-        val density = state.buildings.size.toDouble() / living
+        val buildings = state.buildings.size.coerceAtLeast(1)
+        val density = living.toDouble() / buildings
         val targetGreenery = (parks * 15.0 + (1.0 - density.coerceAtMost(1.0)) * 40.0).coerceIn(0.0, 100.0)
         env.greenery += (targetGreenery - env.greenery) * 0.08
 

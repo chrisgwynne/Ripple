@@ -302,7 +302,7 @@ object PoliticsSystem {
                 if (prev.endedAt == null) {
                     prev.endedAt = state.time
                     prev.finalApproval = state.publicOpinionData.approvalRating
-                    if (prev.legacyStatement.isEmpty()) prev.legacyStatement = buildLegacy(prev, state)
+                    if (prev.legacyStatement.isEmpty()) prev.legacyStatement = PoliticalHistorySystem.buildLegacy(prev, state)
                 }
             }
         }
@@ -323,19 +323,4 @@ object PoliticsSystem {
         if (party != null) PolicyEngine.enactManifestoPolicies(ctx, party)
     }
 
-    private fun buildLegacy(record: GovernmentRecord, state: WorldState): String {
-        val yrs = ((record.endedAt ?: state.time) - record.startedAt) / SimTime.MINUTES_PER_YEAR
-        return when {
-            record.corruption ->
-                "${record.leaderName}'s time in office was overshadowed by corruption"
-            record.finalApproval > 70 && record.policiesPassed.size >= 2 ->
-                "${record.leaderName} left as a popular mayor who delivered real change"
-            record.finalApproval < 35 ->
-                "${record.leaderName}'s government was widely unpopular by the time they left"
-            record.policiesPassed.isEmpty() ->
-                "${record.leaderName} served ${yrs.coerceAtLeast(1)} year(s) without passing major policy"
-            else ->
-                "${record.leaderName} led a stable administration for ${yrs.coerceAtLeast(1)} year(s)"
-        }
-    }
 }

@@ -152,7 +152,9 @@ enum class EventType(val label: String) {
     /** An under-5 child has no assigned caregiver and the town has no nursery. */
     CHILD_WELFARE_CONCERN("Child welfare concern"),
     /** A council member or mayor is found to have engaged in corrupt conduct. */
-    POLITICAL_SCANDAL("Political scandal")
+    POLITICAL_SCANDAL("Political scandal"),
+    /** Government approval has moved significantly — fell sharply or climbed back. */
+    APPROVAL_SHIFTED("Approval shifted")
 }
 
 enum class EventVisibility {

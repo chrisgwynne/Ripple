@@ -455,6 +455,28 @@ class WorldRepository @Inject constructor(
         return levels
     }
 
+    /** Forward-consequence chain for the "What this led to" viewer. */
+    suspend fun forwardChain(eventId: Long, maxDepth: Int = 3): List<List<EventUi>> {
+        val levels = mutableListOf<List<EventUi>>()
+        var frontier = listOf(eventId)
+        val seen = mutableSetOf(eventId)
+        var depth = 0
+        while (frontier.isNotEmpty() && depth < maxDepth) {
+            val nextIds = frontier.flatMap { db.eventDao().consequenceIdsOf(it) }
+                .distinct().filter { it !in seen }
+            if (nextIds.isEmpty()) break
+            val rows = db.eventDao().events(nextIds)
+                .filter { it.visibility != "HIDDEN" }
+                .sortedBy { it.time }
+            if (rows.isEmpty()) break
+            levels += rows.map { it.toUi() }
+            seen += nextIds
+            frontier = nextIds
+            depth++
+        }
+        return levels
+    }
+
     fun newspaperIssues(): Flow<List<com.ripple.town.core.database.NewspaperIssueEntity>> = db.newspaperDao().issues()
 
     suspend fun storiesOf(issueId: Long): List<com.ripple.town.core.database.NewspaperStoryEntity> =

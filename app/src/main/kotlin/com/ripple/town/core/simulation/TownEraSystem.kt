@@ -100,6 +100,41 @@ object TownEraSystem {
             if (state.townSentiment.optimism > 55.0) era.endedAt = ctx.now
         }
 
+        // Close an EPIDEMIC era when general health recovers
+        for (era in state.townEras.filter { it.type == TownEraType.EPIDEMIC && it.endedAt == null }) {
+            if (state.townState.healthIndex > 65.0) era.endedAt = ctx.now
+        }
+
+        // Close a DYNASTY era when the ruling family no longer holds the mayoralty
+        for (era in state.townEras.filter { it.type == TownEraType.DYNASTY && it.endedAt == null }) {
+            val dynastySurname = era.name.removePrefix("The ").removeSuffix(" Dynasty")
+            val currentSurname = state.residents[state.mayorId]?.surname
+            if (currentSurname != dynastySurname) era.endedAt = ctx.now
+        }
+
+        // Detect widespread illness → epidemic
+        val avgHealth = if (state.residents.isEmpty()) 100.0 else
+            state.livingResidents().map { it.needs.health }.average()
+        if (avgHealth < 45.0) {
+            val yearLabel = SimTime.year(ctx.now)
+            maybeSpawnEra(ctx, TownEraType.EPIDEMIC,
+                "The Sickness Year $yearLabel",
+                "Disease spread from house to house. Those who could help did; those who couldn't stayed indoors and hoped.",
+                state.recentEventIds.lastOrNull() ?: 0L)
+        }
+
+        // Detect ruling dynasty (same family holds mayoralty across 2+ terms)
+        val mayorSurname = state.residents[state.mayorId]?.surname
+        if (mayorSurname != null) {
+            val legacy = state.familyLegacies[mayorSurname]
+            if (legacy != null && legacy.mayorships >= 2) {
+                maybeSpawnEra(ctx, TownEraType.DYNASTY,
+                    "The $mayorSurname Dynasty",
+                    "The ${mayorSurname} family has cast a long shadow over ${state.townName}'s politics — mayor after mayor bearing the same name.",
+                    state.recentEventIds.lastOrNull() ?: 0L)
+            }
+        }
+
         // Detect sustained crime wave
         if (state.townSentiment.safety < 25.0) {
             maybeSpawnEra(ctx, TownEraType.CRIME_WAVE,

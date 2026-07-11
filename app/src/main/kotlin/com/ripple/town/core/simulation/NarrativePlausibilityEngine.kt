@@ -281,8 +281,11 @@ object NarrativePlausibilityEngine {
             if (!r.inTown) continue
             val key = fun(t: EmergenceType) = "${t.name}_${r.id}"
 
-            // UNEXPECTED_LEADER: was born poor (wealth < 50 at some point) and is now mayor.
-            if (r.id == state.mayorId && r.wealth < 100 && key(EmergenceType.UNEXPECTED_LEADER) !in existingKeys) {
+            // UNEXPECTED_LEADER: rose from a family with little starting wealth to become mayor.
+            // FamilyLegacy.startingWealth is a better historical proxy than current wealth (which
+            // has likely grown with the job). Fall back to current wealth before legacy is tracked.
+            val familyStartWealth = state.familyLegacies[r.surname]?.startingWealth ?: r.wealth
+            if (r.id == state.mayorId && familyStartWealth < 200.0 && key(EmergenceType.UNEXPECTED_LEADER) !in existingKeys) {
                 found += EmergenceRecord(
                     type = EmergenceType.UNEXPECTED_LEADER.name,
                     residentId = r.id,
@@ -364,7 +367,10 @@ object NarrativePlausibilityEngine {
         for (resident in state.livingResidents()) {
             val children = resident.childIds.mapNotNull { state.resident(it) }.filter { it.alive }
             if (children.size >= 2) {
-                val parentWasWealthy = resident.wealth < 80 && resident.ageAt(now) >= 50
+                // Use family peak wealth as the historical signal — the current resident may
+                // now be impoverished too (that's the collapse), so current wealth is wrong.
+                val familyPeak = state.familyLegacies[resident.surname]?.peakWealth ?: resident.wealth
+                val parentWasWealthy = familyPeak > 2000.0 && resident.ageAt(now) >= 50
                 val childrenAllPoor = children.all { it.wealth < 60 && it.ageAt(now) >= 18 }
                 val keyStr = "${EmergenceType.DYNASTY_COLLAPSE.name}_${resident.id}"
                 if (parentWasWealthy && childrenAllPoor && keyStr !in existingKeys) {

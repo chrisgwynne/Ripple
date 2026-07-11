@@ -25,6 +25,7 @@ object PublicOpinionSystem {
             inc.status == CorruptionStatus.INVESTIGATED.name ||
             inc.status == CorruptionStatus.EXPOSED.name
         }
+        val previousApproval = data.approvalRating
         detailed.forEach { r ->
             val current = data.residentSatisfaction.getOrDefault(r.id, 50.0)
             val delta = computeDelta(r, state, mods, mayorPartyId, activeCorruption)
@@ -35,6 +36,23 @@ object PublicOpinionSystem {
         // Rolling approval rating = mean satisfaction
         data.approvalRating = if (data.residentSatisfaction.isEmpty()) 50.0
             else data.residentSatisfaction.values.average()
+        // Emit approval-change event so politics is visible in the newspaper and event log
+        val approvalChange = data.approvalRating - previousApproval
+        val mayorName = state.residents[state.mayorId]?.fullName ?: "The administration"
+        when {
+            approvalChange <= -8.0 && data.approvalRating < 35.0 ->
+                ctx.emit(EventType.APPROVAL_SHIFTED,
+                    "$mayorName's approval has collapsed to ${data.approvalRating.toInt()}% — residents have lost faith.",
+                    severity = 0.6)
+            approvalChange <= -8.0 ->
+                ctx.emit(EventType.APPROVAL_SHIFTED,
+                    "Public satisfaction with the government has dropped to ${data.approvalRating.toInt()}%.",
+                    severity = 0.35)
+            approvalChange >= 8.0 && data.approvalRating > 65.0 ->
+                ctx.emit(EventType.APPROVAL_SHIFTED,
+                    "Confidence in $mayorName's administration has climbed to ${data.approvalRating.toInt()}%.",
+                    severity = 0.2)
+        }
         // Update current government record peaks
         state.currentGovernmentId?.let { gid ->
             state.governmentRecords.find { it.id == gid }?.also { rec ->
