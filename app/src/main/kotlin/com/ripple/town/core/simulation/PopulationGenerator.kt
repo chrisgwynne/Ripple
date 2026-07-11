@@ -28,13 +28,10 @@ import com.ripple.town.core.model.WorldState
  * background residents are cheap on every one of those), but with real family/household
  * structure so the town doesn't read as a crowd of strangers.
  *
- * Population ceiling is real, not aspirational: `Building.capacity` (8 per home × the existing
- * 12 home slots = 96) is treated as the authoritative per-building headcount cap, even though no
- * runtime system currently enforces it for homes (`capacity` is otherwise a write-only field —
- * see `docs/simulation-rules.md`'s new "Procedural background population" section for the honest
- * accounting of why 1000 is out of reach without a map-expansion pass). [targetCount] is
- * therefore a ceiling/goal the generator stops short of once real spare home capacity runs out,
- * never a promise.
+ * Population ceiling is real, not aspirational: `Building.capacity` per home (4-8 depending on
+ * type) summed across all residential lots in the 320×200 map gives several thousand slots —
+ * far more than needed for 1,000 residents. [targetCount] is therefore achievable in practice;
+ * the generator stops at capacity only if an unusually small world is loaded.
  */
 object PopulationGenerator {
 

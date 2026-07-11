@@ -2,6 +2,7 @@ package com.ripple.town.core.simulation
 
 import com.ripple.town.core.model.Building
 import com.ripple.town.core.model.BuildingType
+import com.ripple.town.core.model.isHome
 import com.ripple.town.core.model.TransportRoute
 import com.ripple.town.core.model.toBusinessType
 import com.ripple.town.core.model.DistrictType
@@ -57,6 +58,10 @@ class WorldGenerator(private val seed: Long, private val townName: String = "Ash
         buildProceduralBuildings(state, mapResult)
         // Real, connected background households (family/partner links, age pyramid).
         PopulationGenerator.buildProceduralPopulation(state, rng, targetCount = PROCEDURAL_POPULATION_TARGET)
+        // Sanity check: log total population and home-building count (visible in logcat under "RIPPLE_GEN").
+        val totalResidents = state.residents.size
+        val totalHomes = state.buildings.values.count { it.type.isHome }
+        android.util.Log.i("RIPPLE_GEN", "Generated $totalResidents residents in $totalHomes homes across ${state.districts.size} districts")
         buildRelationships(state, rng)
         seedScenarios(state)
         seedTransportRoutes(state)
@@ -804,7 +809,7 @@ class WorldGenerator(private val seed: Long, private val townName: String = "Ash
         const val ROWAN_ST_Y = 22
         /** Target for procedural background population; population will be capped by
          *  available home capacity if fewer homes exist than needed to reach this target. */
-        const val PROCEDURAL_POPULATION_TARGET = 950
+        const val PROCEDURAL_POPULATION_TARGET = 1000
         const val NEW_FAMILY_NOTE = "new_family_arrival"
     }
 }
