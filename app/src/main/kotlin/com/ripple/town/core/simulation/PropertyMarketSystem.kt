@@ -55,6 +55,7 @@ object PropertyMarketSystem {
             if (home.ownerId != null) continue // already bought by this or an earlier household
             if (home.abandoned) continue
 
+            if (home.value <= 0.0) continue  // no-value buildings are not for sale
             val buyer = buyerFor(ctx, hh, home.value) ?: continue
             purchase(ctx, hh, home.id, buyer.id)
         }

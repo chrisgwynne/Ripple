@@ -77,10 +77,8 @@ class RecoveryLadderTest {
                 break
             }
         }
-        // This lever can be masked by others firing the same day; if the sweep above didn't
-        // isolate it, fall back to a smaller, more direct probability sweep purely on the
-        // reputation-cost signature (unique to reduce-stock among the gentle levers).
-        assertThat(fired || true).isTrue() // covered more precisely by the cooldown test below
+        // reputation dip + balance credit is the unique signature of the reduce-stock lever
+        assertThat(fired).isTrue()
     }
 
     @Test

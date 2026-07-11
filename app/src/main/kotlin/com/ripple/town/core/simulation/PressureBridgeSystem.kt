@@ -72,11 +72,8 @@ object PressureBridgeSystem {
      * `DemandShift`'s existing `biz.demand += 8.0 * strength` formula in `DelayedEffectSystem
      * .apply` — `strength` here is deliberately chosen so `8.0 * strength ≈ amount`, keeping this
      * helper's `amount` parameter in the same "roughly how many demand points" units every other
-     * call site of this bridge reasons in. [causeIds] links the scheduled dip back to whatever
-     * triggered it (a `CRIME_COMMITTED`-flavoured event, a `WEATHER_DAMAGE` event) purely for
-     * documentation at the call site — the underlying `DelayedEffect.sourceEventId` already
-     * carries this; `causeIds` is accepted for symmetry with every other bridge helper in this
-     * codebase but is not separately persisted (DelayedEffect has no `causeIds` field).
+     * call site of this bridge reasons in. The triggering event is linked via [sourceEvent]
+     * (stored as `DelayedEffect.sourceEventId`).
      */
     fun applyTemporaryDemandPenalty(
         ctx: TickContext,

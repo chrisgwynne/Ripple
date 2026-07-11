@@ -28,7 +28,8 @@ object BusinessRivalrySystem {
     const val CLOSE_COMPETITION_THRESHOLD = 20.0
 
     /** Daily relationship nudges between owners while their businesses are in
-     *  close, sustained competition. Small — rivalry should take weeks to form. */
+     *  close, sustained competition. Small — at 0.6/day against a 55-point threshold,
+     *  rivalry takes ~3 months to form from a standing start. */
     const val RESENTMENT_PER_DAY = 0.6
     const val AFFECTION_DECAY_PER_DAY = 0.3
 
@@ -105,7 +106,7 @@ object BusinessRivalrySystem {
             ctx.emit(
                 EventType.RIVALRY_FORMED,
                 "There is bad blood between ${ownerA.fullName} and ${ownerB.fullName} now — " +
-                    "${a.name} and ${b.name} have been fighting over the same trade for weeks.",
+                    "${a.name} and ${b.name} have been fighting over the same trade for months.",
                 sourceResidentId = ownerA.id, targetResidentIds = listOf(ownerB.id),
                 severity = 0.3, visibility = EventVisibility.PRIVATE
             )

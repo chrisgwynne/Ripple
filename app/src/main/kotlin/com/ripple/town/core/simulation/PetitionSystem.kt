@@ -1,4 +1,4 @@
-package com.ripple.town.core.simulation
+﻿package com.ripple.town.core.simulation
 
 import com.ripple.town.core.model.Building
 import com.ripple.town.core.model.EventType
@@ -241,7 +241,7 @@ object PetitionSystem {
                 if (target != null) {
                     target.noise = (target.noise - NOISE_REDUCTION_ON_SUCCESS).coerceAtLeast(0.0)
                     target.visibleChanges += "${SimTime.formatDate(ctx.now)} — Noise abatement notice"
-                    if (target.visibleChanges.size > 6) target.visibleChanges.removeAt(0)
+                    if (target.visibleChanges.size >= 6) target.visibleChanges.removeAt(0)
                 }
                 "The town council has upheld the petition against ${target?.name ?: "a noisy premises"} — quieter hours are now in force."
             }
