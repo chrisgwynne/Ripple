@@ -854,6 +854,31 @@ fun TownOverviewSheetContent(world: WorldUi, viewModel: TownViewModel? = null) {
             StatBar("Health", stats.averageHealth)
             SectionTitle("Economy")
             Text("Average savings: ${stats.averageWealth.toInt()} coins", style = MaterialTheme.typography.bodyMedium)
+            if (world.emergenceRecords.isNotEmpty()) {
+                SectionTitle("Town stories")
+                world.emergenceRecords.forEach { record ->
+                    val typeLabel = com.ripple.town.core.model.EmergenceType.values()
+                        .firstOrNull { it.name == record.type }?.label ?: record.type
+                    Surface(
+                        shape = MaterialTheme.shapes.small,
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp)
+                            .then(
+                                if (viewModel != null)
+                                    Modifier.clickable { viewModel.openResident(record.residentId) }
+                                else Modifier
+                            )
+                    ) {
+                        Column(Modifier.padding(10.dp)) {
+                            Text(typeLabel, style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(record.description, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            }
             Spacer(Modifier.height(4.dp))
             Text(
                 "These are town-wide averages across everyone currently living here. " +

@@ -4,6 +4,7 @@ import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.EventVisibility
 import com.ripple.town.core.model.LegendSubject
 import com.ripple.town.core.model.LocalLegend
+import com.ripple.town.core.model.MemoryType
 import com.ripple.town.core.model.SimTime
 import com.ripple.town.core.model.WorldEvent
 import com.ripple.town.core.model.WorldState
@@ -176,14 +177,19 @@ object LegendSystem {
         if (possibleListeners.isEmpty()) return
         val listener = possibleListeners[ctx.rng.nextInt(possibleListeners.size)]
 
-        // Each successful spread ticks up believer count and marginally strengthens the legend
-        if (ctx.rng.nextBoolean(0.4)) {
+        // Each successful spread ticks up believer count and records belief on the listener
+        if (ctx.rng.nextBoolean(0.4) && legend.id !in listener.knownLegendIds) {
             legend.believerCount++
             legend.strength = (legend.strength + 0.5).coerceAtMost(100.0)
             legend.lastSpreadAt = ctx.now
+            listener.knownLegendIds += legend.id
+            ctx.addMemory(
+                listener,
+                MemoryType.INSPIRATION,
+                "${legend.subjectName}: ${legend.text}",
+                intensity = 20.0
+            )
         }
-        // Suppress unused variable warning
-        listener.let {}
     }
 
     private fun checkBusinessLongevityLegends(ctx: TickContext) {

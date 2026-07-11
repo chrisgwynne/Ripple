@@ -287,6 +287,9 @@ data class Resident(
     // RumourSystem's leak-eligibility check and any future dialogue/reaction logic need.
     // Bounded like memories so it can't grow without limit over a long-running world.
     val knownFacts: MutableList<Long> = mutableListOf(),
+    // Ids of LocalLegends this resident has heard and believes (or has been told about). Stored
+    // here rather than on LocalLegend.believerIds to keep legend data small and checkpoint-compat.
+    val knownLegendIds: MutableList<Long> = mutableListOf(),
 
     // Abstract, ownable ideas this resident currently holds (any strength) — see [IdeaTemplate]/
     // [ResidentIdeaState] and `IdeaDiffusionSystem`. Distinct from [ideaSeeds] above: ideaSeeds is

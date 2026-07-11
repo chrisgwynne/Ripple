@@ -125,15 +125,26 @@ object NarrativePlausibilityEngine {
             }
         }
 
-        // Tuning: if sleep events are highly regular, push sleepPressureVariance up.
-        val sleepTimings = data.eventTimingsByHour[EventType.PERSON_BORN.name]  // proxy: not ideal, but birth hours are a good diagnostic
-        if (sleepTimings != null && sleepTimings.size >= 10) {
-            val cv = coefficientOfVariation(sleepTimings.map { it.toDouble() })
+        // Tuning: measure actual sleep-schedule variance from the live resident state.
+        // For each sleeping resident, estimate their sleep-start hour from activityEndsAt minus
+        // a typical sleep block (480 min = 8 hours).  CV < 0.15 means everyone wakes at the same
+        // hour → push sleepPressureVariance up so NeedsSystem adds staggered overnight energy
+        // pressure next time it is wired.
+        val sleepingResidents = state.detailedResidents()
+            .filter { it.activity == com.ripple.town.core.model.Activity.SLEEPING && it.activityEndsAt > ctx.now }
+        if (sleepingResidents.size >= 5) {
+            val sleepStartHours = sleepingResidents.map { r ->
+                val startMin = (r.activityEndsAt - 480L).let { s ->
+                    ((s % SimTime.MINUTES_PER_DAY) / 60L).toInt().coerceIn(0, 23)
+                }
+                startMin
+            }
+            val cv = coefficientOfVariation(sleepStartHours.map { it.toDouble() })
             if (cv < 0.15 && state.narrativeTuning.sleepPressureVariance < 0.3) {
                 state.narrativeTuning = state.narrativeTuning.copy(
                     sleepPressureVariance = (state.narrativeTuning.sleepPressureVariance + 0.05).coerceAtMost(0.3)
                 )
-                tuningNotes += "Sleep pressure variance nudged up (+0.05) — schedules were too uniform."
+                tuningNotes += "Sleep pressure variance nudged up (+0.05) — residents were all sleeping at the same hour."
             }
         }
 

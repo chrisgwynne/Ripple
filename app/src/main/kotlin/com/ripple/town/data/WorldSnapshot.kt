@@ -13,6 +13,7 @@ import com.ripple.town.core.model.SimSpeed
 import com.ripple.town.core.model.SimTime
 import com.ripple.town.core.model.SpriteConfig
 import com.ripple.town.core.model.TimeOfDay
+import com.ripple.town.core.model.EmergenceRecord
 import com.ripple.town.core.model.TownMap
 import com.ripple.town.core.model.Weather
 import com.ripple.town.core.model.WorldState
@@ -41,7 +42,8 @@ data class WorldUi(
     val councillorIds: List<Long>,
     val residents: List<ResidentUi>,
     val buildings: List<BuildingUi>,
-    val map: TownMap
+    val map: TownMap,
+    val emergenceRecords: List<EmergenceRecord> = emptyList()
 ) {
     val residentsById: Map<Long, ResidentUi> by lazy { residents.associateBy { it.id } }
     val buildingsById: Map<Long, BuildingUi> by lazy { buildings.associateBy { it.id } }
@@ -239,7 +241,9 @@ object SnapshotBuilder {
             councillorIds = state.councillorIds.toList(),
             residents = residents,
             buildings = buildings,
-            map = state.map
+            map = state.map,
+            emergenceRecords = state.plausibilityData.emergenceRecords
+                .sortedByDescending { it.surpriseScore }.take(10)
         )
     }
 
