@@ -35,6 +35,27 @@ val BuildingType.isHome: Boolean
 val BuildingType.isPublicSpace: Boolean
     get() = this == BuildingType.PARK || this == BuildingType.PUB || this == BuildingType.CAFE
 
+fun BuildingType.toBusinessType(): BusinessType? = when (this) {
+    BuildingType.BAKERY           -> BusinessType.BAKERY
+    BuildingType.CAFE             -> BusinessType.CAFE
+    BuildingType.PUB              -> BusinessType.PUB
+    BuildingType.GROCER           -> BusinessType.GROCER
+    BuildingType.HARDWARE         -> BusinessType.HARDWARE
+    BuildingType.BOOKSHOP         -> BusinessType.BOOKSHOP
+    BuildingType.TAILOR           -> BusinessType.TAILOR
+    BuildingType.WORKSHOP         -> BusinessType.WORKSHOP
+    BuildingType.SCHOOL           -> BusinessType.SCHOOL
+    BuildingType.CLINIC           -> BusinessType.CLINIC
+    BuildingType.TOWN_HALL        -> BusinessType.TOWN_HALL
+    BuildingType.FACTORY          -> BusinessType.FACTORY
+    BuildingType.FIRE_STATION     -> BusinessType.FIRE_STATION
+    BuildingType.POLICE_STATION   -> BusinessType.POLICE_STATION
+    BuildingType.SPORTS_HALL      -> BusinessType.SPORTS_HALL
+    BuildingType.COMMUNITY_CENTRE -> BusinessType.COMMUNITY_CENTRE
+    // PARK, HOUSE, COTTAGE, TERRACE, FLAT, CEMETERY, VACANT — no business entity
+    else -> null
+}
+
 @Serializable
 data class Tile(val x: Int, val y: Int) {
     fun manhattan(other: Tile): Int = kotlin.math.abs(x - other.x) + kotlin.math.abs(y - other.y)

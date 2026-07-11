@@ -56,11 +56,11 @@ class WorldGeneratorTest {
         assertThat(types[BuildingType.FACTORY]!!.size).isAtLeast(1)
         assertThat(types[BuildingType.CEMETERY]).hasSize(1)
         assertThat(types[BuildingType.VACANT]).hasSize(1)
-        // Eight private Ashcombe businesses seeded (clinic/school/town hall are services).
+        // At least 8 private Ashcombe businesses seeded; procedural civic buildings add more.
         val commercial = state.businesses.values.filterNot {
             it.type.name in listOf("CLINIC", "SCHOOL", "TOWN_HALL")
         }
-        assertThat(commercial).hasSize(8)
+        assertThat(commercial.size).isAtLeast(8)
         // All buildings assigned to a district
         assertThat(state.buildings.values.all { it.districtId != null }).isTrue()
     }

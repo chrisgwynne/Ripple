@@ -2,6 +2,7 @@ package com.ripple.town.core.simulation
 
 import com.ripple.town.core.model.Building
 import com.ripple.town.core.model.BuildingType
+import com.ripple.town.core.model.toBusinessType
 import com.ripple.town.core.model.DistrictType
 import com.ripple.town.core.model.Business
 import com.ripple.town.core.model.BusinessType
@@ -190,6 +191,38 @@ class WorldGenerator(private val seed: Long, private val townName: String = "Ash
                 capacity = lot.capacity,
                 constructedAt = 0L,
                 districtId = districtByType[lot.districtType]?.id
+            )
+        }
+        buildProceduralCivicBusinesses(state)
+    }
+
+    /** Creates Business objects for civic buildings created by buildProceduralBuildings. */
+    private fun buildProceduralCivicBusinesses(state: WorldState) {
+        // BusinessType to (demand, balance, employeeCapacity) — civic services are publicly funded
+        val civicParams = mapOf(
+            BusinessType.FIRE_STATION     to Triple(40.0, 25_000.0, 6),
+            BusinessType.POLICE_STATION   to Triple(45.0, 30_000.0, 8),
+            BusinessType.COMMUNITY_CENTRE to Triple(50.0, 15_000.0, 4),
+            BusinessType.SPORTS_HALL      to Triple(55.0, 20_000.0, 4),
+            BusinessType.SCHOOL           to Triple(50.0, 18_000.0, 4),
+            BusinessType.CLINIC           to Triple(55.0, 22_000.0, 4),
+            BusinessType.GROCER           to Triple(65.0, 8_000.0,  3),
+            BusinessType.PUB              to Triple(60.0, 6_000.0,  3),
+            BusinessType.FACTORY          to Triple(60.0, 12_000.0, 6),
+            BusinessType.BOOKSHOP         to Triple(40.0, 5_000.0,  2),
+            BusinessType.WORKSHOP         to Triple(45.0, 10_000.0, 4),
+        )
+        // Only create for civic lots whose buildings don't already have a Business
+        val existingBuildingIds = state.businesses.values.map { it.buildingId }.toSet()
+        for (building in state.buildings.values) {
+            if (building.id in existingBuildingIds) continue
+            val bizType = building.type.toBusinessType() ?: continue
+            val (demand, balance, empCap) = civicParams[bizType] ?: continue
+            val bizId = state.nextBusinessId++
+            state.businesses[bizId] = Business(
+                id = bizId, buildingId = building.id, name = building.name, type = bizType,
+                ownerId = null, balance = balance, demand = demand,
+                employeeCapacity = empCap, openedAt = 0L
             )
         }
     }
@@ -719,7 +752,7 @@ class WorldGenerator(private val seed: Long, private val townName: String = "Ash
         const val ROWAN_ST_Y = 22
         /** Target for procedural background population; population will be capped by
          *  available home capacity if fewer homes exist than needed to reach this target. */
-        const val PROCEDURAL_POPULATION_TARGET = 500
+        const val PROCEDURAL_POPULATION_TARGET = 950
         const val NEW_FAMILY_NOTE = "new_family_arrival"
     }
 }
