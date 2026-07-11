@@ -23,5 +23,10 @@ data class CommunityGroup(
     val meetingBuildingId: Long?,
     val memberIds: MutableList<Long> = mutableListOf(),
     var active: Boolean = true,
-    var reputation: Double = 50.0   // 0..100
+    var reputation: Double = 50.0,  // 0..100
+    /** Id of a rival group that competes for members with a shared hobby type, or null. */
+    var rivalGroupId: Long? = null,
+    /** Event IDs of significant town events (severity ≥ 0.6) that ≥3 members witnessed.
+     *  Capped at 10; oldest evicted when full. Safe default (empty list) for existing checkpoints. */
+    val sharedMemories: MutableList<Long> = mutableListOf()
 )

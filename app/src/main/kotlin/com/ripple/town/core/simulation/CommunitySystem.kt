@@ -22,6 +22,85 @@ object CommunitySystem {
     fun updateFortnightly(ctx: TickContext) {
         maybeFoundGroup(ctx)
         updateGroups(ctx)
+        processGroupRivalry(ctx)
+        updateSharedMemories(ctx)
+    }
+
+    /**
+     * Finds pairs of active groups that share a [CommunityGroupType] and tracks membership
+     * rivalry between them. For each pair (both with ≥2 members), residents who are in neither
+     * group but share the relevant hobby are identified as potential recruits. If there are ≥3
+     * such shared candidates, each candidate "leans" toward the group whose existing members
+     * they have higher average affection toward. When a candidate prefers the rival group,
+     * [CommunityGroup.rivalGroupId] is set on the losing group so downstream systems can read
+     * the tension — no actual recruitment happens here.
+     */
+    private fun processGroupRivalry(ctx: TickContext) {
+        val state = ctx.state
+        val activeGroups = state.communityGroups.values.filter { it.active && it.memberIds.size >= 2 }
+        if (activeGroups.size < 2) return
+
+        // Build pairs that share the same CommunityGroupType
+        for (i in activeGroups.indices) {
+            for (j in i + 1 until activeGroups.size) {
+                val groupA = activeGroups[i]
+                val groupB = activeGroups[j]
+                if (groupA.type != groupB.type) continue
+
+                val memberSetA = groupA.memberIds.toSet()
+                val memberSetB = groupB.memberIds.toSet()
+                val allMembers = memberSetA + memberSetB
+
+                // Potential recruits: in town, have matching hobby, not already in either group
+                val candidates = state.detailedResidents().filter { r ->
+                    r.inTown &&
+                        r.id !in allMembers &&
+                        r.hobbies.any { hobbyToGroupType(it.type) == groupA.type }
+                }.sortedBy { it.id }  // stable deterministic order
+
+                if (candidates.size < 3) continue
+
+                // For each candidate, compute average affection toward each group's members
+                for (candidate in candidates) {
+                    val avgAffectionA = averageAffectionToward(state, candidate.id, memberSetA)
+                    val avgAffectionB = averageAffectionToward(state, candidate.id, memberSetB)
+
+                    val prefersA = when {
+                        avgAffectionA > avgAffectionB -> true
+                        avgAffectionB > avgAffectionA -> false
+                        else -> ctx.rng.nextBoolean(0.5)  // tie-break deterministically
+                    }
+
+                    // The group that loses this candidate to the rival marks the rival
+                    if (prefersA) {
+                        // candidate prefers A → B is the losing group
+                        groupB.rivalGroupId = groupA.id
+                    } else {
+                        // candidate prefers B → A is the losing group
+                        groupA.rivalGroupId = groupB.id
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Returns the mean [Relationship.affection] from [residentId] toward the members in
+     * [targetMemberIds], or 0.0 if there are no known relationships.
+     */
+    private fun averageAffectionToward(
+        state: com.ripple.town.core.model.WorldState,
+        residentId: Long,
+        targetMemberIds: Set<Long>
+    ): Double {
+        var total = 0.0
+        var count = 0
+        for (memberId in targetMemberIds) {
+            val rel = state.relationship(residentId, memberId) ?: continue
+            total += rel.affection
+            count++
+        }
+        return if (count > 0) total / count else 0.0
     }
 
     private fun maybeFoundGroup(ctx: TickContext) {
@@ -95,6 +174,38 @@ object CommunitySystem {
                     buildingId = group.meetingBuildingId,
                     severity = 0.2
                 )
+            }
+        }
+    }
+
+    /**
+     * Records significant town events (severity ≥ 0.6) in each active group's
+     * [CommunityGroup.sharedMemories] when ≥3 members live in the same district as the event's
+     * building. Uses the bounded [WorldState.recentEventIds] window (last ~60 events) via
+     * [EventIndex.get]. Capped at 10 entries per group; oldest evicted when full.
+     */
+    private fun updateSharedMemories(ctx: TickContext) {
+        val state = ctx.state
+        val cutoff = ctx.now - SimTime.MINUTES_PER_DAY * 30
+        val significantEvents = state.recentEventIds
+            .mapNotNull { ctx.eventIndex.get(it) }
+            .filter { it.severity >= 0.6 && it.time >= cutoff && it.buildingId != null }
+        if (significantEvents.isEmpty()) return
+
+        for (group in state.communityGroups.values.filter { it.active }) {
+            for (event in significantEvents) {
+                // Already recorded?
+                if (event.id in group.sharedMemories) continue
+                val eventDistrictId = state.buildings[event.buildingId]?.districtId ?: continue
+                // Count members whose home building is in the same district
+                val witnessCount = group.memberIds.count { memberId ->
+                    val homeId = state.resident(memberId)?.homeBuildingId ?: return@count false
+                    state.buildings[homeId]?.districtId == eventDistrictId
+                }
+                if (witnessCount >= 3) {
+                    if (group.sharedMemories.size >= 10) group.sharedMemories.removeAt(0)
+                    group.sharedMemories += event.id
+                }
             }
         }
     }
