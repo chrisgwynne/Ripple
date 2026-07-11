@@ -186,7 +186,10 @@ data class Business(
     var reputation: Double = 55.0,      // 0..100
     var demand: Double = 50.0,          // 0..100, how much custom the town gives it
     var priceLevel: Double = 1.0,       // multiplier on base prices
-    var employeeCapacity: Int = 3,
+    // Default 1: a newly opened business is sole-trader only; capacity grows via
+    // EconomySystem.expandBusiness. Callers that create established or civic businesses
+    // (WorldGenerator, DevelopmentSystem) pass an explicit value and are unaffected.
+    var employeeCapacity: Int = 1,
     var open: Boolean = true,
     var closedAt: Long? = null,
     var openedAt: Long = 0L,
