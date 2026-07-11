@@ -70,6 +70,8 @@ class SimulationCoordinator(
         val dayIndex = SimTime.dayIndex(state.time)
         val prevMayorId = state.mayorId
 
+        // 1b. Activate background residents that are now socially relevant.
+        ActivationSystem.updateTick(ctx)
         // 2. Needs, weather, travel arrivals.
         NeedsSystem.update(ctx)
         // 3-4. Urgent health checks (clinic treatment, crises).
@@ -107,6 +109,7 @@ class SimulationCoordinator(
         if (newDay) {
             HealthSystem.updateDaily(ctx)
             LifecycleSystem.updateDaily(ctx)
+            ActivationSystem.updateDaily(ctx)
             ElectionSystem.updateDaily(ctx)
             GoalSystem.updateDaily(ctx)
             BuildingLifecycleSystem.updateDaily(ctx)
