@@ -85,7 +85,17 @@ data class Business(
     var revenueToday: Double = 0.0,
     var expensesToday: Double = 0.0,
     /** Consecutive days the balance has been below zero. */
-    var daysInTrouble: Int = 0
+    var daysInTrouble: Int = 0,
+    /**
+     * Bounded trailing window of daily net cash flow (revenue-after-COGS minus rent/utilities/
+     * tax/wages, i.e. what `dailySettlement` actually did to `balance` that day), most-recent
+     * last — see `EconomySystem.NET_DAILY_HISTORY_WINDOW`/`recordNetDaily`/`reserveRunway`.
+     * Economy Calibration Gate Phase 1 (2026-07-11, see docs/simulation-rules.md "Unit economics
+     * + catchment demand"). A new, safe-default field (empty list) so existing checkpoints
+     * deserialize unchanged; `reserveRunway` degrades gracefully to a single-day reading until
+     * this fills up.
+     */
+    val recentNetDaily: MutableList<Double> = mutableListOf()
 )
 
 /**

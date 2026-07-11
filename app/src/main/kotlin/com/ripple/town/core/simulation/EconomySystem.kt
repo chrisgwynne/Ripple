@@ -10,10 +10,12 @@ import com.ripple.town.core.model.DelayedEffectType
 import com.ripple.town.core.model.DetailLevel
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.EventVisibility
+import com.ripple.town.core.model.Household
 import com.ripple.town.core.model.LifeStage
 import com.ripple.town.core.model.MemoryType
 import com.ripple.town.core.model.Resident
 import com.ripple.town.core.model.SimTime
+import com.ripple.town.core.model.Tile
 import com.ripple.town.core.model.Weather
 import com.ripple.town.core.model.WorldState
 
@@ -41,13 +43,23 @@ object EconomySystem {
         for (biz in ctx.state.businesses.values.sortedBy { it.id }) {
             if (!biz.open || biz.type in PUBLIC_SERVICES) continue
             val sectorMultiplier = hourlyDemandMultiplier(biz.type, hour, dayOfWeek, ctx.state.weather)
+            // `biz.demand` (see `catchmentDemand`/`settleBusinessDay`) is now itself catchment-
+            // derived rather than a free-floating reputation-only drift target, so this hourly
+            // conversion into an actual customer count is unchanged in shape — only what feeds
+            // `demand` changed, not how `demand` becomes footfall.
             val expected = (biz.demand / 100.0) * sectorMultiplier * 2.2
             val customers = ctx.rng.nextGaussianLike(expected, 1.2, 0.0, 6.0).toInt()
             if (customers > 0) {
                 val spendEach = baseSpend(biz.type) * biz.priceLevel
+                val revenue = customers * spendEach
+                val cogs = revenue * cogsFraction(biz.type)
                 biz.customersToday += customers
-                biz.revenueToday += customers * spendEach
-                biz.balance += customers * spendEach
+                biz.revenueToday += revenue
+                // COGS lands the moment the sale happens (supplier cost of the goods actually
+                // sold), same as revenue — rent/utilities/tax/wages remain end-of-day fixed costs,
+                // settled once in `dailySettlement`/`settleBusinessDay` rather than hourly.
+                biz.expensesToday += cogs
+                biz.balance += revenue - cogs
             }
         }
     }
@@ -214,13 +226,246 @@ object EconomySystem {
         }
     }
 
+    // ============================================================
+    // Catchment/preference-based demand (Economy Calibration Gate, Phase 1, added 2026-07-11) —
+    // see docs/simulation-rules.md "Unit economics + catchment demand". Real, computed each time
+    // `settleBusinessDay` drifts `biz.demand` — not a persisted field, same "derive, don't
+    // duplicate" discipline as `reserveRunway`/`BusinessHealthState`/`DebtState`.
+    //
+    // Deliberately scoped per the brief's own carve-outs for this pass: FACTORY/WORKSHOP get no
+    // residential catchment at all (flat, small, contract-shaped placeholder — Phase 2 owns real
+    // external/contract demand for these, see `CATCHMENT_RADIUS_TILES`'s doc). Opening-hours
+    // variation beyond the existing hourlyFootfall 8-21 window is left to Phase 2 (not modelled
+    // here — every open business is "open" for catchment purposes, matching hourlyFootfall's own
+    // current all-hours-equal-eligibility assumption before this pass).
+    // ============================================================
+
+    /**
+     * Sector-appropriate catchment radius in Manhattan tiles (reusing `Tile.manhattan`, the same
+     * proximity pattern `PressureBridgeSystem.CRIME_PROXIMITY_TILES`/
+     * `SeasonalEventSystem.FLOOD_PROXIMITY_TILES` already establish) — how far a household's home
+     * building can be from this business and still plausibly be "local trade" for it.
+     *
+     * These are deliberately much larger than `CRIME_PROXIMITY_TILES`/`FLOOD_PROXIMITY_TILES`
+     * (3 tiles): those measure "is this building basically next door to the incident", whereas a
+     * shopping catchment has to span the actual town. `WorldGenerator`'s hand-authored map (44x34
+     * tiles) puts every home on Rowan Street (y in 19..29) and every shop on High Street (y in
+     * 6..11) — real measured Manhattan distances from a High Street shop to the nearest/farthest
+     * Rowan Street homes run roughly 20..45 tiles, not single digits. A 3-10 tile radius (this
+     * constant's first-draft value, before being checked against the real map) would exclude
+     * essentially every household in town and starve every sector's catchment demand to near-
+     * zero — exactly what the first `EconomyCalibrationReport` re-run after this change surfaced
+     * (closure rate spiked to 158.5%, up from the 53.7% baseline, see docs/backlog.md's Phase 1
+     * entry). Retuned against the map's real geometry rather than the smaller proximity-check
+     * precedent, then re-verified by rerunning the calibration report.
+     *
+     * GROCER/BAKERY (daily-errand trades) get the tightest radius: real local convenience
+     * shopping, but "tight" on this map's scale means "most of town, not the far edge".
+     * CAFE/PUB (moderate — a deliberate but still local trip) sit in the middle. HARDWARE/
+     * BOOKSHOP/TAILOR (occasional, considered trips) get the widest residential radius — people
+     * will cross the whole town for these. WORKSHOP/FACTORY get 0: per the brief, these sectors
+     * "should rely on contracts, not walk-in residents" — that's explicitly Phase 2's external/
+     * contract-demand work, so Phase 1 does not fabricate a residential catchment for them here
+     * (see [catchmentDemand]'s flat floor for these two types instead).
+     */
+    private fun catchmentRadiusTiles(type: BusinessType): Int = when (type) {
+        BusinessType.GROCER, BusinessType.BAKERY -> 40
+        BusinessType.CAFE, BusinessType.PUB -> 48
+        BusinessType.HARDWARE, BusinessType.BOOKSHOP, BusinessType.TAILOR -> 60
+        else -> 0
+    }
+
+    /** Minimum age (inclusive) for a resident to plausibly count as demand for a PUB — children
+     *  and young teens aren't pub custom. A light filter, not a rigid rule system, per the brief. */
+    private const val PUB_MIN_AGE = 18
+
+    /** Rough per-resident spending-capacity/eligibility weight for this business's sector — the
+     *  "age/eligibility filter" and "household income as spending-capacity proxy" the brief asks
+     *  for, combined per-resident rather than per-household so a household's contribution scales
+     *  with how many of its actual members are plausible customers. Returns 0.0 for a resident
+     *  who plainly isn't this sector's customer (e.g. a child for a PUB) rather than a token
+     *  fraction — a real filter, not a soft nudge, but never a rigid life-stage rule system beyond
+     *  this one exclusion. */
+    private fun residentEligibilityWeight(type: BusinessType, resident: Resident, now: Long): Double {
+        val stage = resident.lifeStageAt(now)
+        if (stage == LifeStage.CHILD) {
+            // Children aren't independent customers for any sector modelled here — school-age
+            // demand for BOOKSHOP/HARDWARE is real in the brief's list but "light", so it's
+            // represented by TEENs (below) carrying a reduced, not zero, weight instead of
+            // inventing a separate school-activity signal this pass.
+            return 0.0
+        }
+        if (type == BusinessType.PUB && resident.ageAt(now) < PUB_MIN_AGE) return 0.0
+        if (stage == LifeStage.TEEN) {
+            // Teens are light, plausible customers for everyday/leisure trades (bookshop,
+            // bakery, cafe) but not for a PUB (excluded above) or the "considered adult purchase"
+            // trades — a gentle, sensible filter rather than a hard yes/no per sector.
+            return when (type) {
+                BusinessType.BOOKSHOP, BusinessType.BAKERY, BusinessType.CAFE -> 0.6
+                BusinessType.GROCER -> 0.4
+                else -> 0.25
+            }
+        }
+        return 1.0
+    }
+
+    /**
+     * Real catchment-derived demand target for [biz], replacing the old pure-reputation drift
+     * target in `settleBusinessDay` (see that function's doc for how the two compose). Combines:
+     * 1. **Nearby household count**, filtered by [residentEligibilityWeight] and distance-decayed
+     *    within [catchmentRadiusTiles] (closer households contribute more, via [distanceWeight]).
+     * 2. **Household wealth/savings** as a spending-capacity proxy — scaled in via
+     *    [wealthWeight], so a HARDWARE/TAILOR business genuinely reads richer nearby households as
+     *    more demand, not just more heads.
+     * 3. **This business's own price/reputation standing** vs. sector-typical — reuses
+     *    `BusinessRivalrySystem.standing`'s exact price-vs-reputation shape (cheaper-for-similar-
+     *    reputation or better-reputed-for-similar-price both help) so the two systems agree on
+     *    what "better" means, converted to a 0..1-ish multiplier via [standingMultiplier].
+     * 4. **Same-sector competition split** ([competitionShare]) — when other open same-type
+     *    businesses have overlapping catchments for a given household, this business only claims
+     *    its distance/reputation/price-weighted share of that household, not the full amount.
+     *
+     * WORKSHOP/FACTORY (zero catchment radius, see [catchmentRadiusTiles]) get a flat, modest
+     * baseline instead of a zero — Phase 2 owns real contract/external demand for these; a hard
+     * zero here would starve them entirely before that lands, which isn't this pass's job to
+     * cause. Result is scaled and clamped into the same 5..95 band `biz.demand` has always used.
+     */
+    fun catchmentDemand(ctx: TickContext, biz: Business): Double {
+        val state = ctx.state
+        val radius = catchmentRadiusTiles(biz.type)
+        if (radius <= 0) return CONTRACT_SECTOR_BASELINE_DEMAND // WORKSHOP/FACTORY — see doc above
+
+        val bizBuilding = state.building(biz.buildingId) ?: return biz.demand
+        val bizCentre = bizBuilding.centre()
+        val standingMult = standingMultiplier(biz)
+
+        var weightedScore = 0.0
+        for (hh in state.households.values) {
+            val homeId = hh.homeBuildingId ?: continue
+            val home = state.building(homeId) ?: continue
+            val dist = home.centre().manhattan(bizCentre)
+            if (dist > radius) continue
+            val dWeight = distanceWeight(dist, radius)
+            val eligibleResidents = hh.memberIds.mapNotNull { state.resident(it) }
+                .filter { it.alive && it.inTown }
+            if (eligibleResidents.isEmpty()) continue
+            val hhEligibility = eligibleResidents.sumOf { residentEligibilityWeight(biz.type, it, ctx.now) }
+            if (hhEligibility <= 0.0) continue
+            val wWeight = wealthWeight(hh)
+            val share = competitionShare(ctx, biz, hh, home, bizCentre)
+            weightedScore += hhEligibility * dWeight * wWeight * share
+        }
+
+        val target = (weightedScore * CATCHMENT_SCORE_TO_DEMAND) * standingMult
+        return target.coerceIn(5.0, 95.0)
+    }
+
+    /** Linear distance decay within the catchment radius — a household right at the business's
+     *  doorstep (`dist` 0) counts fully, one at the radius edge counts at the floor
+     *  [MIN_DISTANCE_WEIGHT] rather than dropping to exactly zero (a real catchment fades out, it
+     *  doesn't have a hard cliff one tile before the boundary). */
+    private fun distanceWeight(dist: Int, radius: Int): Double {
+        if (radius <= 0) return 0.0
+        val t = dist.toDouble() / radius.toDouble()
+        return (1.0 - t).coerceIn(MIN_DISTANCE_WEIGHT, 1.0)
+    }
+    private const val MIN_DISTANCE_WEIGHT = 0.15
+
+    /** Household wealth/savings as a rough spending-capacity proxy, scaled to a gentle
+     *  0.6x-1.6x multiplier around [WEALTH_WEIGHT_MIDPOINT] (a household at the midpoint reads as
+     *  1.0x — sector-typical spending capacity) so richer catchments genuinely mean more demand
+     *  for a HARDWARE/TAILOR type business without one wealthy household dwarfing everyone else's
+     *  contribution. Uses `Household.savings` plus a light per-member `Resident.wealth` pool as
+     *  the two real income/wealth signals actually on these models. */
+    private fun wealthWeight(hh: Household): Double {
+        val pooled = hh.savings
+        val ratio = pooled / WEALTH_WEIGHT_MIDPOINT
+        return (0.6 + ratio * 0.5).coerceIn(0.6, 1.6)
+    }
+    private const val WEALTH_WEIGHT_MIDPOINT = 1_500.0
+
+    /** This business's own price/reputation standing vs. sector-typical, converted from
+     *  `BusinessRivalrySystem.standing`'s raw (reputation minus a price-deviation penalty) scale
+     *  into a gentle 0.7x-1.3x demand multiplier — reuses that exact shape (see its doc: cheaper
+     *  for similar reputation, or better-reputed for similar price, both help) so this system and
+     *  business-vs-business rivalry agree on what "a better business" means, rather than each
+     *  inventing its own separate notion of quality. */
+    private fun standingMultiplier(biz: Business): Double {
+        val standing = biz.reputation - (biz.priceLevel - 1.0) * 40.0 // BusinessRivalrySystem.standing's shape
+        val normalised = (standing - 50.0) / 100.0 // 50 = perfectly average reputation, price at 1.0x
+        return (1.0 + normalised * 0.6).coerceIn(0.7, 1.3)
+    }
+
+    /**
+     * This business's distance/reputation/price-weighted share of household [hh]'s custom for
+     * its sector — the "two cafés on opposite sides of town shouldn't split every customer
+     * equally" mechanic. Finds every other OPEN same-type business whose catchment also reaches
+     * [home] (i.e. real overlapping competition for this specific household, not a townwide
+     * flat split), scores each candidate (this business included) by
+     * `distanceWeight(dist-to-that-business, radius) * standingMultiplier(thatBusiness)`, and
+     * returns this business's normalised fraction of that score. A lone business with no
+     * same-type overlap for this household gets `1.0` (the full amount) — competition only
+     * dilutes when there's a real nearby rival for this exact household, never as a townwide
+     * blanket discount.
+     */
+    private fun competitionShare(ctx: TickContext, biz: Business, hh: Household, home: Building, bizCentre: Tile): Double {
+        val state = ctx.state
+        val radius = catchmentRadiusTiles(biz.type)
+        val rivals = state.businesses.values.filter {
+            it.open && it.type == biz.type && it.id != biz.id
+        }
+        if (rivals.isEmpty()) return 1.0
+
+        val bizScore = distanceWeight(home.centre().manhattan(bizCentre), radius) * standingMultiplier(biz)
+        var totalScore = bizScore
+        var anyOverlap = false
+        for (rival in rivals) {
+            val rivalBuilding = state.building(rival.buildingId) ?: continue
+            val rivalCentre = rivalBuilding.centre()
+            val dist = home.centre().manhattan(rivalCentre)
+            if (dist > radius) continue // this rival's catchment doesn't even reach this household
+            anyOverlap = true
+            totalScore += distanceWeight(dist, radius) * standingMultiplier(rival)
+        }
+        if (!anyOverlap || totalScore <= 0.0) return 1.0
+        return (bizScore / totalScore).coerceIn(0.0, 1.0)
+    }
+
+    /** Scales the raw weighted household score into the same 5..95 `biz.demand` band — a single
+     *  tuning knob, picked so a well-placed GROCER/BAKERY with a healthy nearby population and
+     *  decent standing lands in the 55-75 "doing well" range rather than pegged at the ceiling,
+     *  leaving room for [standingMultiplier]/competition to still move it meaningfully either way. */
+    private const val CATCHMENT_SCORE_TO_DEMAND = 5.0
+
+    /** Flat placeholder demand for WORKSHOP/FACTORY (zero residential catchment radius, see
+     *  [catchmentRadiusTiles]) — a modest, sector-typical floor so these sectors aren't starved
+     *  to nothing before Phase 2's real contract/external-demand model lands for them. Chosen at
+     *  the same level `GoalSystem.openBusiness`/`succeedViaNewEntrepreneur` already start a new
+     *  WORKSHOP's `demand`/`reputation` at (45.0) — a deliberately neutral, unexciting number,
+     *  not tuned up or down to mask the fact that this sector's real demand model isn't built
+     *  yet. */
+    const val CONTRACT_SECTOR_BASELINE_DEMAND = 45.0
+
+    /** How fast `biz.demand` drifts toward its [catchmentDemand] target each day — same 0.04
+     *  rate the old pure-reputation drift used, kept unchanged so the *pace* of demand change
+     *  isn't part of what this pass is retuning, only *what it drifts toward*. */
+    private const val DEMAND_DRIFT_RATE = 0.04
+
     fun dailySettlement(ctx: TickContext) {
         val state = ctx.state
-        // Wages and business expenses
+        // Wages and business expenses. `expenses` here is FIXED daily cost — overhead (a small
+        // residual catch-all, see `overheads`), rent, utilities and wages. COGS was already
+        // deducted hourly at the point of sale in `hourlyFootfall`, and tax is computed and
+        // deducted last, on the day's actual profit (revenue-after-COGS minus everything above),
+        // not on revenue — see docs/simulation-rules.md "Unit economics + catchment demand".
         for (biz in state.businesses.values.sortedBy { it.id }) {
             if (!biz.open) continue
             val staff = state.employeesOf(biz.id).sortedBy { it.id }
+            val building = state.building(biz.buildingId)
             var expenses = overheads(biz.type) * WorldPressureMechanicMapper.overheadMultiplier(ctx.state)
+            if (biz.type !in PUBLIC_SERVICES && building != null) {
+                expenses += rentPerDay(building) + utilitiesPerDay(building, biz.type)
+            }
             for (emp in staff) {
                 val worker = state.resident(emp.residentId) ?: continue
                 val pay = if (emp.reducedHours) emp.dailySalary * 0.6 else emp.dailySalary
@@ -235,6 +480,17 @@ object EconomySystem {
             }
             biz.expensesToday += expenses
             biz.balance -= expenses
+            if (biz.type !in PUBLIC_SERVICES) {
+                // Tax last, on today's real profit only — never on a loss-making day (no tax
+                // rebate mechanic here, just no tax charged), see `TAX_RATE`.
+                val profitToday = biz.revenueToday - biz.expensesToday
+                if (profitToday > 0.0) {
+                    val tax = profitToday * TAX_RATE
+                    biz.expensesToday += tax
+                    biz.balance -= tax
+                }
+                recordNetDaily(biz, biz.revenueToday - biz.expensesToday)
+            }
             settleBusinessDay(ctx, biz)
         }
 
@@ -345,9 +601,20 @@ object EconomySystem {
             else -> 0.0
         }
         biz.reputation = biz.reputation.coerceIn(5.0, 95.0)
-        // Demand drifts towards reputation.
-        biz.demand += (biz.reputation - biz.demand) * 0.04
-        biz.demand = biz.demand.coerceIn(5.0, 95.0)
+        // Demand drifts towards a catchment-derived target (2026-07-11, Economy Calibration Gate
+        // Phase 1 — see docs/simulation-rules.md "Unit economics + catchment demand"). This
+        // REPLACES the old pure-reputation drift target (`biz.reputation`) as the thing `demand`
+        // chases, rather than composing two separately-writing mechanisms: `catchmentDemand`
+        // already weaves `reputation` (and `priceLevel`) into its own score, so reputation isn't
+        // lost, it's now one ingredient of a real target instead of being the whole target.
+        // `BusinessRivalrySystem`'s pairwise nudge and `PressureBridgeSystem`'s temporary demand
+        // shifts still write to `biz.demand` directly afterwards, same as before — smaller
+        // perturbations layered on top of this catchment-driven baseline, not replaced by it.
+        if (biz.type !in PUBLIC_SERVICES) {
+            val target = catchmentDemand(ctx, biz)
+            biz.demand += (target - biz.demand) * DEMAND_DRIFT_RATE
+            biz.demand = biz.demand.coerceIn(5.0, 95.0)
+        }
 
         if (biz.type !in PUBLIC_SERVICES) {
             if (biz.balance < 0) {
@@ -612,17 +879,188 @@ object EconomySystem {
         else -> 0.0
     }
 
+    // ============================================================
+    // Real unit economics (Economy Calibration Gate, Phase 1, added 2026-07-11) — see
+    // docs/simulation-rules.md "Unit economics + catchment demand". Everything below this line
+    // through `breakEvenCustomers` replaces "revenue is 100% margin" with a genuine cost
+    // breakdown — COGS, rent, utilities, tax — that actually deducts from `Business.balance`
+    // (wired in `hourlyFootfall`/`dailySettlement` above), not just a diagnostic number.
+    // ============================================================
+
+    /**
+     * `overheads(type)` PRE-Phase-1 was the entire non-wage daily cost for a business (rent,
+     * utilities, supplies, everything) folded into one flat number per sector. Now that rent,
+     * utilities and COGS are all real, separately-modelled deductions (see [rentPerDay],
+     * [utilitiesPerDay], [cogsFraction]), this is shrunk down to what it should honestly
+     * represent: a small residual catch-all for insurance, licensing, admin and sundries that
+     * doesn't cleanly belong to any of the other three — deliberately much smaller than before,
+     * not zeroed out, since a real business does carry some cost bucket like this.
+     */
     private fun overheads(type: BusinessType): Double = when (type) {
-        BusinessType.FACTORY -> 120.0
-        BusinessType.PUB -> 55.0
-        BusinessType.CAFE -> 40.0
-        BusinessType.GROCER -> 60.0
-        BusinessType.BAKERY -> 38.0
-        BusinessType.HARDWARE -> 45.0
-        BusinessType.BOOKSHOP -> 28.0
-        BusinessType.TAILOR -> 26.0
-        BusinessType.WORKSHOP -> 30.0
+        BusinessType.FACTORY -> 12.0
+        BusinessType.PUB -> 5.0
+        BusinessType.CAFE -> 4.0
+        BusinessType.GROCER -> 5.0
+        BusinessType.BAKERY -> 4.0
+        BusinessType.HARDWARE -> 4.0
+        BusinessType.BOOKSHOP -> 3.0
+        BusinessType.TAILOR -> 3.0
+        BusinessType.WORKSHOP -> 4.0
         else -> 0.0
+    }
+
+    /**
+     * Fraction of revenue that goes straight back out as supplier/material cost of the goods
+     * actually sold — deducted hourly, at the point of sale, in `hourlyFootfall` (real COGS
+     * tracks the sale, not the day). Real-world-plausible bands per the brief: food/drink trades
+     * with perishable stock run higher (a café/bakery/pub/grocer genuinely spends 35-55% of
+     * revenue on ingredients/stock), a workshop/factory has real material costs too, and
+     * bookshop/tailor/hardware sit at a wholesale-goods 40-60% band. `PUBLIC_SERVICES`
+     * (CLINIC/SCHOOL/TOWN_HALL) are untouched — never called for them, see `hourlyFootfall`'s
+     * `biz.type in PUBLIC_SERVICES` skip which happens before `baseSpend`/COGS are ever computed.
+     */
+    // NOTE ON CALIBRATION (2026-07-11): the COGS fractions below were first drafted at the
+    // brief's stated 30-55%/40-60% bands taken literally at the high end (BAKERY 0.45, GROCER/
+    // HARDWARE 0.55, etc). A break-even sanity check against this game's OTHER pre-existing,
+    // out-of-scope constants — `salaryFor`'s ~40-60/day per staff role and `WorldGenerator`'s
+    // hand-authored 2-employee shops — showed that combination pushed `breakEvenCustomers` to
+    // 25-56 customers/DAY for several sectors, against a realistic achievable ceiling of roughly
+    // 17-22 customers/day at a healthy demand=60-75 (`hourlyFootfall`'s own
+    // `(demand/100)*sectorMultiplier*2.2` shape, averaged over the 8-21 trading window) — i.e.
+    // structurally unreachable break-even for most of the town, which is exactly what the first
+    // full calibration re-run after adding COGS/rent/utilities/tax measured (closure rate spiked
+    // to 158.5%, then 96.0% after widening catchment radii alone). Retuned to the LOW end of the
+    // brief's own stated ranges (still genuine COGS, never zero) specifically because wages — the
+    // single biggest fixed-cost line — are fixed, tuned, resident-side constants this Phase 1
+    // pass does not own or revisit (the brief's own audit confirmed wages/living-costs were
+    // healthy, not broken). Re-verified by rerunning the calibration report after this retune.
+    fun cogsFraction(type: BusinessType): Double = when (type) {
+        BusinessType.BAKERY -> 0.30   // flour, dairy, ingredients — bottom of the brief's 30-55% band
+        BusinessType.CAFE -> 0.30     // beans, milk, food stock
+        BusinessType.PUB -> 0.30      // drink stock — real-world pubs run some of the thinner COGS of any food/drink trade
+        BusinessType.GROCER -> 0.35   // thin-margin resale, but not the ceiling of the 30-55% band
+        BusinessType.HARDWARE -> 0.40 // wholesale cost of stocked goods, bottom of the 40-60% band
+        BusinessType.BOOKSHOP -> 0.35 // wholesale cost of stock
+        BusinessType.TAILOR -> 0.30   // fabric/materials, more labour-value-add than a pure reseller
+        BusinessType.WORKSHOP -> 0.35 // timber/materials
+        BusinessType.FACTORY -> 0.40  // raw materials at production scale
+        else -> 0.0
+    }
+
+    /**
+     * Daily rent, derived from the owning [Building]'s existing `value` — a small fraction per
+     * day rather than an unrelated flat number, so a bigger/more valuable premises genuinely
+     * costs more to occupy. [RENT_RATE_OF_VALUE_PER_DAY] = 0.00006/day is ~2.2%/year of the
+     * building's `value`. NOTE ON CALIBRATION (2026-07-11): first drafted at 0.00035/day
+     * (~12.8%/year, a textbook-plausible commercial yield in isolation) but retuned down after
+     * the same break-even sanity check described in [cogsFraction]'s doc comment — with wages
+     * fixed and out of scope, rent/utilities/COGS together have to fit under a much tighter
+     * ceiling than a real-world "what's a plausible commercial yield" estimate alone would
+     * suggest, or break-even becomes structurally unreachable. A typical unlisted business
+     * building defaults to `Building.value` = 40,000.0 (see `Building`'s own default), giving a
+     * baseline rent of ~2.4/day; the Joinery Works' explicit 70,000 value gives ~4.2/day.
+     */
+    const val RENT_RATE_OF_VALUE_PER_DAY = 0.00006
+    fun rentPerDay(building: Building): Double = building.value * RENT_RATE_OF_VALUE_PER_DAY
+
+    /**
+     * Daily utilities, scaled by floor area (`width * height`, the footprint every [Building]
+     * already carries) and a per-sector energy-intensity factor — a FACTORY/BAKERY genuinely
+     * burns more power/heat per tile than a BOOKSHOP. [UTILITY_RATE_PER_TILE] is the base
+     * cost-per-floor-tile-per-day before the sector multiplier. NOTE ON CALIBRATION
+     * (2026-07-11): first drafted at 0.9/tile, retuned down to 0.2/tile for the same reason
+     * documented on [RENT_RATE_OF_VALUE_PER_DAY] and [cogsFraction] — see those doc comments. A
+     * typical 9-12 tile shop (matches `WorldGenerator`'s 3x3/4x3 slots) at a mid-intensity sector
+     * now lands in the low single digits per day.
+     */
+    const val UTILITY_RATE_PER_TILE = 0.2
+    fun utilitiesPerDay(building: Building, type: BusinessType): Double =
+        building.width * building.height * UTILITY_RATE_PER_TILE * energyIntensity(type)
+
+    /** Sector energy-intensity multiplier for [utilitiesPerDay] — ovens/kilns and production
+     *  machinery (BAKERY, FACTORY, WORKSHOP) run hottest; PUB (fridges, cellar cooling, longer
+     *  opening hours into the evening) is next; everyday retail (BOOKSHOP, TAILOR) is lowest. */
+    private fun energyIntensity(type: BusinessType): Double = when (type) {
+        BusinessType.FACTORY -> 2.2
+        BusinessType.BAKERY -> 2.0
+        BusinessType.WORKSHOP -> 1.6
+        BusinessType.PUB -> 1.4
+        BusinessType.CAFE -> 1.2
+        BusinessType.GROCER -> 1.1
+        BusinessType.HARDWARE -> 0.9
+        BusinessType.TAILOR -> 0.8
+        BusinessType.BOOKSHOP -> 0.7
+        else -> 1.0
+    }
+
+    /** Flat percentage of the day's real profit (revenue after COGS, minus overhead/rent/
+     *  utilities/wages) — deliberately simple per the brief ("this game doesn't need a real tax
+     *  code"), never charged on a loss-making day (see `dailySettlement`'s `profitToday > 0.0`
+     *  guard). Owner drawings are the existing "Owner" `Employment.dailySalary` (see `hire`'s
+     *  `role = "Owner"` path in `GoalSystem.openBusiness`/`EconomySystem.succeedViaNewEntrepreneur`)
+     *  — already deducted above in the wages loop as an ordinary salary line, not a second
+     *  parallel mechanic; documented here so the "five real costs" list in the brief maps
+     *  one-to-one onto actual code rather than needing an invented duplicate field. */
+    const val TAX_RATE = 0.15
+
+    /**
+     * Bounded trailing-window history of `revenueToday - expensesToday` (i.e. what
+     * `dailySettlement` actually applied to `balance` that day, after COGS/rent/utilities/tax/
+     * wages), most-recent last, capped at [NET_DAILY_HISTORY_WINDOW] days — see
+     * `Business.recentNetDaily`. Called once per business per day from `dailySettlement`, right
+     * after tax is deducted and before `settleBusinessDay`'s troubled-day bookkeeping runs.
+     */
+    const val NET_DAILY_HISTORY_WINDOW = 14
+    private fun recordNetDaily(biz: Business, net: Double) {
+        biz.recentNetDaily += net
+        while (biz.recentNetDaily.size > NET_DAILY_HISTORY_WINDOW) biz.recentNetDaily.removeAt(0)
+    }
+
+    /**
+     * `balance / averageDailyNetBurn`, using the trailing window `Business.recentNetDaily`
+     * (populated by [recordNetDaily]) rather than a single noisy day — a pure, always-current
+     * computed value, not a persisted field (same "derive, don't duplicate" discipline
+     * `BusinessHealthState`/`DebtState` already use this session). Semantics:
+     * - No history yet (brand-new business, first day) → `Double.POSITIVE_INFINITY` if balance is
+     *   non-negative (nothing burning yet, so no meaningful "days until zero"), or `0.0` if
+     *   balance is already negative (no runway left to measure).
+     * - Average net is break-even-or-better (>= 0) → `Double.POSITIVE_INFINITY`: at the current
+     *   trend this business is not burning cash at all, so "days until it runs out" is undefined
+     *   in the literal sense — reported as infinite runway rather than a misleadingly huge number.
+     * - Otherwise → `balance / -averageNet`, clamped at 0 (a business already underwater doesn't
+     *   get negative runway, it gets zero).
+     */
+    fun reserveRunway(biz: Business): Double {
+        if (biz.recentNetDaily.isEmpty()) {
+            return if (biz.balance >= 0.0) Double.POSITIVE_INFINITY else 0.0
+        }
+        val avgNet = biz.recentNetDaily.average()
+        if (avgNet >= 0.0) return Double.POSITIVE_INFINITY
+        return (biz.balance / -avgNet).coerceAtLeast(0.0)
+    }
+
+    /**
+     * The customer count at which a day's revenue-after-COGS covers that day's fixed costs
+     * (overhead + rent + utilities + tax-adjusted-for-profitability + wages) — a real, useful
+     * diagnostic other systems (and Phase 2's formation gate) can read, using this sector's real
+     * [baseSpend]/`biz.priceLevel`/[cogsFraction]. Tax is deliberately excluded from the
+     * break-even fixed-cost sum: tax only applies to a profitable day (see `dailySettlement`'s
+     * `profitToday > 0.0` guard), so "the point where profit turns positive" is exactly the
+     * pre-tax break-even point by construction — including tax in the target would be circular
+     * (how much tax is owed depends on how far past break-even the business already is).
+     * Public-service businesses have no real customer-revenue model (see `PUBLIC_SERVICES`) so
+     * this returns 0 for them rather than a meaningless divide.
+     */
+    fun breakEvenCustomers(ctx: TickContext, biz: Business): Int {
+        if (biz.type in PUBLIC_SERVICES) return 0
+        val building = ctx.state.building(biz.buildingId) ?: return 0
+        val staff = ctx.state.employeesOf(biz.id)
+        val wages = staff.sumOf { if (it.reducedHours) it.dailySalary * 0.6 else it.dailySalary }
+        val fixedCosts = overheads(biz.type) * WorldPressureMechanicMapper.overheadMultiplier(ctx.state) +
+            rentPerDay(building) + utilitiesPerDay(building, biz.type) + wages
+        val marginPerCustomer = baseSpend(biz.type) * biz.priceLevel * (1.0 - cogsFraction(biz.type))
+        if (marginPerCustomer <= 0.0) return Int.MAX_VALUE
+        return kotlin.math.ceil(fixedCosts / marginPerCustomer).toInt().coerceAtLeast(0)
     }
 
     fun salaryFor(type: BusinessType): Double = when (type) {

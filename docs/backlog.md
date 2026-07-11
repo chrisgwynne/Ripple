@@ -4,6 +4,97 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-11 — Economy Calibration Gate, Phase 1: real unit economics + catchment demand
+
+The user rejected the prior narrow-fix passes below (66.7% → 53.7% closure rate) as insufficient
+and issued a much larger, structural brief — preserved verbatim at
+`docs/economy-brief-2026-07-11-final-gate.md` ("Ripple — Final Business Economy Calibration
+Gate"). This entry covers **Phase 1 of 3 only**: real per-sector unit economics (genuine COGS,
+rent, utilities, tax — not just revenue-is-100%-margin) and a real catchment/preference-based
+demand model. Phase 2 (staffing-ramp, recovery-ladder, formation-gate, competition refinement,
+external/contract demand) is a separate, later pass — not attempted here.
+
+**What changed** (full formulas/constants in
+`docs/simulation-rules.md#unit-economics--catchment-demand-economy-calibration-gate-phase-1-added-2026-07-11`):
+
+- `Business` gained `recentNetDaily: MutableList<Double>` (safe-default empty list, bounded
+  14-day trailing window) — backs a new pure `EconomySystem.reserveRunway(biz)` function
+  (`balance / averageDailyNetBurn`), not a persisted runway field.
+- `hourlyFootfall` now deducts COGS from `balance`/`expensesToday` at the point of sale, not just
+  adding pure-profit revenue. `dailySettlement` now also deducts real rent (derived from the
+  owning `Building.value`) and utilities (derived from floor area x a per-sector energy-intensity
+  factor) as fixed daily costs, and a flat 15% tax on the day's actual profit (never on a loss).
+  The old flat `overheads(type)` — previously the *entire* non-wage daily cost — is shrunk to a
+  small residual catch-all now that rent/utilities are real, separate deductions.
+- New `EconomySystem.breakEvenCustomers(ctx, biz): Int` — a real, useful diagnostic (customer
+  count needed to cover fixed costs) that Phase 2's formation gate can read directly.
+- New `EconomySystem.catchmentDemand(ctx, biz): Double` replaces the old pure-reputation demand
+  drift target outright (`biz.demand` now drifts toward a real catchment score, not toward
+  `biz.reputation` alone — `reputation` is folded into the catchment score's own
+  `standingMultiplier` term instead of being lost). Built from real signals: nearby household
+  count within a sector-appropriate Manhattan-tile catchment radius (reusing the existing
+  `Tile.manhattan`/`PressureBridgeSystem.CRIME_PROXIMITY_TILES` proximity pattern, but at a much
+  larger scale matched to the actual town map), an age/eligibility filter (children never count;
+  PUB excludes under-18s), household wealth/savings as a spending-capacity proxy, this business's
+  own price/reputation standing (reusing `BusinessRivalrySystem.standing`'s exact shape), and a
+  same-sector competition split (`competitionShare`) so two overlapping same-type businesses
+  divide a household's custom by real distance/standing rather than an even flat split.
+  WORKSHOP/FACTORY get a flat, modest placeholder baseline (not a hard-zero collapse) since real
+  contract/external demand for those sectors is explicitly Phase 2's job.
+  `BusinessRivalrySystem`'s pairwise demand nudge and `PressureBridgeSystem`'s temporary demand
+  shifts still layer on top afterwards, unmodified.
+
+**Calibration honesty — the constants shipped are NOT the first-drafted values.** The brief's own
+stated COGS bands (30-55%/40-60%) and a textbook-plausible rent yield (~12.8%/year of building
+value), taken at face value, made break-even structurally unreachable for most sectors once
+combined with the game's pre-existing, out-of-scope, already-tuned wage constants
+(`salaryFor`≈40-60/day x 2 staff per hand-authored shop) — measured directly via
+`breakEvenCustomers` math (25-56 customers/day needed against a realistic ~17-22/day achievable
+ceiling). The first full `EconomyCalibrationReport` re-run after wiring in COGS/rent/utilities/tax
+at those first-drafted values, combined with catchment radii that were also first drafted far too
+small (copying `CRIME_PROXIMITY_TILES`'s "next door" scale onto a map where homes and shops are
+genuinely 20-45 tiles apart), measured a **158.5% one-year closure rate** — dramatically worse
+than the 53.7% starting point. Rather than shipping that, both the catchment radii and the
+COGS/rent/utility magnitudes were retuned against the map's real geometry and the fixed-wage
+reality, then re-measured at each step:
+
+| Stage | One-year closure rate |
+|---|---|
+| Pre-Phase-1 baseline | 53.7% |
+| First attempt (costs + radii both first-drafted) | 158.5% |
+| After widening catchment radii only | 96.0% |
+| After retuning costs down to the brief's own low-end bands (shipped) | **36.6%** |
+
+**Final measured state** (`EconomyCalibrationReport`, 10 seeds x 1 simulated year, pooled): 93
+businesses ever tracked, 76 open at year-end, 34 closed (36.6%), median open-business balance
+3,653.3, p90 `daysInTrouble` = 0 at year-end (most still-open businesses are genuinely healthy,
+not just not-yet-closed), resident median wealth 9,565.8, only 2.7% of residents in debt crisis.
+Employment rate dropped to 71.9%-94.9% (from a pre-Phase-1 93.2%-97.3%) — a real, expected
+consequence of `hireSomeone`'s balance/demand gate being genuinely harder to clear once real costs
+slow down cash building, not a bug (`EconomyCalibrationGuardrailTest`'s bounds were updated to
+match, with the reasoning documented inline in that file).
+
+This is a genuine structural improvement (53.7% → 36.6%) achieved through real unit-economics
+mechanics — `CLOSURE_DAYS`/`STRUGGLE_NOTICE_DAYS` were never touched, nothing was suppressed. It
+is **honestly not yet at the brief's 2-10% final target** — Phase 1's job was correct mechanics,
+not the full target in one pass. New test coverage: `UnitEconomicsCatchmentDemandTest` (COGS/rent/
+utilities/tax as real deductions, `breakEvenCustomers` sanity, `catchmentDemand` distance/wealth/
+competition-split behaviour, determinism). Existing `SectorDemandProfileTest`/
+`BusinessHealthStateTest`/calibration suites all still pass; `EconomyCalibrationGuardrailTest`'s
+closure-rate and employment-rate bounds were updated to the new, better baseline with the reasoning
+documented in that file (not silently loosened to hide a regression — both moved in the *good*
+direction: the closure-rate ceiling tightened from 75% to 55%, the employment-rate floor was
+lowered with an explicit "why this drop is real and expected" note).
+
+**Deliberately NOT covered by this pass (Phase 2)**: staffing ramp (new businesses starting lean,
+hiring only after sustained demand), the brief's full 10-step recovery ladder (only price-cut/
+early-layoff exist today), the business-formation gate (nothing yet stops a new business opening
+without projected demand support — though `breakEvenCustomers`/`reserveRunway`/`catchmentDemand`
+built here are exactly the inputs that gate needs), real external/contract demand for FACTORY/
+WORKSHOP, opening-hours variation, and weather/transport as catchment inputs (weather still applies
+as `hourlyDemandMultiplier`'s existing hourly multiplier, just not woven into the catchment score
+itself).
+
 ### 2026-07-11 — Sector-shaped demand: businesses stop trading on one identical hourly curve
 
 Direct remediation follow-up to the same-day "Economy calibration audit"/"Economy calibration

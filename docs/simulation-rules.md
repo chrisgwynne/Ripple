@@ -2947,3 +2947,266 @@ the same inputs every time. Verified in `DebtStateTest`: every boundary reachabl
 classified (including the "same debt, different wealth → different tier" case the brief calls out
 by name), 20-repeat-call determinism check, and edge cases (zero wealth, zero debt, no household,
 and negative wealth/debt inputs that shouldn't occur in practice but must not throw) all covered.
+
+## Unit economics + catchment demand (Economy Calibration Gate, Phase 1, added 2026-07-11)
+
+Follow-up to `docs/economy-brief-2026-07-11-final-gate.md` ("Ripple — Final Business Economy
+Calibration Gate"), which rejected the prior session's narrow, targeted fixes (closure rate
+66.7% → 53.7%) as insufficient and asked for a structural rebuild. This entry covers **Phase 1
+only** — real per-sector unit economics and catchment/preference-based demand. Phase 2 (not
+covered here) owns staffing-ramp, the recovery ladder, the business-formation gate, and
+external/contract demand for FACTORY/WORKSHOP — see "Deliberately out of scope" below and the
+matching `docs/backlog.md` entry.
+
+### Why `EconomySystem` needed structural, not incremental, changes
+
+Before this pass, `hourlyFootfall` added `customers * spendEach` straight to `Business.balance` as
+pure profit — there was **no cost of goods sold at all**. `dailySettlement`'s only real cost was a
+single flat `overheads(type)` number plus wages; no rent, no utilities, no tax. A business's
+`demand` was a free-floating abstract 0-100 number that drifted toward its own `reputation`
+(`biz.demand += (biz.reputation - biz.demand) * 0.04`), with no connection whatsoever to the actual
+resident population, where they live, or what they can afford.
+
+### 1. Real cost breakdown — COGS, rent, utilities, tax, owner drawings
+
+All five real costs the brief asked for map onto actual code as follows:
+
+- **COGS** — `EconomySystem.cogsFraction(type): Double`, a fraction of revenue deducted **hourly,
+  at the point of sale**, inside `hourlyFootfall` itself (not once a day) — real COGS tracks the
+  sale, not the calendar day. `PUBLIC_SERVICES` (CLINIC/SCHOOL/TOWN_HALL) never call this — the
+  `hourlyFootfall`/`dailySettlement` loops both skip them entirely before any revenue/cost math
+  runs, same as before this pass.
+
+  | Sector | COGS fraction |
+  |---|---|
+  | BAKERY | 0.30 |
+  | CAFE | 0.30 |
+  | PUB | 0.30 |
+  | GROCER | 0.35 |
+  | HARDWARE | 0.40 |
+  | BOOKSHOP | 0.35 |
+  | TAILOR | 0.30 |
+  | WORKSHOP | 0.35 |
+  | FACTORY | 0.40 |
+
+  **Calibration note:** these are deliberately the LOW end of the brief's own stated bands
+  (30-55% for food/drink trades, 40-60% for wholesale-goods trades), not the values first drafted
+  (which sat at the high end — BAKERY 0.45, GROCER/HARDWARE 0.55, etc). The first full
+  `EconomyCalibrationReport` re-run after adding COGS/rent/utilities/tax at the high-end values
+  measured a **158.5% one-year closure rate** — dramatically worse than the pre-Phase-1 53.7%
+  baseline. A break-even sanity check (see `breakEvenCustomers` below) showed why: `salaryFor`'s
+  ~40-60/day per staff role and `WorldGenerator`'s hand-authored 2-employee shops are fixed,
+  out-of-scope, previously-tuned constants this Phase 1 pass does not own — with those fixed, COGS
+  at the high end of the brief's band pushed break-even to 25-56 customers/day against a realistic
+  achievable ceiling of ~17-22 customers/day at healthy demand. Retuned to the low end (never
+  zero — still genuine COGS) specifically to keep wages' fixed-cost weight survivable; re-verified
+  by rerunning the calibration report (see "Measured results" below).
+
+- **Rent** — `EconomySystem.rentPerDay(building): Double` = `building.value *
+  RENT_RATE_OF_VALUE_PER_DAY` (0.00006/day, ~2.2%/year of the building's `value`). Derived from
+  the owning `Building`'s existing `value` field, per the brief's "derive from the building's
+  existing value/footprint" instruction, rather than an unrelated flat number. **Calibration
+  note:** first drafted at 0.00035/day (~12.8%/year — a textbook-plausible real-world commercial
+  yield in isolation), retuned down for the same reason as `cogsFraction` above: wages are fixed
+  and out of scope, so rent/utilities/COGS together have to fit under a much tighter combined
+  ceiling than a "what's a plausible yield" estimate alone would suggest. A typical unlisted
+  business building defaults to `Building.value` = 40,000.0, giving baseline rent of ~2.4/day.
+
+- **Utilities** — `EconomySystem.utilitiesPerDay(building, type): Double` = `width * height *
+  UTILITY_RATE_PER_TILE (0.2) * energyIntensity(type)`, scaling with the building's actual floor
+  area and a per-sector energy-intensity factor (FACTORY 2.2, BAKERY 2.0, WORKSHOP 1.6, PUB 1.4,
+  CAFE 1.2, GROCER 1.1, HARDWARE 0.9, TAILOR 0.8, BOOKSHOP 0.7 — ovens/kilns/machinery run
+  hottest, everyday retail lowest). Same calibration-note history as rent: first drafted at
+  0.9/tile, retuned to 0.2/tile.
+
+- **Tax** — `EconomySystem.TAX_RATE = 0.15`, a flat 15% of the day's real profit
+  (`revenueToday - expensesToday`, computed and deducted **last**, after overhead/rent/
+  utilities/wages), and **only on a profitable day** — `dailySettlement` guards with
+  `profitToday > 0.0` before charging it, so there is no tax rebate mechanic and no tax on a loss.
+  Kept genuinely simple per the brief ("this game doesn't need a real tax code") — one flat rate,
+  no brackets.
+
+- **Owner drawings** — the existing "Owner" `Employment.dailySalary` (set in
+  `GoalSystem.openBusiness`, `EconomySystem.succeedViaNewEntrepreneur`, and every
+  `WorldGenerator`-authored business's owner-role `employ(...)` call) already IS this — it flows
+  through `dailySettlement`'s ordinary wages loop like any other staff salary. No parallel
+  mechanic was added; this section exists so the brief's five-cost list maps one-to-one onto real
+  code rather than needing an invented duplicate field.
+
+The pre-existing `overheads(type)` — previously the entire non-wage daily cost folded into one
+flat number — is shrunk to a small residual catch-all (insurance/licensing/admin/sundries that
+doesn't cleanly belong to COGS/rent/utilities): FACTORY 12.0, PUB/GROCER 5.0, CAFE/HARDWARE 4.0,
+BAKERY/WORKSHOP 4.0, BOOKSHOP/TAILOR 3.0 (per day). Not zeroed out — a real business does carry
+some cost bucket like this — but deliberately much smaller than the pre-Phase-1 30-120 range, since
+rent/utilities/COGS now separately cover what that flat number used to lump together.
+
+### 2. Reserve runway
+
+`Business.recentNetDaily: MutableList<Double>` (new field, safe-default empty list) is a bounded
+trailing window (`EconomySystem.NET_DAILY_HISTORY_WINDOW` = 14 days) of
+`revenueToday - expensesToday` — i.e. what `dailySettlement` actually applied to `balance` that
+day, after every real deduction — populated once per business per day by `recordNetDaily`, called
+right after tax is deducted and before `settleBusinessDay`'s troubled-day bookkeeping runs.
+
+`EconomySystem.reserveRunway(biz): Double` is a **pure computed function**, not a second persisted
+field (same "derive, don't duplicate" discipline as `BusinessHealthState`/`DebtState`) =
+`balance / averageDailyNetBurn` using that trailing window rather than one noisy day. Semantics:
+brand-new business with no history yet → `Double.POSITIVE_INFINITY` if balance is non-negative (or
+`0.0` if already underwater); average net at or above break-even → `Double.POSITIVE_INFINITY`
+(nothing is burning, "days until zero" is undefined in the literal sense); otherwise
+`balance / -averageNet`, floored at 0.
+
+### 3. Break-even customer count
+
+`EconomySystem.breakEvenCustomers(ctx, biz): Int` — the customer count at which a day's
+revenue-after-COGS covers that day's fixed costs (overhead + rent + utilities + wages; tax is
+deliberately excluded from the target sum since tax only applies to an already-profitable day, so
+"where profit turns positive" is the pre-tax break-even point by construction). Formula:
+`ceil(fixedCosts / (baseSpend(type) * priceLevel * (1 - cogsFraction(type))))`. Returns `0` for
+`PUBLIC_SERVICES` (no real customer-revenue model). A real, useful diagnostic other systems — and
+Phase 2's formation gate — can read directly; not just printed and discarded.
+
+### 4. Catchment/preference-based demand
+
+`EconomySystem.catchmentDemand(ctx, biz): Double` replaces the old pure-reputation drift target in
+`settleBusinessDay` outright (not composed alongside it — see "One demand-update mechanism, not
+two" below), built from real signals:
+
+- **Catchment radius** (`catchmentRadiusTiles(type)`, Manhattan tiles via the existing
+  `Tile.manhattan` — the same proximity pattern `PressureBridgeSystem.CRIME_PROXIMITY_TILES`/
+  `SeasonalEventSystem.FLOOD_PROXIMITY_TILES` already use, just at a much larger scale): GROCER/
+  BAKERY 40, CAFE/PUB 48, HARDWARE/BOOKSHOP/TAILOR 60, WORKSHOP/FACTORY 0 (see below).
+  **Calibration note:** first drafted at 3-10x smaller (10/14/20), directly copying
+  `CRIME_PROXIMITY_TILES`'s "is this basically next door" scale — but `WorldGenerator`'s
+  hand-authored map puts every home on Rowan Street (y in 19..29) and every shop on High Street
+  (y in 6..11); real measured Manhattan distances from a High Street shop to Rowan Street homes
+  run roughly 20-45 tiles. The small radii excluded nearly every household in town, collapsing
+  catchment demand to near-zero for most sectors — confirmed by the same closure-rate spike
+  measured for the COGS-fraction calibration above (158.5%, further worsening to that number
+  specifically from this cause before the COGS retune was even applied). Widened to match the
+  map's real geometry, then re-verified.
+- **Age/eligibility filter** (`residentEligibilityWeight`): children (`LifeStage.CHILD`) count as
+  0 for every sector; teens count at a reduced 0.6/0.4/0.25 weight depending on sector (bookshop/
+  bakery/cafe higher, grocer lower, everything else lowest); a PUB additionally excludes anyone
+  under `PUB_MIN_AGE` (18) outright. A light filter, not a rigid rule system, per the brief.
+- **Household wealth/spending-capacity** (`wealthWeight`): `Household.savings` scaled to a gentle
+  0.6x-1.6x multiplier around a `WEALTH_WEIGHT_MIDPOINT` of 1,500.0 — richer nearby households
+  genuinely mean more demand for a HARDWARE/TAILOR-type business, without one wealthy household
+  swamping everyone else's contribution.
+- **Price/quality/reputation** (`standingMultiplier`): reuses `BusinessRivalrySystem.standing`'s
+  exact shape (`reputation - (priceLevel - 1.0) * 40.0`) so the two systems agree on what "a
+  better business" means, converted to a 0.7x-1.3x demand multiplier around a reputation-50/
+  price-1.0x baseline.
+- **Distance decay** (`distanceWeight`): linear within the catchment radius, from 1.0x at the
+  business's own doorstep down to a `MIN_DISTANCE_WEIGHT` floor of 0.15x at the radius edge — a
+  real catchment fades out, it doesn't cliff-drop to zero one tile before the boundary.
+- **Same-sector competition split** (`competitionShare`) — the "two cafés on opposite sides of
+  town shouldn't split every customer equally" mechanic. For each household in range, finds every
+  other OPEN same-type business whose catchment *also* reaches that household's home (real
+  overlap, not a townwide flat split), scores each candidate (including this business) by
+  `distanceWeight(dist-to-that-business) * standingMultiplier(thatBusiness)`, and returns this
+  business's normalised fraction of the total. A lone business with no real nearby same-type
+  overlap for a given household gets the full `1.0` share — competition only dilutes where a real
+  rival's catchment genuinely overlaps for that specific household.
+- **Opening hours** — left to Phase 2. Every open business is treated as "open" for catchment
+  purposes across the existing `hourlyFootfall` 8-21 window, matching the pre-Phase-1 assumption;
+  distinct per-business opening-hours variation was judged out of this pass's scope (the brief's
+  own "trivial to add now" carve-out did not apply cleanly given `Employment.shiftStartHour`/
+  `shiftEndHour` model staff shifts, not the business's own trading hours).
+
+**WORKSHOP/FACTORY get a flat, modest baseline (`CONTRACT_SECTOR_BASELINE_DEMAND` = 45.0), not a
+zero-catchment collapse.** Per the brief, these sectors "should rely on contracts, not walk-in
+residents" — real external/contract demand is explicitly Phase 2's job. Giving them a hard `0`
+catchment radius but then feeding that `0` into the same weighted-sum formula as every other
+sector would starve them to nothing before that Phase 2 work lands, which is not this pass's job
+to cause. 45.0 matches the exact starting `demand`/`reputation` `GoalSystem.openBusiness`/
+`succeedViaNewEntrepreneur` already use for a freshly-opened WORKSHOP — a deliberately neutral
+placeholder, not tuned up or down to mask that this sector's real demand model doesn't exist yet.
+
+### One demand-update mechanism, not two
+
+The old code: `biz.demand += (biz.reputation - biz.demand) * 0.04`. The new code:
+`biz.demand += (catchmentDemand(ctx, biz) - biz.demand) * DEMAND_DRIFT_RATE` (same `0.04` rate,
+renamed as a named constant but numerically unchanged — the pace of demand change isn't part of
+what this pass retunes, only what it drifts toward). This **replaces** the reputation-only target
+outright rather than composing two separately-writing mechanisms, per the brief's explicit
+instruction not to leave two uncoordinated things writing to the same field — `reputation` is not
+lost, it's folded into `catchmentDemand`'s own `standingMultiplier` term as one ingredient of a
+real target instead of being the entire target.
+
+`BusinessRivalrySystem`'s existing pairwise demand nudge (`DEMAND_SHIFT_PER_DAY`) and
+`PressureBridgeSystem`'s temporary demand-shift effects continue to write to `biz.demand` directly,
+unmodified, after `settleBusinessDay`'s drift step runs each day — smaller perturbations layered on
+top of the new catchment-driven baseline, not replaced by it, exactly as the brief asked.
+
+### Measured results — before/after, honestly reported
+
+All numbers from `EconomyCalibrationReport` (10 seeds x 1 simulated year, pooled), rerun after
+every retune described above:
+
+| Stage | One-year closure rate |
+|---|---|
+| Pre-Phase-1 baseline (this session's starting point) | 53.7% |
+| First Phase 1 attempt (COGS/rent/utilities/tax at drafted values, catchment radii at first-draft small values) | 158.5% |
+| After widening catchment radii to match the map's real geometry (COGS/rent/utilities still at first-draft values) | 96.0% |
+| After retuning COGS/rent/utilities down to the brief's own low-end bands (final, shipped state) | **36.6%** |
+
+The final measured state (10 seeds, 1 simulated year, pooled): 93 businesses ever tracked, 76 still
+open at year-end, 34 closed (36.6%), median open-business balance 3,653.3, p90 `daysInTrouble` = 0
+(i.e. 90% of still-open businesses have zero consecutive days in the red at year-end — genuinely
+healthy, not just "not yet closed"), resident median wealth 9,565.8, only 2.7% of residents in debt
+crisis, employment rate 71.9%-94.9% across seeds (down from a pre-Phase-1 93.2%-97.3% range — see
+`EconomyCalibrationGuardrailTest`'s updated bound doc comment for why this drop is real and
+expected: `hireSomeone`'s own gate, `biz.demand > 62 && biz.balance > 1_500`, is genuinely harder
+to clear once real costs slow down how fast `balance` builds, so hiring is now a real decision
+rather than a free action — exactly the direction Phase 2's staffing-ramp work is meant to build
+on).
+
+**This is a real, structural improvement (53.7% → 36.6%) achieved through genuine unit-economics
+mechanics, not through suppressing closures or loosening the closure threshold** — `CLOSURE_DAYS`/
+`STRUGGLE_NOTICE_DAYS` are completely untouched by this pass. It is honestly reported as **not yet
+at the brief's final 2-10% target** — Phase 1's job was correct mechanics (real costs, real
+catchment demand), not the full target in one pass; Phase 2's staffing-ramp, recovery-ladder,
+formation-gate and external/contract-demand work still has to land before the full target is
+realistic.
+
+### Deliberately out of scope for this pass (Phase 2)
+
+- **Staffing ramp** — new businesses should start lean (owner-operated, 0-1 employees) and hire
+  only after sustained demand. Not built here; `WorldGenerator`'s hand-authored shops and
+  `GoalSystem.openBusiness`/`succeedViaNewEntrepreneur`'s freshly-spawned businesses still start
+  at their pre-existing staffing levels.
+- **Recovery ladder** — the brief's full 10-step ladder (reduce drawings → reduce stock → shorten
+  hours → renegotiate supplier terms → raise prices → seek finance → owner capital injection →
+  reduce staff → seek buyer → restructure/relocate). The existing `maybeAttemptRecovery` (price
+  cut, early layoff — see "Business health states" above) is a real but partial precursor, not
+  the full ladder.
+- **Business formation gate** — nothing yet stops a new business opening without projected demand
+  support, adequate startup capital relative to real break-even, acceptable local competition, a
+  staffing plan, or reserve runway. `breakEvenCustomers`/`reserveRunway`/`catchmentDemand` built in
+  this pass are the real, useful diagnostic inputs a Phase 2 formation gate should read — they did
+  not exist before this pass.
+- **External/contract demand for FACTORY/WORKSHOP** — these sectors get the flat
+  `CONTRACT_SECTOR_BASELINE_DEMAND` placeholder (see above), not real commuter/tourist/contract/
+  institutional demand modelling.
+- **Opening-hours variation** — every open business is "open" for catchment purposes across the
+  existing 8-21 window; no per-business trading-hours model distinct from staff shift hours.
+- **Weather/transport as catchment inputs** — `hourlyDemandMultiplier`'s existing per-sector
+  weather sensitivity (see "Sector demand shaping" above) still applies as an hourly multiplier on
+  top of `catchmentDemand`'s daily-drift target; weather/transport were not woven into the
+  catchment score itself this pass.
+
+### Determinism & bounds
+
+`catchmentDemand`, `breakEvenCustomers`, `reserveRunway`, `cogsFraction`, `rentPerDay`,
+`utilitiesPerDay` are all pure functions of their inputs (`ctx.state`, `biz`, `building`) — no
+`ctx.rng` involved anywhere in this pass's cost/demand math (the customer-count *draw* itself, in
+`hourlyFootfall`, was already `ctx.rng`-based before this pass and is unchanged). `catchmentDemand`
+is always clamped to the same `5.0..95.0` band `biz.demand` has always used. Verified in
+`UnitEconomicsCatchmentDemandTest`: COGS/rent/utilities/tax are real `balance`/`recentNetDaily`
+deductions (not just computed and discarded), `breakEvenCustomers` is sane and positive per real
+sector and `0` for `PUBLIC_SERVICES`, `catchmentDemand` responds correctly to distance (closer
+households contribute more) and household wealth (richer catchment → more demand for a
+HARDWARE-type business), two same-sector businesses in overlapping catchments genuinely split a
+household rather than each claiming the full amount, WORKSHOP/FACTORY get the flat baseline not a
+collapse, and determinism (same state + same tick → same result, repeatably).
