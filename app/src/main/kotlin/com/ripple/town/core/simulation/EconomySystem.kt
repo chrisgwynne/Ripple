@@ -773,8 +773,16 @@ object EconomySystem {
                     }
                 }
                 biz.daysInTrouble = 0
-                // Prosperous businesses may expand.
-                if (biz.balance > EXPANSION_BALANCE && ctx.rng.nextBoolean(0.04)) {
+                // Prosperous businesses may expand — capped (see maxEmployeeCapacity), found via
+                // the Phase 3 multi-year validation run: uncapped growth here let a healthy
+                // business hire indefinitely (every 0.04 daily roll while balance > EXPANSION_
+                // BALANCE, forever) while hourlyFootfall's customer draw depends only on `demand`
+                // (ceiling 95, never on employeeCapacity) — wages grew without bound against
+                // revenue that plateaus, which is what actually drove the 89.5% 10-year closure
+                // rate, not demand or catchment.
+                if (biz.balance > EXPANSION_BALANCE && biz.employeeCapacity < maxEmployeeCapacity(biz.type) &&
+                    ctx.rng.nextBoolean(0.04)
+                ) {
                     expandBusiness(ctx, biz)
                 }
                 // Staffing ramp (Economy Calibration Gate Phase 2, 2026-07-11) — see
@@ -942,6 +950,25 @@ object EconomySystem {
         return ctx.state.recentEventIds.asReversed()
             .mapNotNull { ctx.eventIndex.get(it) }
             .firstOrNull { it.type == type && it.buildingId == buildingId }
+    }
+
+    /**
+     * Real ceiling on `Business.employeeCapacity` growth (Economy Calibration Gate Phase 3
+     * follow-up, added 2026-07-11) — see `docs/simulation-rules.md` "Full validation matrix"
+     * for the multi-year run that found this missing. For footfall-driven retail/food/service
+     * sectors, `hourlyFootfall`'s customer draw depends only on `demand` (hard-capped at 95),
+     * never on `employeeCapacity` — extra staff past enough to cover a 14-hour trading day
+     * (roughly 2-3 shift-covering hires) adds pure wage cost with zero matching revenue
+     * capacity, which is what actually drove the 89.5% ten-year closure rate. For WORKSHOP/
+     * FACTORY, contract revenue genuinely does scale with `employeeCapacity` via
+     * `capacityMultiplier` (`0.7 + employeeCapacity * 0.12`) — but that itself is
+     * `coerceIn(0.7, 2.0)`, i.e. plateaus at `employeeCapacity ≈ 11`; a cap just above that
+     * plateau lets contract-driven sectors keep growing exactly as far as it actually helps
+     * them, and no further.
+     */
+    private fun maxEmployeeCapacity(type: BusinessType): Int = when (type) {
+        BusinessType.WORKSHOP, BusinessType.FACTORY -> 12
+        else -> 4
     }
 
     private fun expandBusiness(ctx: TickContext, biz: Business) {

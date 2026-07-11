@@ -4,6 +4,48 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-11 — Economy Calibration Gate Phase 3 follow-up: capped `employeeCapacity` growth, re-validated
+
+Direct follow-up to the Phase 3 entry immediately below, closing its own "Deliberately deferred"
+expansion-mechanism item the same session. Full write-up:
+`docs/simulation-rules.md#follow-up-fix-same-session-capping-employeecapacity-growth-and-re-validating`.
+
+**Diagnosis confirmed, fix applied.** `EconomySystem.expandBusiness` had no ceiling on
+`Business.employeeCapacity` growth, while `hourlyFootfall`'s customer draw for retail/food/service
+sectors depends only on `demand` (hard-capped 95.0), never on `employeeCapacity` — every expansion
+past the point of covering a full trading day was pure wage cost with zero matching revenue
+capacity. New private `EconomySystem.maxEmployeeCapacity(type): Int` gates the existing
+`expandBusiness` call site: retail/food/service capped at 4, WORKSHOP/FACTORY at 12 (chosen because
+`maybeWinContract`'s own `capacityMultiplier` already plateaus at `employeeCapacity ≈ 11` — the cap
+sits just above where the contract mechanism itself stops rewarding more staff, not an arbitrary
+round number).
+
+**Re-ran all three `EconomyValidationReport` configs (real, same seeds, actually executed):**
+
+| Horizon | Closure rate BEFORE | Closure rate AFTER |
+|---|---|---|
+| 1yr (WIDE, 15 seeds) | 4.4% | **2.2%** |
+| 5yr (MEDIUM, 5 seeds) | 26.1% | **19.1%** |
+| 10yr (NARROW, 2 seeds) | 89.5% | **21.1%** |
+
+The 10-year figure fell from a near-total-collapse 89.5% to 21.1% — inside the brief's own more
+lenient 20-25% startup ceiling, though still above the strict 2-10% established-business band.
+Survival at 10yr improved from 57.9% to 89.5%. Recoveries (126-215) and expansions (68-276) stayed
+robustly non-zero at every horizon post-fix — the cap reduced how many expansions accumulate per
+business, it did not stop the mechanisms from firing. One sector-level flag still trips post-fix
+(FACTORY 60.0% closure at 5yr, n=5) — reported as a real, un-smoothed finding, not hidden.
+**Genuinely still open, reported honestly rather than declared complete:** the
+"startups-riskier-than-established" Definition-of-Done item remains a FAIL even post-fix — every
+closure in the re-validated runs was still an established business (age >= 1 simulated year), not
+a new one. The expansion cap fixed the wage-cost-outpacing-demand mechanism specifically; it did
+not make `closeBusiness`'s single, non-age-aware `daysInTrouble >= CLOSURE_DAYS` trigger care about
+business age, which is what that Definition-of-Done item actually needs.
+
+Compile-verified via `./gradlew compileDebugKotlin compileDebugUnitTestKotlin` (BUILD SUCCESSFUL).
+`EconomyValidationReport` re-run in full (all 3 configs, BUILD SUCCESSFUL this time — no Gradle
+infra flake — 8m1s wall clock, faster than the pre-fix 12m4s since capped staffing means less
+per-tick bookkeeping over long horizons).
+
 ### 2026-07-11 — Economy Calibration Gate Phase 3: full validation matrix (final phase)
 
 Closes the brief's "Validation" section (`docs/economy-brief-2026-07-11-final-gate.md`) — the
@@ -74,7 +116,31 @@ deliberately not tightened further since it does not (and was never scoped to) c
 horizons where the real open problem now lives. A follow-up pass would need to address multi-year
 staffing-cost drift specifically (candidate starting points: capping `expandBusiness`'s
 `employeeCapacity` growth, or scaling `salaryFor` down as a business's `daysInTrouble` history
-shows sustained health rather than only reacting to trouble after the fact).
+shows sustained health rather than only reacting to trouble after the fact) — flagged as a
+background task rather than fixed speculatively in this validation-and-report pass.
+
+**One narrow addition to `EconomyCalibrationGuardrailTest`** (the existing 10-seed x 1yr guardrail,
+not a new run): two new assertions that total `BUSINESS_RECOVERED`/`BUSINESS_EXPANDED` events are
+never zero across that default config — a real signal worth permanently guarding since all three
+Phase 3 validation configs found recoveries/expansions robustly non-zero (203-297 / 417-496 across
+every horizon) while closure rate itself drifted wildly; a future regression that silently zeroed
+out the recovery ladder or expansion mechanism would otherwise go undetected by the existing four
+bounds, none of which read the event stream. Re-ran the guardrail test after adding these — still
+passes (the guardrail's own 10-seed x 1yr config produces its own real, non-zero recovery/expansion
+counts each run; the assertion only requires nonzero, not a specific count, so it isn't tied to one
+session's exact numbers — see the WIDE config's 203 recoveries / 417 expansions on its own 15-seed
+x 1yr run above for a concrete same-horizon reference point).
+
+Compile-verified via `./gradlew compileDebugKotlin compileDebugUnitTestKotlin` (BUILD SUCCESSFUL)
+throughout. Targeted runs actually executed (not just compile-checked): `EconomyValidationReport`
+(all 3 configs, 723.9s combined — Gradle's own post-test binary-result-cache write failed twice
+with an unrelated `NoSuchFileException` on this Windows/Gradle-9.4.1 host, but the JUnit XML
+results (`tests="3" failures="0" errors="0"`) and full println output both came through cleanly
+both times — a known-flaky local infra quirk, not a test or production-code failure, confirmed by
+inspecting the actual XML result file directly rather than trusting the misleading top-level `BUILD
+FAILED`), `EconomyCalibrationGuardrailTest` (passes, new assertions included), `EconomyCalibrationReport`,
+`RecoveryLadderTest`, `BusinessFormationGateTest`, `ContractDemandTest`, `SectorDemandProfileTest`
+(all pass, no regressions from the harness extensions).
 
 ### 2026-07-11 — Fixed a second stale test assertion found by actually running tests
 
