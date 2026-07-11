@@ -148,7 +148,14 @@ private fun MainScaffold(mainViewModel: MainViewModel) {
                 }
             )
         },
-        news = { NewsScreen() },
+        news = {
+            NewsScreen(
+                onOpenEvent = { id ->
+                    townViewModel.openEvent(id)
+                    navController.navigate(Routes.TOWN) { launchSingleTop = true }
+                }
+            )
+        },
         history = {
             HistoryScreen(
                 onOpenEvent = { id ->

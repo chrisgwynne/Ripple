@@ -1,6 +1,7 @@
 package com.ripple.town.feature.news
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -76,7 +77,10 @@ class NewsViewModel @Inject constructor(
 
 /** The town's weekly paper, generated from public simulation events. */
 @Composable
-fun NewsScreen(viewModel: NewsViewModel = hiltViewModel()) {
+fun NewsScreen(
+    onOpenEvent: (Long) -> Unit = {},
+    viewModel: NewsViewModel = hiltViewModel()
+) {
     val issues by viewModel.issues.collectAsState()
     val selectedId by viewModel.selectedIssueId.collectAsState()
     val stories by viewModel.stories.collectAsState()
@@ -186,6 +190,9 @@ fun NewsScreen(viewModel: NewsViewModel = hiltViewModel()) {
                 }
             }
             items(catStories, key = { "story${it.id}" }) { story ->
+                val storyClickable = story.eventId?.let { eid ->
+                    Modifier.clickable { onOpenEvent(eid) }
+                } ?: Modifier
                 if (isHeadline) {
                     // Front-page treatment: distinct tinted block, bigger type, sits
                     // right under the masthead so it reads as the paper's lead story.
@@ -193,6 +200,7 @@ fun NewsScreen(viewModel: NewsViewModel = hiltViewModel()) {
                         Modifier
                             .fillMaxWidth()
                             .background(RippleColors.Cream)
+                            .then(storyClickable)
                             .padding(horizontal = 20.dp, vertical = 14.dp)
                     ) {
                         Text(
@@ -204,7 +212,11 @@ fun NewsScreen(viewModel: NewsViewModel = hiltViewModel()) {
                         Text(story.body, style = MaterialTheme.typography.bodyLarge)
                     }
                 } else {
-                    Column(Modifier.padding(horizontal = 20.dp, vertical = 6.dp)) {
+                    Column(
+                        Modifier
+                            .then(storyClickable)
+                            .padding(horizontal = 20.dp, vertical = 6.dp)
+                    ) {
                         Text(story.headline, style = MaterialTheme.typography.titleMedium)
                         Spacer(Modifier.height(3.dp))
                         Text(

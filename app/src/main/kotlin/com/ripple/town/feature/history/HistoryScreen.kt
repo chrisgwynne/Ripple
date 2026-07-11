@@ -23,6 +23,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -129,9 +130,11 @@ fun HistoryScreen(
     val stats by viewModel.statistics.collectAsState()
     val interventions by viewModel.interventions.collectAsState()
     var filter by remember { mutableStateOf(HistoryFilter.ALL) }
+    var searchQuery by remember { mutableStateOf("") }
 
-    val filtered = if (filter.category == null) events
-    else events.filter { e -> e.type != null && historyCategoryFor(e.type) == filter.category }
+    val filtered = events
+        .let { if (filter.category == null) it else it.filter { e -> e.type != null && historyCategoryFor(e.type) == filter.category } }
+        .let { if (searchQuery.isBlank()) it else it.filter { e -> e.description.contains(searchQuery, ignoreCase = true) } }
 
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
         item {
@@ -174,6 +177,14 @@ fun HistoryScreen(
                     FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f.label) })
                 }
             }
+            Spacer(Modifier.height(6.dp))
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                placeholder = { Text("Search history…") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)
+            )
         }
         if (filtered.isEmpty()) {
             item {
