@@ -25,6 +25,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import com.ripple.town.core.model.Activity
+import com.ripple.town.core.model.BuildingState
 import com.ripple.town.core.model.BuildingType
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.TileType
@@ -202,7 +203,7 @@ fun TownRenderer(
             for (b in world.buildings.filter {
                 it.x < vpTileX1 && it.x + it.w > vpTileX0 && it.y < vpTileY1 && it.y + it.h > vpTileY0
             }) {
-                val bmp = sprites.building(b.type, b.upgradeLevel, b.abandoned, b.id, b.condition)
+                val bmp = sprites.building(b.type, b.upgradeLevel, b.abandoned, b.id, b.condition, b.buildingState)
                 val topY = b.y * TILE_PX - (bmp.height - b.h * TILE_PX)
                 canvas.drawImageRect(
                     bmp,

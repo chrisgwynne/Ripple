@@ -5,6 +5,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.Canvas as ComposeCanvas
 import androidx.compose.ui.geometry.Rect
+import com.ripple.town.core.model.BuildingState
 import com.ripple.town.core.model.BuildingType
 import com.ripple.town.core.model.LifeStage
 import com.ripple.town.core.model.SpriteConfig
@@ -22,7 +23,14 @@ interface SpriteProvider {
         lifeStage: LifeStage = LifeStage.ADULT,
         occupation: String = ""
     ): ImageBitmap
-    fun building(type: BuildingType, level: Int, abandoned: Boolean, seed: Long, condition: Double = 100.0): ImageBitmap
+    fun building(
+        type: BuildingType,
+        level: Int,
+        abandoned: Boolean,
+        seed: Long,
+        condition: Double = 100.0,
+        buildingState: BuildingState = BuildingState.OCCUPIED
+    ): ImageBitmap
 }
 
 enum class Pose { STAND, WALK, SIT, SLEEP, WORK, TALK, ILL, ARGUE, CELEBRATE, MOURN, INJURED }
@@ -192,14 +200,22 @@ class ProceduralSpriteProvider : SpriteProvider {
         return bmp
     }
 
-    override fun building(type: BuildingType, level: Int, abandoned: Boolean, seed: Long, condition: Double): ImageBitmap {
+    override fun building(
+        type: BuildingType,
+        level: Int,
+        abandoned: Boolean,
+        seed: Long,
+        condition: Double,
+        buildingState: BuildingState
+    ): ImageBitmap {
         val conditionBucket = (condition / 20.0).toInt().coerceIn(0, 4)
+        val stateBit = buildingState.ordinal.toLong()
         val key = (type.ordinal.toLong() shl 16) xor (level.toLong() shl 8) xor
-            (if (abandoned) 1L shl 7 else 0L) xor (conditionBucket.toLong() shl 4) xor (seed and 0x7F)
-        return buildingCache.getOrPut(key) { drawBuilding(type, level, abandoned, seed, condition) }
+            (if (abandoned) 1L shl 7 else 0L) xor (conditionBucket.toLong() shl 4) xor (seed and 0x7F) xor (stateBit shl 32)
+        return buildingCache.getOrPut(key) { drawBuilding(type, level, abandoned, seed, condition, buildingState) }
     }
 
-    private fun drawBuilding(type: BuildingType, level: Int, abandoned: Boolean, seed: Long, condition: Double): ImageBitmap {
+    private fun drawBuilding(type: BuildingType, level: Int, abandoned: Boolean, seed: Long, condition: Double, buildingState: BuildingState = BuildingState.OCCUPIED): ImageBitmap {
         val (tw, th) = footprintOf(type)
         val w = tw * TILE_PX
         val bodyH = th * TILE_PX
@@ -216,6 +232,27 @@ class ProceduralSpriteProvider : SpriteProvider {
             if (x < 0 || y < 0 || x >= w || y >= h) return
             paint.color = c
             canvas.drawRect(Rect(x.toFloat(), y.toFloat(), x + 1f, y + 1f), paint)
+        }
+
+        // PLANNED: ghost outline only (white dashed border on transparent ground).
+        if (buildingState == BuildingState.PLANNED) {
+            val ghost = Color(0x88FFFFFF)
+            for (x in 0 until w) { px(x, roofH, ghost); px(x, h - 1, ghost) }
+            for (y in roofH until h) { px(0, y, ghost); px(w - 1, y, ghost) }
+            return bmp
+        }
+        // UNDER_CONSTRUCTION: bare walls + grey scaffold poles.
+        if (buildingState == BuildingState.UNDER_CONSTRUCTION) {
+            val scaffold = Color(0xFF9E9585)
+            val ground   = Color(0xFFB5A898)
+            rect(0, roofH, w, bodyH, ground)
+            // Vertical scaffold poles at corners and mid-points.
+            for (px2 in 0..w step (w / 2).coerceAtLeast(1)) {
+                for (y in 0 until h) px(px2.coerceAtMost(w - 1), y, scaffold)
+            }
+            // Horizontal planks.
+            for (y in listOf(roofH, roofH + bodyH / 2, h - 2)) rect(0, y, w, 1, scaffold)
+            return bmp
         }
 
         if (type == BuildingType.PARK) {

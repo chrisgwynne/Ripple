@@ -61,6 +61,7 @@ class SimulationCoordinator(
         // 1. Advance time.
         state.time += SimTime.MINUTES_PER_TICK
         val newDay = state.time % SimTime.MINUTES_PER_DAY < SimTime.MINUTES_PER_TICK
+        val dayIndex = SimTime.dayIndex(state.time)
 
         // 2. Needs, weather, travel arrivals.
         NeedsSystem.update(ctx)
@@ -131,6 +132,18 @@ class SimulationCoordinator(
             // residents' own beliefs) rather than being set directly by any of them; run last so
             // it always sees this tick's freshest picture of what actually happened today.
             TownSentimentSystem.updateDaily(ctx)
+            // Dynamic town growth & decline (2026-07-11): budget collection, development
+            // pipeline advancement, building vacancy tracking, and weekly district identity
+            // reclassification.
+            BudgetSystem.updateDaily(ctx)
+            DevelopmentSystem.updateDaily(ctx)
+            VacancySystem.updateDaily(ctx)
+            if (dayIndex % DistrictCharacterSystem.UPDATE_INTERVAL_DAYS == 0L) {
+                DistrictCharacterSystem.updateWeekly(ctx)
+            }
+            if (dayIndex % TownNeedsPlanner.UPDATE_INTERVAL_DAYS == 0L) {
+                TownNeedsPlanner.updateMonthly(ctx)
+            }
         }
         // 13. Intervention influence regenerates through observation.
         InterventionEngine.regenerate(state, SimTime.MINUTES_PER_TICK)
@@ -145,7 +158,6 @@ class SimulationCoordinator(
 
         // 15. Daily statistic + checkpoint cadence.
         var stat: TownStatistic? = null
-        val dayIndex = SimTime.dayIndex(state.time)
         if (newDay && dayIndex != state.lastStatisticDay) {
             stat = buildStatistic(dayIndex)
             state.lastStatisticDay = dayIndex
