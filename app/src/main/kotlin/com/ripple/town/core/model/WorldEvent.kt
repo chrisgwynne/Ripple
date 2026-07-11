@@ -148,7 +148,9 @@ enum class EventType(val label: String) {
     /** A district's social or economic character has shifted to a new classification. */
     DISTRICT_CHARACTER_CHANGED("District character changed"),
     /** The municipal budget balance has fallen below zero — deficit spending. */
-    BUDGET_SHORTFALL("Budget shortfall")
+    BUDGET_SHORTFALL("Budget shortfall"),
+    /** An under-5 child has no assigned caregiver and the town has no nursery. */
+    CHILD_WELFARE_CONCERN("Child welfare concern")
 }
 
 enum class EventVisibility {

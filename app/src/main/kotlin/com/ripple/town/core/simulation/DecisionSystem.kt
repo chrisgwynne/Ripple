@@ -113,6 +113,16 @@ object DecisionSystem {
     }
 
     fun decide(ctx: TickContext, r: Resident) {
+        // Under-5s are cared for — no autonomous decision-making.
+        if (r.detailedLifeStageAt(ctx.now).needsCaregiver) {
+            val home = r.homeBuildingId
+            if (home != null) {
+                ctx.sendTo(r, home, Activity.BEING_CARED_FOR, 4 * 60, "Being looked after at home")
+            } else {
+                ctx.beginActivity(r, Activity.BEING_CARED_FOR, 4 * 60, "Being looked after")
+            }
+            return
+        }
         val actions = candidateActions(ctx.state, r, ctx.now)
         if (actions.isEmpty()) {
             ctx.beginActivity(r, Activity.IDLE, 30, "Nothing pressing")
@@ -254,6 +264,7 @@ object DecisionSystem {
         val n = r.needs
         val p = r.personality
         val stage = r.lifeStageAt(now)
+        val age = r.ageAt(now)
         val hour = SimTime.hourOfDay(now)
         val weekend = SimTime.dayOfWeek(now) >= 5
         val home = r.homeBuildingId
@@ -313,8 +324,10 @@ object DecisionSystem {
             }
         }
 
-        // --- Work
-        if (employment != null && !weekend && stage != LifeStage.CHILD) {
+        // --- Work (16+ only; designated caregivers with no nursery cover are blocked)
+        val isSoleCaregiverOnDuty = CaregiverSystem.isDesignatedCaregiver(state, r) &&
+            !CaregiverSystem.hasNursery(state)
+        if (employment != null && !weekend && age >= 16 && !isSoleCaregiverOnDuty) {
             val biz = state.businesses[employment.businessId]
             val withinShift = hour >= employment.shiftStartHour && hour < employment.shiftEndHour
             if (biz != null && biz.open && withinShift && r.activity != Activity.WORKING) {
@@ -332,8 +345,8 @@ object DecisionSystem {
             }
         }
 
-        // --- School for children and teens on weekdays
-        if ((stage == LifeStage.CHILD || stage == LifeStage.TEEN) && !weekend && hour in 8..14) {
+        // --- School for children aged 5–17 on weekdays
+        if (age in 5..17 && !weekend && hour in 8..14) {
             val school = state.buildings.values.firstOrNull { it.type == BuildingType.SCHOOL }
             if (school != null && r.activity != Activity.AT_SCHOOL) {
                 out += ScoredAction(

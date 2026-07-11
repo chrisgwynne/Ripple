@@ -42,6 +42,12 @@ class SimulationCoordinator(
     var ticksSinceCheckpoint = 0
         private set
 
+    /** Most recent world-consistency violations. Empty when the world is plausible.
+     *  Replace the daily [WorldConsistencyValidator.validate] call with
+     *  [WorldConsistencyValidator.assertValid] in debug builds to halt on the first violation. */
+    var lastConsistencyViolations: List<WorldConsistencyValidator.Violation> = emptyList()
+        private set
+
     /** Pre-load context after restoring from a checkpoint. */
     fun primeNewspaperBuffer(events: List<WorldEvent>) {
         newspaperBuffer.clear()
@@ -154,6 +160,8 @@ class SimulationCoordinator(
             if (dayIndex % AnomalyDetector.CHECK_INTERVAL_DAYS == 0L) {
                 AnomalyDetector.updateMonthly(ctx)
             }
+            // Life stage & caregiving: ensure every under-5 child has a caregiver, update occupation labels.
+            CaregiverSystem.updateDaily(ctx)
             // Human society evolution: aspirations form/inherit, identities solidify, life satisfaction drifts,
             // legacies fade, town culture assessed monthly.
             AspirationSystem.updateDaily(ctx)
@@ -179,6 +187,11 @@ class SimulationCoordinator(
             if (dayIndex % TechnologySystem.UPDATE_INTERVAL_DAYS == 0L) {
                 TechnologySystem.updateMonthly(ctx)
             }
+            // Consistency check: run after all daily systems to catch impossible states created
+            // this tick (e.g. a caregiver dying with no replacement assigned yet).
+            // Violations are collected; in debug builds replace with WorldConsistencyValidator.assertValid(ctx.state).
+            val consistencyViolations = WorldConsistencyValidator.validate(ctx.state)
+            if (consistencyViolations.isNotEmpty()) lastConsistencyViolations = consistencyViolations
         }
         // 12b. Per-tick life-event dispatch: society systems react to every new event this tick.
         for (event in ctx.newEvents) {

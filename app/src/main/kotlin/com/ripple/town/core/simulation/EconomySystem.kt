@@ -1378,6 +1378,7 @@ object EconomySystem {
         BusinessType.POLICE_STATION -> "Police officer"
         BusinessType.SPORTS_HALL -> "Sports centre worker"
         BusinessType.COMMUNITY_CENTRE -> "Community worker"
+        BusinessType.NURSERY -> "Nursery worker"
     }
 
     private fun relevantSkillFor(type: BusinessType): com.ripple.town.core.model.SkillType = when (type) {

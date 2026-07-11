@@ -25,7 +25,8 @@ enum class BuildingType(val label: String) {
     FIRE_STATION("Fire station"),
     POLICE_STATION("Police station"),
     SPORTS_HALL("Sports hall"),
-    COMMUNITY_CENTRE("Community centre")
+    COMMUNITY_CENTRE("Community centre"),
+    NURSERY("Nursery")
 }
 
 val BuildingType.isHome: Boolean
@@ -52,6 +53,7 @@ fun BuildingType.toBusinessType(): BusinessType? = when (this) {
     BuildingType.POLICE_STATION   -> BusinessType.POLICE_STATION
     BuildingType.SPORTS_HALL      -> BusinessType.SPORTS_HALL
     BuildingType.COMMUNITY_CENTRE -> BusinessType.COMMUNITY_CENTRE
+    BuildingType.NURSERY          -> BusinessType.NURSERY
     // PARK, HOUSE, COTTAGE, TERRACE, FLAT, CEMETERY, VACANT — no business entity
     else -> null
 }
@@ -112,7 +114,8 @@ enum class BusinessType(val label: String) {
     BOOKSHOP("Bookshop"), TAILOR("Tailor"), WORKSHOP("Furniture workshop"), FACTORY("Factory"),
     CLINIC("Clinic"), SCHOOL("School"), TOWN_HALL("Town hall"),
     FIRE_STATION("Fire station"), POLICE_STATION("Police station"),
-    SPORTS_HALL("Sports hall"), COMMUNITY_CENTRE("Community centre")
+    SPORTS_HALL("Sports hall"), COMMUNITY_CENTRE("Community centre"),
+    NURSERY("Nursery")
 }
 
 @Serializable

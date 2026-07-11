@@ -26,7 +26,8 @@ enum class Activity(val label: String) {
     CELEBRATING("Celebrating"),
     MOURNING("Mourning"),
     TRAVELLING("On the way"),
-    COMMUNITY("Community activity")
+    COMMUNITY("Community activity"),
+    BEING_CARED_FOR("Being cared for")
 }
 
 enum class Mood(val label: String) {
@@ -308,7 +309,9 @@ data class Resident(
     val aspirations: MutableList<Aspiration> = mutableListOf(),
     val identityFacets: MutableList<IdentityFacet> = mutableListOf(),
     var lifeSatisfaction: LifeSatisfaction = LifeSatisfaction(),
-    val hobbies: MutableList<HobbyEngagement> = mutableListOf()
+    val hobbies: MutableList<HobbyEngagement> = mutableListOf(),
+    // --- Caregiver system (2026-07-11): resident responsible for this child when needsCaregiver ---
+    var caregiverId: Long? = null
 ) {
     val fullName: String get() = "$firstName $surname"
 
@@ -319,6 +322,19 @@ data class Resident(
         in 13..17 -> LifeStage.TEEN
         in 18..64 -> LifeStage.ADULT
         else -> LifeStage.ELDER
+    }
+
+    fun detailedLifeStageAt(now: Long): DetailedLifeStage = when (ageAt(now)) {
+        0 -> DetailedLifeStage.NEWBORN
+        1, 2 -> DetailedLifeStage.INFANT
+        3, 4 -> DetailedLifeStage.TODDLER
+        in 5..11 -> DetailedLifeStage.CHILD
+        in 12..17 -> DetailedLifeStage.TEENAGER
+        in 18..25 -> DetailedLifeStage.YOUNG_ADULT
+        in 26..39 -> DetailedLifeStage.ADULT
+        in 40..59 -> DetailedLifeStage.MIDDLE_AGE
+        in 60..74 -> DetailedLifeStage.SENIOR
+        else -> DetailedLifeStage.ELDERLY
     }
 
     fun mood(): Mood = Mood.fromScore(needs.wellbeing())

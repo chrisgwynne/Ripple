@@ -123,6 +123,7 @@ object LifecycleSystem {
             currentBuildingId = parentA.homeBuildingId
         )
         state.residents[id] = child
+        CaregiverSystem.assignCaregiver(state, child)
         parentA.childIds += id
         parentB.childIds += id
         child.householdId?.let { state.households[it]?.memberIds?.add(id) }
