@@ -101,8 +101,12 @@ object GoalSystem {
             )
         }
 
-        // Lonely single adults look for company — but not right after losing someone or closing a business
-        if (!inBreathingSpace && n.social < 30 && r.partnerId == null && stage == LifeStage.ADULT && r.personality.sociability > 0.35) {
+        // Lonely single adults look for company — but not right after losing someone or closing a business.
+        // A childhood bereavement (parental loss) lowers the effective social floor slightly.
+        val findPartnerSocialBar = 30.0 * MemoryRecallSystem.childhoodInfluenceModifier(
+            r, MemoryRecallSystem.ChildhoodSituation.PARENTAL_LOSS
+        )
+        if (!inBreathingSpace && n.social < findPartnerSocialBar && r.partnerId == null && stage == LifeStage.ADULT && r.personality.sociability > 0.35) {
             seedGoal(ctx, r, GoalType.FIND_PARTNER, "The evenings have grown very quiet.")
         }
 

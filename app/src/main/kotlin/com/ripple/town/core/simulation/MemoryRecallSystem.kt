@@ -192,18 +192,20 @@ object MemoryRecallSystem {
      * (no effect) when the resident has no matching childhood memory, so every call site that
      * doesn't wire this in is unaffected by construction.
      *
-     * Only two [ChildhoodSituation] cases are wired into real call sites today (see
-     * `GoalSystem.generateFromCircumstance`'s `START_BUSINESS`/`FIND_JOB` branches) — the hook
-     * itself is general enough for more call sites later, but only those two are actually
-     * plumbed in this pass, per the brief's "1-2 clear cases, document the rest as the hook
-     * exists" scoping.
+     * Four [ChildhoodSituation] cases are wired:
+     * - `BUSINESS_FAILURE` → GoalSystem START_BUSINESS ambition bar (dampened)
+     * - `FINANCIAL_HARDSHIP` → GoalSystem FIND_JOB urgency threshold (elevated)
+     * - `CRIME_VICTIM` → CrimeSystem shoplifting honesty bar (raised, less likely to steal)
+     * - `PARENTAL_LOSS` → GoalSystem FIND_PARTNER social threshold (lowered, seeking connection)
      */
-    enum class ChildhoodSituation { BUSINESS_FAILURE, FINANCIAL_HARDSHIP }
+    enum class ChildhoodSituation { BUSINESS_FAILURE, FINANCIAL_HARDSHIP, CRIME_VICTIM, PARENTAL_LOSS }
 
     fun childhoodInfluenceModifier(resident: Resident, situation: ChildhoodSituation): Double {
         val (types, keyword) = when (situation) {
             ChildhoodSituation.BUSINESS_FAILURE -> setOf(MemoryType.LOSS, MemoryType.FEAR) to "business"
             ChildhoodSituation.FINANCIAL_HARDSHIP -> setOf(MemoryType.LOSS, MemoryType.HARDSHIP_SHARED) to "money"
+            ChildhoodSituation.CRIME_VICTIM -> setOf(MemoryType.FEAR, MemoryType.LOSS) to "stolen"
+            ChildhoodSituation.PARENTAL_LOSS -> setOf(MemoryType.LOSS) to "died"
         }
         val hit = resident.memories.any { m ->
             m.type in types &&
@@ -221,6 +223,14 @@ object MemoryRecallSystem {
             // finding paid work — read as a multiplier that lowers the effective threshold
             // (i.e. the resident is more readily nudged towards FIND_JOB), not a courage/risk term.
             ChildhoodSituation.FINANCIAL_HARDSHIP -> 1.1
+            // A childhood theft or crime memory slightly raises the effective honesty bar needed
+            // to proceed — the resident has seen the cost from the victim's side, not the thief's.
+            // Used as a multiplier on the honesty filter in CrimeSystem (0.9 → harder to qualify).
+            ChildhoodSituation.CRIME_VICTIM -> 0.9
+            // A childhood bereavement lowers the threshold to seek a partner — loss early in life
+            // creates a slightly stronger pull toward connection. Multiplied onto the social need
+            // floor in GoalSystem (1.1 → slightly looser trigger).
+            ChildhoodSituation.PARENTAL_LOSS -> 1.1
         }
     }
 

@@ -7,6 +7,7 @@ import com.ripple.town.core.model.MemoryType
 import com.ripple.town.core.model.Resident
 import com.ripple.town.core.model.SimTime
 import com.ripple.town.core.model.WorldEvent
+import com.ripple.town.core.simulation.MemoryRecallSystem.ChildhoodSituation
 
 /**
  * The town constable investigates reported crimes with imperfect information.
@@ -186,7 +187,7 @@ object CrimeSystem {
                 it.inTown && it.lifeStageAt(ctx.now) != LifeStage.CHILD &&
                     !onCooldown(ctx, it.id) &&
                     (it.needs.financialSecurity < 30.0 || it.debt > 400.0) &&
-                    it.personality.honesty < 0.55
+                    it.personality.honesty < 0.55 * MemoryRecallSystem.childhoodInfluenceModifier(it, ChildhoodSituation.CRIME_VICTIM)
             }
         )
 
