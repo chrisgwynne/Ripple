@@ -170,6 +170,15 @@ class SimulationCoordinator(
             if (dayIndex % CommunitySystem.UPDATE_INTERVAL_DAYS == 0L) {
                 CommunitySystem.updateFortnightly(ctx)
             }
+            if (dayIndex % TransportSystem.UPDATE_INTERVAL_DAYS == 0L) {
+                TransportSystem.updateMonthly(ctx)
+            }
+            if (dayIndex % EnvironmentSystem.UPDATE_INTERVAL_DAYS == 0L) {
+                EnvironmentSystem.updateMonthly(ctx)
+            }
+            if (dayIndex % TechnologySystem.UPDATE_INTERVAL_DAYS == 0L) {
+                TechnologySystem.updateMonthly(ctx)
+            }
         }
         // 12b. Per-tick life-event dispatch: society systems react to every new event this tick.
         for (event in ctx.newEvents) {

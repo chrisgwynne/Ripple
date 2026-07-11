@@ -402,7 +402,11 @@ data class WorldState(
     val institutionRecords: MutableMap<Long, InstitutionRecord> = mutableMapOf(),
     val communityGroups: MutableMap<Long, CommunityGroup> = mutableMapOf(),
     var nextInstitutionId: Long = 1L,
-    var nextGroupId: Long = 1L
+    var nextGroupId: Long = 1L,
+    val transportRoutes: MutableMap<Long, TransportRoute> = mutableMapOf(),
+    var nextRouteId: Long = 1L,
+    var townEnvironment: TownEnvironment = TownEnvironment(),
+    var techLevel: TechLevel = TechLevel()
 ) {
     fun district(id: Long): District? = districts[id]
 
