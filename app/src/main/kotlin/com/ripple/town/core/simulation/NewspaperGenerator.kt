@@ -94,6 +94,27 @@ object NewspaperGenerator {
         // real simulated town (park, café, actual businesses) rather than free-floating text.
         add(StoryCategory.NOTICES, "Public notices", noticeCopy(state, rng))
 
+        // Mysteries surfaced passively — no announcement, just the paper noticing things
+        val legend = if (rng.nextBoolean(0.25)) LegendSystem.strongestActive(state) else null
+        if (legend != null) {
+            add(StoryCategory.HUMAN_INTEREST,
+                "Word around town",
+                "It has been said — and this paper neither confirms nor denies — that ${legend.text}")
+        }
+        val anomaly = if (rng.nextBoolean(0.15)) AnomalyDetector.recentAnomaly(state) else null
+        if (anomaly != null) {
+            add(StoryCategory.HUMAN_INTEREST, "A curious observation", anomaly.description)
+        }
+        val coldCase = UnsolvedCaseSystem.anniversaryCase(state)
+        if (coldCase != null) {
+            val years = UnsolvedCaseSystem.yearsOpen(coldCase, state.time)
+            val s = if (years == 1L) "" else "s"
+            val snippet = coldCase.description.take(60).trimEnd { it == ' ' || it == ',' }
+            add(StoryCategory.CRIME,
+                "$years year$s on:",
+                "It has now been $years year$s since $snippet. The case remains unsolved.")
+        }
+
         state.lastNewspaperAt = state.time
         return issue
     }

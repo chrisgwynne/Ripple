@@ -86,6 +86,19 @@ object CrimeSystem {
         ensureConstable(ctx)
         val constable = state.constableResidentId?.let { state.resident(it) }
 
+        // 18% of hidden crimes go cold — the trail runs out before anyone is named
+        if (crime.visibility == EventVisibility.HIDDEN && ctx.rng.nextBoolean(0.18)) {
+            UnsolvedCaseSystem.createCase(ctx, crime)
+            ctx.emit(
+                EventType.CRIME_REPORTED,
+                "The constable looked into the matter but found no clear leads. The case remains open.",
+                sourceResidentId = constable?.id,
+                severity = 0.2, causeIds = listOf(crime.id)
+            )
+            LegendSystem.considerSpawn(ctx, crime)
+            return
+        }
+
         val others = state.detailedResidents()
             .filter { it.inTown && it.lifeStageAt(ctx.now) == LifeStage.ADULT && it.id != constable?.id && it.id != culprit.id }
         val pool = (others + culprit).sortedBy { it.id }
@@ -288,6 +301,8 @@ object CrimeSystem {
             ConsequenceEngine.onEvent(ctx, crime)
             PressureBridgeSystem.onCrimeNearBusiness(ctx, crime)
             investigate(ctx, crime) // burglary is always reported — too significant to sit hidden
+            LegendSystem.considerSpawn(ctx, crime)
+            TownEraSystem.considerEra(ctx, crime)
         }
     }
 
@@ -544,6 +559,8 @@ object CrimeSystem {
             ConsequenceEngine.onEvent(ctx, crime)
             PressureBridgeSystem.onCrimeNearBusiness(ctx, crime)
             investigate(ctx, crime) // always investigated — too severe to sit unreported
+            LegendSystem.considerSpawn(ctx, crime)
+            TownEraSystem.considerEra(ctx, crime)
         }
     }
 

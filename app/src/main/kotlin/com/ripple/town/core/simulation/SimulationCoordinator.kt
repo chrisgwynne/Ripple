@@ -147,6 +147,13 @@ class SimulationCoordinator(
             if (dayIndex % TownNeedsPlanner.UPDATE_INTERVAL_DAYS == 0L) {
                 TownNeedsPlanner.updateMonthly(ctx)
             }
+            // Mysteries engine: legends accumulate, cold cases decay, eras open/close, anomalies detected monthly.
+            LegendSystem.updateDaily(ctx)
+            UnsolvedCaseSystem.updateDaily(ctx)
+            TownEraSystem.updateDaily(ctx)
+            if (dayIndex % AnomalyDetector.CHECK_INTERVAL_DAYS == 0L) {
+                AnomalyDetector.updateMonthly(ctx)
+            }
         }
         // 13. Intervention influence regenerates through observation.
         InterventionEngine.regenerate(state, SimTime.MINUTES_PER_TICK)

@@ -76,6 +76,22 @@ object RumourSystem {
             leak(ctx, event, recipients)
             budget--
         }
+
+        // Second pass: inaccurate rumours can mutate and re-spread up to 3 hops from the original
+        val spreadableRumours = ctx.newEvents
+            .filter {
+                it.type == EventType.RUMOUR_SPREAD &&
+                    it.payload["accurate"] == "false" &&
+                    (it.payload["generationDepth"]?.toInt() ?: 0) < 3
+            }
+            .sortedBy { it.id }
+        for (rumour in spreadableRumours) {
+            if (!ctx.rng.nextBoolean(0.08)) continue
+            val depth = (rumour.payload["generationDepth"]?.toInt() ?: 0) + 1
+            val recipients = leakRecipients(ctx, rumour)
+            if (recipients.isEmpty()) continue
+            leakMutated(ctx, rumour, recipients, depth)
+        }
     }
 
     private fun markInvolvedAsKnowing(ctx: TickContext, event: WorldEvent) {
@@ -151,6 +167,39 @@ object RumourSystem {
             templates += "Rumour has dragged ${bystander.fullName} into it too, fairly or not."
         }
         return ctx.rng.pick(templates)
+    }
+
+    private fun leakMutated(ctx: TickContext, original: WorldEvent, recipients: List<Resident>, depth: Int) {
+        val mutatedDesc = mutateForGeneration(original.description, depth, ctx.rng)
+        ctx.emit(
+            EventType.RUMOUR_SPREAD,
+            mutatedDesc,
+            sourceResidentId = original.sourceResidentId,
+            targetResidentIds = original.targetResidentIds,
+            severity = (original.severity * 0.8).coerceIn(0.05, 1.0),
+            visibility = EventVisibility.PUBLIC,
+            payload = mapOf(
+                "accurate" to "false",
+                "sourceEventId" to (original.payload["sourceEventId"] ?: original.id.toString()),
+                "generationDepth" to depth.toString()
+            )
+        )
+        for (r in recipients) r.learn(original.id)
+    }
+
+    private fun mutateForGeneration(description: String, depth: Int, rng: SimRandom): String {
+        val openers = when (depth) {
+            1 -> listOf("A version going round has it that ", "Some are saying now that ")
+            2 -> listOf("By this telling, ", "It's got so garbled by now that some believe ")
+            else -> listOf("Nobody quite knows the original story, but the version circulating claims that ", "The tale has a life of its own now: ")
+        }
+        val suffixes = when (depth) {
+            1 -> listOf(" — though details are hazy.", " — accounts differ.")
+            2 -> listOf(" Nobody seems to remember how it started.", " The original event is long since lost in the telling.")
+            else -> listOf(" It may bear no relation to what actually happened.", " The truth, if there ever was one, is long buried.")
+        }
+        val snippet = description.take(80).trimEnd { it == '.' || it == ' ' }
+        return rng.pick(openers) + snippet.replaceFirstChar { it.lowercase() } + rng.pick(suffixes)
     }
 
     private val TRUE_OPENERS = listOf(

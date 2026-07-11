@@ -275,6 +275,7 @@ object LifecycleSystem {
         passDownHeirloom(ctx, r, death.id)
 
         ConsequenceEngine.onEvent(ctx, death)
+        LegendSystem.considerSpawn(ctx, death)
     }
 
     /** How important a memory's formed belief must be to survive as a family story. */

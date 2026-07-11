@@ -290,6 +290,7 @@ object IncidentSystem {
                 ctx.addMemory(w, MemoryType.FEAR, "${r.firstName} went missing and we didn't know where.", 65.0, event.id, listOf(r.id))
             }
             ConsequenceEngine.onEvent(ctx, event)
+            LegendSystem.considerSpawn(ctx, event)
         }
     }
 

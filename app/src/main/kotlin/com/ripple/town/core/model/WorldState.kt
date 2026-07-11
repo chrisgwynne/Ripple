@@ -375,7 +375,25 @@ data class WorldState(
      * prevent clusters ("three weddings this week"). Written by
      * [com.ripple.town.core.simulation.HumanScheduler.recordFired].
      */
-    val activityCooldowns: MutableMap<String, Long> = mutableMapOf()
+    val activityCooldowns: MutableMap<String, Long> = mutableMapOf(),
+
+    // --- Anomalies, legends & mysteries (2026-07-11) ---
+    /** Local legends that have emerged from coincidence and spread by word of mouth.
+     *  Managed by [com.ripple.town.core.simulation.LegendSystem]. */
+    val localLegends: MutableMap<Long, LocalLegend> = mutableMapOf(),
+    /** Crimes and incidents whose investigation went cold.
+     *  Managed by [com.ripple.town.core.simulation.UnsolvedCaseSystem]. */
+    val unsolvedCases: MutableMap<Long, UnsolvedCase> = mutableMapOf(),
+    /** Statistical anomalies detected by [com.ripple.town.core.simulation.AnomalyDetector]. */
+    val anomalyRecords: MutableList<AnomalyRecord> = mutableListOf(),
+    /** Defining historical eras the town collectively remembers.
+     *  Managed by [com.ripple.town.core.simulation.TownEraSystem]. */
+    val townEras: MutableList<TownEra> = mutableListOf(),
+    var nextLegendId: Long = 1L,
+    var nextCaseId: Long = 1L,
+    var nextEvidenceId: Long = 1L,
+    var nextEraId: Long = 1L,
+    var nextAnomalyId: Long = 1L
 ) {
     fun district(id: Long): District? = districts[id]
 

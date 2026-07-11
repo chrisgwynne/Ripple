@@ -201,6 +201,8 @@ object SeasonalEventSystem {
         PressureBridgeSystem.onSevereWeatherNearResidents(
             ctx, event, "The flood tore through while we were still inside — I won't forget that fear."
         )
+        LegendSystem.considerSpawn(ctx, event)
+        TownEraSystem.considerEra(ctx, event)
     }
 
     /** True if any tile within [FLOOD_PROXIMITY_TILES] of the building's footprint is water. */
