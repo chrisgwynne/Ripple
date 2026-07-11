@@ -54,8 +54,24 @@ object IncidentSystem {
         updateVandalism(ctx)
         updateDomesticDisturbance(ctx)
         updateMissingPerson(ctx)
+        accumulateMissingPersonWorry(ctx)
         resolveMissingPersons(ctx)
         updateWorkplaceAccident(ctx)
+    }
+
+    /** Daily stress/safety drain for close family while a resident remains missing. */
+    private fun accumulateMissingPersonWorry(ctx: TickContext) {
+        val state = ctx.state
+        for (id in state.missingResidentIds) {
+            val r = state.resident(id) ?: continue
+            val worriers = listOfNotNull(r.partnerId?.let { state.resident(it) }) +
+                listOfNotNull(r.motherId?.let { state.resident(it) }, r.fatherId?.let { state.resident(it) })
+            for (w in worriers) {
+                if (!w.inTown) continue
+                w.needs.stress = (w.needs.stress + 0.8).coerceAtMost(100.0)
+                w.needs.safety = (w.needs.safety - 0.3).coerceAtLeast(0.0)
+            }
+        }
     }
 
     // ============================================================
