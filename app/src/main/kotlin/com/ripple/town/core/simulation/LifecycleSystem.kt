@@ -1,14 +1,18 @@
 package com.ripple.town.core.simulation
 
 import com.ripple.town.core.model.Activity
+import com.ripple.town.core.model.ArrivalReason
+import com.ripple.town.core.model.DepartureReason
 import com.ripple.town.core.model.DetailLevel
 import com.ripple.town.core.model.DistrictCharacter
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.Gender
 import com.ripple.town.core.model.GoalType
 import com.ripple.town.core.model.Household
+import com.ripple.town.core.model.HouseholdArrivalType
 import com.ripple.town.core.model.LifeStage
 import com.ripple.town.core.model.MemoryType
+import com.ripple.town.core.model.MigrationRecord
 import com.ripple.town.core.model.Needs
 import com.ripple.town.core.model.Personality
 import com.ripple.town.core.model.Relationship
@@ -33,6 +37,10 @@ object LifecycleSystem {
         InteractionSystem.dailyDecay(ctx)
         memoryDecay(ctx)
         election(ctx)
+        // Monthly outward migration check -- runs on the first day of each in-game month.
+        if (SimTime.dayOfMonth(ctx.now) == 1) {
+            checkOutwardMigration(ctx)
+        }
     }
 
     /**
@@ -91,7 +99,7 @@ object LifecycleSystem {
             if (ageA !in 20..44 || ageB !in 20..44) continue
             if (rel.affection < 55) continue
             val existingKids = a.childIds.count { state.resident(it)?.alive == true }
-            // Spring gives a small birth-rate uplift — more conceptions in the warmer months.
+            // Spring gives a small birth-rate uplift -- more conceptions in the warmer months.
             val springFactor = if (SimCalendar.season(ctx.now) == SimCalendar.Season.SPRING) 1.15 else 1.0
             val chance = 0.0012 * (rel.affection / 100.0) * (1.0 / (1 + existingKids)) * springFactor
             if (!ctx.rng.nextBoolean(chance)) continue
@@ -200,7 +208,7 @@ object LifecycleSystem {
         r.travelToBuildingId = null
         r.plannedActivity = null
 
-        // Employment ends immediately — the dead do not work.
+        // Employment ends immediately -- the dead do not work.
         val emp = state.employmentOf(r)
         if (emp != null) {
             emp.endedAt = ctx.now
@@ -236,7 +244,7 @@ object LifecycleSystem {
         r.householdId?.let { hid -> state.households[hid]?.memberIds?.remove(r.id) }
 
         val age = r.ageAt(ctx.now)
-        // Deaths should appear in the event log at a realistic hour — not midnight when the tick fires.
+        // Deaths should appear in the event log at a realistic hour -- not midnight when the tick fires.
         val dayStart = ctx.now - SimTime.minuteOfDay(ctx.now)
         val deathTime = HumanScheduler.realisticTimeToday(ScheduledActivity.DAYTIME_GENERAL, dayStart, ctx.rng)
         val death = ctx.emit(
@@ -246,15 +254,6 @@ object LifecycleSystem {
             targetResidentIds = listOfNotNull(partner?.id) + r.childIds.filter { state.resident(it)?.alive == true },
             severity = 0.85,
             atTime = deathTime,
-            // "bornAt" lets a UI-side era summary (see WorldRepository.detectFollowedDeath)
-            // query the full span of events/memories the deceased's life covered, without the
-            // engine itself needing to read back through history it doesn't keep in WorldState.
-            // "immediate_cause"/"underlying_cause" (added 2026-07-10, see docs/simulation-rules.md
-            // "Events, causes, importance"): immediate is just `cause` itself (already the
-            // condition label or "old age"/"a sudden decline" — descriptive as-is); underlying is
-            // only added by callers that pass real `causeIds` (currently `HealthSystem`, tracing
-            // back to the actual `ILLNESS_DIAGNOSED` event) — never invented when a death has no
-            // such traceable history (e.g. genuine old age).
             payload = buildMap {
                 put("cause", cause)
                 put("age", age.toString())
@@ -277,15 +276,11 @@ object LifecycleSystem {
             ctx.beginActivity(m, Activity.MOURNING, 12 * 60, "Grieving for ${r.firstName}")
             ctx.addMemory(m, MemoryType.LOSS, "We lost ${r.firstName}.", 80.0, death.id, listOf(r.id))
             EmotionSystem.spawnEmotion(ctx, m, com.ripple.town.core.model.EmotionType.GRIEF, 75.0, death.id, r.id)
-            // Close family/partner (not every warm acquaintance) get the same bounded shock
-            // window as job loss/business closure — see EconomySystem.scheduleShock.
             if (m.id == partner?.id || m.id in r.childIds || m.id == r.motherId || m.id == r.fatherId) {
                 EconomySystem.scheduleShock(ctx, m, death.id)
             }
         }
 
-        // Generational play: surviving children inherit the deceased's most significant
-        // beliefs (as secondhand family stories) and, sometimes, a small heirloom.
         passDownBeliefs(ctx, r, death.id)
         passDownHeirloom(ctx, r, death.id)
 
@@ -308,11 +303,6 @@ object LifecycleSystem {
 
     private val HEIRLOOM_MEMORY_TYPES = setOf(MemoryType.ACHIEVEMENT, MemoryType.INSPIRATION, MemoryType.ROMANCE)
 
-    /**
-     * The deceased's most significant formed beliefs live on as secondhand family stories:
-     * every surviving child gets a diminished [MemoryType.CHILDHOOD] memory referencing the
-     * deceased, rather than the raw original memory.
-     */
     private fun passDownBeliefs(ctx: TickContext, deceased: Resident, deathEventId: Long) {
         val state = ctx.state
         val survivingChildren = deceased.childIds.mapNotNull { state.resident(it) }
@@ -343,11 +333,6 @@ object LifecycleSystem {
         }
     }
 
-    /**
-     * A resident who died holding onto a high-importance positive memory leaves a small,
-     * lightweight heirloom behind for one heir — an idea seed the goal system can later pick
-     * up on, plus a memory of receiving it.
-     */
     private fun passDownHeirloom(ctx: TickContext, deceased: Resident, deathEventId: Long) {
         val state = ctx.state
         val proudMemory = deceased.memories
@@ -403,16 +388,12 @@ object LifecycleSystem {
     /** Background/connected residents step into the next detail tier when they start to matter. */
     fun promoteIfNeeded(ctx: TickContext, r: Resident, why: String) {
         if (r.detailLevel == DetailLevel.DETAILED) return
-        // Step through the tier ladder: BACKGROUND → CONNECTED → DETAILED.
-        // Callers that need full DETAILED immediately (e.g. a hired owner) call this twice;
-        // single-step promotion lets the ActivationSystem gate the rate of CONNECTED→DETAILED.
         if (r.detailLevel == DetailLevel.BACKGROUND) {
             r.detailLevel = DetailLevel.CONNECTED
             return
         }
         r.detailLevel = DetailLevel.DETAILED
         if (r.homeBuildingId == null) {
-            // Move into the emptiest home with space.
             val state = ctx.state
             val home = state.homes()
                 .filter { !it.abandoned }
@@ -434,30 +415,133 @@ object LifecycleSystem {
         if (r.id !in ctx.state.discoveredResidentIds) ctx.state.discoveredResidentIds += r.id
     }
 
-    /** Handles the seeded "new family arrives" thread and any later arrivals. */
+    /**
+     * Handles new family arrivals -- typed by [HouseholdArrivalType], with an [ArrivalReason],
+     * household composition matching the type, and a [MigrationRecord] entry.
+     * Emits [EventType.FAMILY_ARRIVED] (Phase 6A).
+     */
     fun newFamilyArrives(ctx: TickContext, causeEventId: Long?) {
         val state = ctx.state
         val surname = ctx.rng.pick(NameData.SURNAMES)
         val home = state.homes().firstOrNull { h -> state.households.values.none { it.homeBuildingId == h.id } }
+
+        // --- Step 1: Pick household type based on current town conditions ---
+        val openJobs = state.businesses.values
+            .filter { it.open }
+            .sumOf { biz -> (biz.employeeCapacity - state.employeesOf(biz.id).size).coerceAtLeast(0) }
+        val manyOpenJobs = openJobs >= 3
+        val elderlyPop = state.livingResidents().count { it.ageAt(ctx.now) >= 65 }
+        val totalPop = state.livingResidents().size
+        val elderlyFraction = if (totalPop > 0) elderlyPop.toDouble() / totalPop else 0.0
+
+        val arrivalType: HouseholdArrivalType = when {
+            ctx.rng.nextBoolean(0.1) -> HouseholdArrivalType.ENTREPRENEUR_FAMILY
+            manyOpenJobs -> {
+                val roll = ctx.rng.nextDouble(0.0, 1.0)
+                when {
+                    roll < 0.30 -> HouseholdArrivalType.SINGLE_WORKER
+                    roll < 0.50 -> HouseholdArrivalType.YOUNG_COUPLE
+                    roll < 0.70 -> HouseholdArrivalType.COUPLE_WITH_CHILDREN
+                    roll < 0.85 -> HouseholdArrivalType.PROFESSIONAL_HOUSEHOLD
+                    roll < 0.90 -> if (elderlyFraction > 0.2) HouseholdArrivalType.RETIRED_COUPLE else HouseholdArrivalType.SINGLE_PARENT
+                    else -> HouseholdArrivalType.MULTIGENERATIONAL
+                }
+            }
+            else -> {
+                val roll = ctx.rng.nextDouble(0.0, 1.0)
+                when {
+                    roll < 0.20 -> HouseholdArrivalType.SINGLE_WORKER
+                    roll < 0.35 -> HouseholdArrivalType.YOUNG_COUPLE
+                    roll < 0.50 -> HouseholdArrivalType.COUPLE_WITH_CHILDREN
+                    roll < 0.60 -> HouseholdArrivalType.SINGLE_PARENT
+                    roll < 0.70 + (if (elderlyFraction > 0.2) 0.15 else 0.0) ->
+                        HouseholdArrivalType.RETIRED_COUPLE
+                    roll < 0.80 -> HouseholdArrivalType.PROFESSIONAL_HOUSEHOLD
+                    else -> HouseholdArrivalType.MULTIGENERATIONAL
+                }
+            }
+        }
+
+        // --- Step 2: Pick arrival reason matching the type ---
+        val arrivalReason: ArrivalReason = when (arrivalType) {
+            HouseholdArrivalType.SINGLE_WORKER,
+            HouseholdArrivalType.PROFESSIONAL_HOUSEHOLD -> {
+                if (ctx.rng.nextBoolean(0.7)) ArrivalReason.JOB_OFFER else ArrivalReason.AFFORDABILITY
+            }
+            HouseholdArrivalType.YOUNG_COUPLE -> {
+                val r = ctx.rng.nextDouble(0.0, 1.0)
+                when {
+                    r < 0.5 -> ArrivalReason.JOB_OFFER
+                    r < 0.8 -> ArrivalReason.AFFORDABILITY
+                    else -> ArrivalReason.AVAILABLE_HOUSING
+                }
+            }
+            HouseholdArrivalType.COUPLE_WITH_CHILDREN -> {
+                val r = ctx.rng.nextDouble(0.0, 1.0)
+                when {
+                    r < 0.4 -> ArrivalReason.FAMILY_REUNIFICATION
+                    r < 0.8 -> ArrivalReason.JOB_OFFER
+                    else -> ArrivalReason.AVAILABLE_HOUSING
+                }
+            }
+            HouseholdArrivalType.SINGLE_PARENT -> {
+                val r = ctx.rng.nextDouble(0.0, 1.0)
+                when {
+                    r < 0.4 -> ArrivalReason.FAMILY_REUNIFICATION
+                    r < 0.7 -> ArrivalReason.AFFORDABILITY
+                    else -> ArrivalReason.JOB_OFFER
+                }
+            }
+            HouseholdArrivalType.RETIRED_COUPLE -> ArrivalReason.RETIREMENT
+            HouseholdArrivalType.ENTREPRENEUR_FAMILY -> ArrivalReason.BUSINESS_OPPORTUNITY
+            HouseholdArrivalType.MULTIGENERATIONAL -> {
+                val r = ctx.rng.nextDouble(0.0, 1.0)
+                when {
+                    r < 0.5 -> ArrivalReason.FAMILY_REUNIFICATION
+                    r < 0.75 -> ArrivalReason.JOB_OFFER
+                    else -> ArrivalReason.AVAILABLE_HOUSING
+                }
+            }
+            HouseholdArrivalType.STUDENT_HOUSEHOLD -> ArrivalReason.EDUCATION
+            HouseholdArrivalType.DISPLACED_FAMILY -> ArrivalReason.DISPLACEMENT
+        }
+
+        // --- Step 3: Set household savings based on type ---
+        val hhSavings = when (arrivalType) {
+            HouseholdArrivalType.RETIRED_COUPLE -> ctx.rng.nextDouble(5_000.0, 15_000.0)
+            HouseholdArrivalType.ENTREPRENEUR_FAMILY -> ctx.rng.nextDouble(8_000.0, 25_000.0)
+            HouseholdArrivalType.PROFESSIONAL_HOUSEHOLD -> ctx.rng.nextDouble(2_000.0, 6_000.0)
+            else -> ctx.rng.nextDouble(400.0, 1_500.0)
+        }
+
         val hh = Household(
             id = state.nextHouseholdId++,
             name = "The $surname household",
             homeBuildingId = home?.id,
-            savings = ctx.rng.nextDouble(400.0, 1_500.0)
+            savings = hhSavings
         )
         state.households[hh.id] = hh
-        val adultCount = ctx.rng.nextInt(1, 3)
-        val kidCount = ctx.rng.nextInt(0, 3)
+
+        // --- Step 4: Generate residents matching the type ---
         val names = mutableListOf<String>()
-        repeat(adultCount + kidCount) { i ->
-            val isAdult = i < adultCount
+        val newResidents = mutableListOf<Resident>()
+
+        fun makeResident(age: Int, isAdult: Boolean, isElderAdult: Boolean = false, wealthOverride: Double? = null): Resident {
             val gender = if (ctx.rng.nextBoolean(0.06)) Gender.NONBINARY else if (ctx.rng.nextBoolean()) Gender.FEMALE else Gender.MALE
             val first = when (gender) {
                 Gender.FEMALE -> ctx.rng.pick(NameData.FEMALE_FIRST)
                 Gender.MALE -> ctx.rng.pick(NameData.MALE_FIRST)
                 Gender.NONBINARY -> ctx.rng.pick(NameData.NEUTRAL_FIRST)
             }
-            val age = if (isAdult) ctx.rng.nextInt(24, 46) else ctx.rng.nextInt(2, 15)
+            val wealth = wealthOverride ?: when {
+                isElderAdult -> ctx.rng.nextDouble(3_000.0, 8_000.0)
+                arrivalType == HouseholdArrivalType.PROFESSIONAL_HOUSEHOLD && isAdult ->
+                    ctx.rng.nextDouble(800.0, 2_500.0)
+                arrivalType == HouseholdArrivalType.ENTREPRENEUR_FAMILY && isAdult ->
+                    ctx.rng.nextDouble(1_500.0, 5_000.0)
+                isAdult -> ctx.rng.nextDouble(200.0, 900.0)
+                else -> 0.0
+            }
             val id = state.nextResidentId++
             val r = Resident(
                 id = id, firstName = first, surname = surname, gender = gender,
@@ -470,7 +554,7 @@ object LifecycleSystem {
                     trouserColor = ctx.rng.nextInt(5)
                 ),
                 occupation = if (isAdult) "Newly arrived" else "Pupil",
-                wealth = if (isAdult) ctx.rng.nextDouble(200.0, 900.0) else 0.0,
+                wealth = wealth,
                 personality = Personality(
                     kindness = ctx.rng.nextDouble(0.3, 0.8), ambition = ctx.rng.nextDouble(0.3, 0.8),
                     curiosity = ctx.rng.nextDouble(0.3, 0.8), sociability = ctx.rng.nextDouble(0.3, 0.8),
@@ -483,29 +567,422 @@ object LifecycleSystem {
             state.residents[id] = r
             hh.memberIds += id
             names += first
-            if (isAdult) {
-                r.goals += com.ripple.town.core.model.Goal(
-                    id = state.nextGoalId++, ownerId = id,
-                    type = com.ripple.town.core.model.GoalType.FIND_JOB,
-                    motivation = "New town, new start — work comes first.",
+            newResidents += r
+            return r
+        }
+
+        when (arrivalType) {
+            HouseholdArrivalType.SINGLE_WORKER -> {
+                val adult = makeResident(ctx.rng.nextInt(22, 36), isAdult = true)
+                adult.goals += com.ripple.town.core.model.Goal(
+                    id = state.nextGoalId++, ownerId = adult.id,
+                    type = GoalType.FIND_JOB, motivation = "New town, new start -- work comes first.",
                     createdAt = ctx.now, causeEventId = causeEventId
                 )
             }
+            HouseholdArrivalType.YOUNG_COUPLE -> {
+                val a = makeResident(ctx.rng.nextInt(20, 33), isAdult = true)
+                val b = makeResident(ctx.rng.nextInt(20, 33), isAdult = true)
+                val rel = state.relationshipOrCreate(a.id, b.id)
+                rel.kind = RelationshipKind.PARTNER
+                rel.familiarity = 80.0; rel.affection = 75.0; rel.trust = 70.0
+                a.partnerId = b.id; b.partnerId = a.id
+                a.relationshipStatus = RelationshipStatus.DATING
+                b.relationshipStatus = RelationshipStatus.DATING
+                for (r in listOf(a, b)) {
+                    r.goals += com.ripple.town.core.model.Goal(
+                        id = state.nextGoalId++, ownerId = r.id,
+                        type = GoalType.FIND_JOB, motivation = "New town, new start -- work comes first.",
+                        createdAt = ctx.now, causeEventId = causeEventId
+                    )
+                }
+            }
+            HouseholdArrivalType.COUPLE_WITH_CHILDREN -> {
+                val a = makeResident(ctx.rng.nextInt(28, 46), isAdult = true)
+                val b = makeResident(ctx.rng.nextInt(28, 46), isAdult = true)
+                val rel = state.relationshipOrCreate(a.id, b.id)
+                rel.kind = RelationshipKind.SPOUSE
+                rel.familiarity = 90.0; rel.affection = 70.0; rel.trust = 75.0
+                a.partnerId = b.id; b.partnerId = a.id
+                a.relationshipStatus = RelationshipStatus.MARRIED
+                b.relationshipStatus = RelationshipStatus.MARRIED
+                for (r in listOf(a, b)) {
+                    r.goals += com.ripple.town.core.model.Goal(
+                        id = state.nextGoalId++, ownerId = r.id,
+                        type = GoalType.FIND_JOB, motivation = "New town, new start -- work comes first.",
+                        createdAt = ctx.now, causeEventId = causeEventId
+                    )
+                }
+                val kidCount = ctx.rng.nextInt(1, 4)
+                repeat(kidCount) {
+                    val child = makeResident(ctx.rng.nextInt(2, 15), isAdult = false)
+                    a.childIds += child.id; b.childIds += child.id
+                    child.motherId = if (a.gender == Gender.FEMALE) a.id else b.id
+                    child.fatherId = if (a.gender == Gender.MALE) a.id else if (b.gender == Gender.MALE) b.id else null
+                    for (parent in listOf(a, b)) {
+                        val pr = state.relationshipOrCreate(parent.id, child.id)
+                        pr.kind = RelationshipKind.FAMILY
+                        pr.familiarity = 90.0; pr.affection = 85.0; pr.trust = 80.0; pr.dependency = 70.0
+                    }
+                }
+            }
+            HouseholdArrivalType.SINGLE_PARENT -> {
+                val parent = makeResident(ctx.rng.nextInt(25, 41), isAdult = true)
+                parent.goals += com.ripple.town.core.model.Goal(
+                    id = state.nextGoalId++, ownerId = parent.id,
+                    type = GoalType.FIND_JOB, motivation = "New town, new start -- work comes first.",
+                    createdAt = ctx.now, causeEventId = causeEventId
+                )
+                val kidCount = ctx.rng.nextInt(1, 3)
+                repeat(kidCount) {
+                    val child = makeResident(ctx.rng.nextInt(3, 13), isAdult = false)
+                    parent.childIds += child.id
+                    child.motherId = if (parent.gender == Gender.FEMALE) parent.id else null
+                    child.fatherId = if (parent.gender == Gender.MALE) parent.id else null
+                    val pr = state.relationshipOrCreate(parent.id, child.id)
+                    pr.kind = RelationshipKind.FAMILY
+                    pr.familiarity = 90.0; pr.affection = 85.0; pr.trust = 80.0; pr.dependency = 75.0
+                }
+            }
+            HouseholdArrivalType.RETIRED_COUPLE -> {
+                val a = makeResident(ctx.rng.nextInt(62, 76), isAdult = true, isElderAdult = true)
+                val b = makeResident(ctx.rng.nextInt(62, 76), isAdult = true, isElderAdult = true)
+                val rel = state.relationshipOrCreate(a.id, b.id)
+                rel.kind = RelationshipKind.SPOUSE
+                rel.familiarity = 95.0; rel.affection = 75.0; rel.trust = 85.0; rel.sharedHistory = 80.0
+                a.partnerId = b.id; b.partnerId = a.id
+                a.relationshipStatus = RelationshipStatus.MARRIED
+                b.relationshipStatus = RelationshipStatus.MARRIED
+            }
+            HouseholdArrivalType.MULTIGENERATIONAL -> {
+                val a = makeResident(ctx.rng.nextInt(28, 46), isAdult = true)
+                val b = makeResident(ctx.rng.nextInt(28, 46), isAdult = true)
+                val rel = state.relationshipOrCreate(a.id, b.id)
+                rel.kind = RelationshipKind.SPOUSE
+                rel.familiarity = 88.0; rel.affection = 70.0; rel.trust = 75.0
+                a.partnerId = b.id; b.partnerId = a.id
+                a.relationshipStatus = RelationshipStatus.MARRIED
+                b.relationshipStatus = RelationshipStatus.MARRIED
+                for (r in listOf(a, b)) {
+                    r.goals += com.ripple.town.core.model.Goal(
+                        id = state.nextGoalId++, ownerId = r.id,
+                        type = GoalType.FIND_JOB, motivation = "New town, new start -- work comes first.",
+                        createdAt = ctx.now, causeEventId = causeEventId
+                    )
+                }
+                val elderCount = ctx.rng.nextInt(1, 3)
+                repeat(elderCount) { makeResident(ctx.rng.nextInt(65, 81), isAdult = true, isElderAdult = true) }
+                val kidCount = ctx.rng.nextInt(1, 3)
+                repeat(kidCount) {
+                    val child = makeResident(ctx.rng.nextInt(2, 15), isAdult = false)
+                    a.childIds += child.id; b.childIds += child.id
+                    child.motherId = if (a.gender == Gender.FEMALE) a.id else b.id
+                    child.fatherId = if (a.gender == Gender.MALE) a.id else if (b.gender == Gender.MALE) b.id else null
+                    for (parent in listOf(a, b)) {
+                        val pr = state.relationshipOrCreate(parent.id, child.id)
+                        pr.kind = RelationshipKind.FAMILY
+                        pr.familiarity = 90.0; pr.affection = 85.0; pr.trust = 80.0; pr.dependency = 70.0
+                    }
+                }
+            }
+            HouseholdArrivalType.ENTREPRENEUR_FAMILY -> {
+                val a = makeResident(ctx.rng.nextInt(30, 49), isAdult = true)
+                val b = makeResident(ctx.rng.nextInt(30, 49), isAdult = true)
+                val rel = state.relationshipOrCreate(a.id, b.id)
+                rel.kind = RelationshipKind.SPOUSE
+                rel.familiarity = 85.0; rel.affection = 72.0; rel.trust = 78.0
+                a.partnerId = b.id; b.partnerId = a.id
+                a.relationshipStatus = RelationshipStatus.MARRIED
+                b.relationshipStatus = RelationshipStatus.MARRIED
+                a.ideaSeeds += "heirloom:entrepreneurial spirit"
+                a.goals += com.ripple.town.core.model.Goal(
+                    id = state.nextGoalId++, ownerId = a.id,
+                    type = GoalType.START_BUSINESS,
+                    motivation = "We moved here to build something new.",
+                    createdAt = ctx.now, causeEventId = causeEventId
+                )
+                b.goals += com.ripple.town.core.model.Goal(
+                    id = state.nextGoalId++, ownerId = b.id,
+                    type = GoalType.FIND_JOB, motivation = "New town, new start -- work comes first.",
+                    createdAt = ctx.now, causeEventId = causeEventId
+                )
+            }
+            HouseholdArrivalType.PROFESSIONAL_HOUSEHOLD -> {
+                val adultCount = if (ctx.rng.nextBoolean()) 1 else 2
+                repeat(adultCount) { i ->
+                    val adult = makeResident(ctx.rng.nextInt(26, 41), isAdult = true)
+                    adult.goals += com.ripple.town.core.model.Goal(
+                        id = state.nextGoalId++, ownerId = adult.id,
+                        type = GoalType.FIND_JOB, motivation = "New town, career first.",
+                        createdAt = ctx.now, causeEventId = causeEventId
+                    )
+                    if (i == 1 && newResidents.size >= 2) {
+                        val first = newResidents[newResidents.size - 2]
+                        val pRel = state.relationshipOrCreate(first.id, adult.id)
+                        pRel.kind = RelationshipKind.PARTNER
+                        pRel.familiarity = 75.0; pRel.affection = 65.0; pRel.trust = 68.0
+                        first.partnerId = adult.id; adult.partnerId = first.id
+                        first.relationshipStatus = RelationshipStatus.DATING
+                        adult.relationshipStatus = RelationshipStatus.DATING
+                    }
+                }
+            }
+            HouseholdArrivalType.STUDENT_HOUSEHOLD,
+            HouseholdArrivalType.DISPLACED_FAMILY -> {
+                val adultCount = ctx.rng.nextInt(1, 3)
+                val kidCount = ctx.rng.nextInt(0, 3)
+                repeat(adultCount) {
+                    val adult = makeResident(ctx.rng.nextInt(18, 35), isAdult = true)
+                    adult.goals += com.ripple.town.core.model.Goal(
+                        id = state.nextGoalId++, ownerId = adult.id,
+                        type = GoalType.FIND_JOB, motivation = "New town, new start -- work comes first.",
+                        createdAt = ctx.now, causeEventId = causeEventId
+                    )
+                }
+                repeat(kidCount) { makeResident(ctx.rng.nextInt(2, 15), isAdult = false) }
+            }
         }
-        // Family members know and love each other.
+
+        // All household members know and care for each other
         val members = hh.memberIds.toList()
         for (i in members.indices) for (j in i + 1 until members.size) {
-            val rel = state.relationshipOrCreate(members[i], members[j])
-            rel.kind = RelationshipKind.FAMILY
-            rel.familiarity = 85.0; rel.affection = 70.0; rel.trust = 72.0; rel.sharedHistory = 60.0
+            if (state.relationship(members[i], members[j]) == null) {
+                val rel = state.relationshipOrCreate(members[i], members[j])
+                rel.kind = RelationshipKind.FAMILY
+                rel.familiarity = 85.0; rel.affection = 70.0; rel.trust = 72.0; rel.sharedHistory = 60.0
+            }
+        }
+
+        // --- Step 5: Record arrival ---
+        val homeBuildingDistrictId = home?.districtId
+        val record = MigrationRecord(
+            tick = ctx.now,
+            householdId = hh.id,
+            arrivalType = arrivalType,
+            arrivalReason = arrivalReason,
+            districtId = homeBuildingDistrictId,
+            memberCount = newResidents.size,
+            isArrival = true
+        )
+        if (state.migrationHistory.size >= 500) state.migrationHistory.removeAt(0)
+        state.migrationHistory.add(record)
+
+        // --- Step 6: Emit FAMILY_ARRIVED event ---
+        val typeLabel = when (arrivalType) {
+            HouseholdArrivalType.SINGLE_WORKER -> "A new resident"
+            HouseholdArrivalType.YOUNG_COUPLE -> "A young couple"
+            HouseholdArrivalType.COUPLE_WITH_CHILDREN -> "A family"
+            HouseholdArrivalType.SINGLE_PARENT -> "A single parent and ${if (newResidents.size > 2) "children" else "child"}"
+            HouseholdArrivalType.RETIRED_COUPLE -> "A retired couple"
+            HouseholdArrivalType.MULTIGENERATIONAL -> "A multigenerational family"
+            HouseholdArrivalType.ENTREPRENEUR_FAMILY -> "An entrepreneurial family"
+            HouseholdArrivalType.PROFESSIONAL_HOUSEHOLD -> "A professional household"
+            HouseholdArrivalType.STUDENT_HOUSEHOLD -> "Student residents"
+            HouseholdArrivalType.DISPLACED_FAMILY -> "A displaced family"
+        }
+        val reasonLabel = when (arrivalReason) {
+            ArrivalReason.JOB_OFFER -> "seeking work"
+            ArrivalReason.AFFORDABILITY -> "drawn by affordable living"
+            ArrivalReason.FAMILY_REUNIFICATION -> "joining family here"
+            ArrivalReason.AVAILABLE_HOUSING -> "looking for a new home"
+            ArrivalReason.RETIREMENT -> "settling into retirement"
+            ArrivalReason.BUSINESS_OPPORTUNITY -> "ready to start a business"
+            ArrivalReason.EDUCATION -> "pursuing education"
+            ArrivalReason.SAFETY -> "looking for safety"
+            ArrivalReason.HEALTHCARE -> "seeking better healthcare"
+            ArrivalReason.RELATIONSHIP -> "following a partner"
+            ArrivalReason.DISPLACEMENT -> "displaced from their previous home"
+            ArrivalReason.GOVERNMENT_PROGRAMME -> "through a resettlement programme"
         }
         val e = ctx.emit(
-            EventType.RESIDENT_ARRIVED,
-            "The $surname family (${names.joinToString(", ")}) has moved to ${state.townName}.",
+            EventType.FAMILY_ARRIVED,
+            "$typeLabel has moved to ${state.townName} -- $reasonLabel. (The $surname household: ${names.joinToString(", ")})",
             targetResidentIds = members,
             buildingId = hh.homeBuildingId,
             severity = 0.45,
-            causeIds = listOfNotNull(causeEventId)
+            causeIds = listOfNotNull(causeEventId),
+            payload = buildMap {
+                put("householdId", hh.id.toString())
+                put("arrivalType", arrivalType.name)
+                put("reason", arrivalReason.name)
+            }
+        )
+        ConsequenceEngine.onEvent(ctx, e)
+    }
+
+    // ---------------------------------------------------------------- outward migration
+
+    /**
+     * Monthly pass: for each in-town CONNECTED or DETAILED resident, calculate departure
+     * pressure from unemployment, unaffordable housing, crime, business failure, life
+     * satisfaction, and relationship factors. Capped at 3 departures per month.
+     */
+    private fun checkOutwardMigration(ctx: TickContext) {
+        val state = ctx.state
+        var departuresThisMonth = 0
+
+        val candidates = state.residents.values.filter { r ->
+            r.alive && r.leftTownAt == null &&
+            r.detailLevel != DetailLevel.BACKGROUND
+        }.sortedBy { it.id }
+
+        for (resident in candidates) {
+            if (departuresThisMonth >= 3) break
+
+            var pressure = 0.0
+            var primaryReason = DepartureReason.BETTER_OPPORTUNITIES
+
+            // 1. Unemployed with no open jobs available in town
+            if (resident.employmentId == null && resident.lifeStageAt(ctx.now) == LifeStage.ADULT) {
+                val hasBeenUnemployed = resident.occupation == "Unemployed" || resident.occupation == "Newly arrived"
+                val openJobExists = state.businesses.values.any { biz ->
+                    biz.open && state.employeesOf(biz.id).size < biz.employeeCapacity
+                }
+                if (hasBeenUnemployed && !openJobExists) {
+                    pressure += 0.25
+                    primaryReason = DepartureReason.UNEMPLOYMENT
+                } else if (hasBeenUnemployed) {
+                    pressure += 0.08
+                }
+            }
+
+            // 2. Wealth < 100 AND home rent > 40% of current wealth
+            val household = resident.householdId?.let { state.households[it] }
+            if (resident.wealth < 100.0 && household != null) {
+                val monthlyRent = household.monthlyRent
+                if (monthlyRent > resident.wealth * 0.4) {
+                    pressure += 0.20
+                    if (primaryReason == DepartureReason.BETTER_OPPORTUNITIES) {
+                        primaryReason = DepartureReason.UNAFFORDABLE_HOUSING
+                    }
+                }
+            }
+
+            // 3. Home district crime rate > 0.6
+            val homeBuilding = resident.homeBuildingId?.let { state.buildings[it] }
+            val homeDistrict = homeBuilding?.districtId?.let { state.districts[it] }
+            if (homeDistrict != null && homeDistrict.crimeRate > 0.6) {
+                pressure += 0.15
+                if (pressure >= 0.35 && primaryReason == DepartureReason.BETTER_OPPORTUNITIES) {
+                    primaryReason = DepartureReason.CRIME
+                }
+            }
+
+            // 4. Business they owned just closed within last 30 days
+            val ownedClosedBusiness = state.businesses.values.firstOrNull { biz ->
+                biz.ownerId == resident.id && !biz.open &&
+                biz.closedAt != null &&
+                (ctx.now - biz.closedAt!!) <= 30L * SimTime.MINUTES_PER_DAY
+            }
+            if (ownedClosedBusiness != null) {
+                pressure += 0.20
+                primaryReason = DepartureReason.BUSINESS_FAILURE
+            }
+
+            // 5. Low life satisfaction + social isolation + adult age > 25
+            val age = resident.ageAt(ctx.now)
+            if (resident.lifeSatisfaction.overall() < 20.0 && age > 25 &&
+                resident.lifeStageAt(ctx.now) == LifeStage.ADULT) {
+                val hasNoFamilyInTown = state.relationshipsOf(resident.id)
+                    .none { rel ->
+                        (rel.kind == RelationshipKind.FAMILY || rel.kind == RelationshipKind.SPOUSE) &&
+                        state.resident(rel.other(resident.id))?.inTown == true
+                    }
+                val hasNoPartner = resident.partnerId == null
+                if (hasNoFamilyInTown || hasNoPartner) {
+                    pressure += 0.15
+                }
+            }
+
+            // 6. Partner has left town
+            val partner = resident.partnerId?.let { state.resident(it) }
+            if (partner != null && partner.leftTownAt != null) {
+                pressure += 0.30
+                primaryReason = DepartureReason.RELATIONSHIP
+            }
+
+            if (pressure <= 0.0) continue
+
+            val actualProb = pressure * 0.008
+            if (ctx.rng.nextBoolean(actualProb)) {
+                departResident(ctx, resident, primaryReason, household)
+                departuresThisMonth++
+            }
+        }
+    }
+
+    /**
+     * Remove a resident from town: set [Resident.leftTownAt], free home occupancy,
+     * end employment, shrink household. Emits [EventType.FAMILY_DEPARTED].
+     */
+    private fun departResident(
+        ctx: TickContext,
+        resident: Resident,
+        reason: DepartureReason,
+        household: Household?
+    ) {
+        val state = ctx.state
+
+        resident.leftTownAt = ctx.now
+        resident.activity = Activity.IDLE
+        resident.travelToBuildingId = null
+        resident.plannedActivity = null
+
+        resident.homeBuildingId?.let { bid ->
+            val building = state.buildings[bid]
+            if (building != null && resident.id !in building.tenantHistory) {
+                building.tenantHistory += resident.id
+                if (building.tenantHistory.size > com.ripple.town.core.model.Building.MAX_TENANT_HISTORY) {
+                    building.tenantHistory.removeAt(0)
+                }
+            }
+        }
+
+        val emp = state.employmentOf(resident)
+        if (emp != null) {
+            emp.endedAt = ctx.now
+            resident.employmentId = null
+        }
+
+        val hh = household ?: resident.householdId?.let { state.households[it] }
+        hh?.memberIds?.remove(resident.id)
+
+        val departingHouseholdId = hh?.id ?: resident.householdId
+        if (hh != null && hh.memberIds.isEmpty() && departingHouseholdId != null) {
+            val record = MigrationRecord(
+                tick = ctx.now,
+                householdId = departingHouseholdId,
+                departureReason = reason,
+                memberCount = 1,
+                isArrival = false
+            )
+            if (state.migrationHistory.size >= 500) state.migrationHistory.removeAt(0)
+            state.migrationHistory.add(record)
+        }
+
+        val reasonLabel = when (reason) {
+            DepartureReason.UNEMPLOYMENT -> "unable to find work"
+            DepartureReason.UNAFFORDABLE_HOUSING -> "unable to afford the cost of living"
+            DepartureReason.CRIME -> "driven away by crime in the area"
+            DepartureReason.BUSINESS_FAILURE -> "after their business closed"
+            DepartureReason.BETTER_OPPORTUNITIES -> "seeking better opportunities elsewhere"
+            DepartureReason.RELATIONSHIP -> "following their partner"
+            DepartureReason.EDUCATION_ELSEWHERE -> "to pursue education elsewhere"
+            DepartureReason.POOR_SERVICES -> "due to poor local services"
+            DepartureReason.RETIREMENT_MIGRATION -> "retiring to a new place"
+            DepartureReason.DISASTER -> "displaced by a disaster"
+            DepartureReason.FAMILY_ELSEWHERE -> "to be with family elsewhere"
+        }
+        val e = ctx.emit(
+            EventType.FAMILY_DEPARTED,
+            "${resident.fullName} has left ${state.townName} -- $reasonLabel.",
+            sourceResidentId = resident.id,
+            buildingId = resident.homeBuildingId,
+            severity = 0.35,
+            payload = buildMap {
+                departingHouseholdId?.let { put("householdId", it.toString()) }
+                put("reason", reason.name)
+            }
         )
         ConsequenceEngine.onEvent(ctx, e)
     }
@@ -517,8 +994,6 @@ object LifecycleSystem {
         r.leftTownAt = null
         r.occupation = "Unemployed"
 
-        // Back into the old household if it kept a home; otherwise in with a parent
-        // still in town; otherwise whatever's free.
         val oldHousehold = r.householdId?.let { state.households[it] }
         val targetHousehold = when {
             oldHousehold?.homeBuildingId != null -> oldHousehold
@@ -545,7 +1020,6 @@ object LifecycleSystem {
         r.homeBuildingId = home
         r.currentBuildingId = home
 
-        // Changed: years away studying leave a mark.
         val gained = ctx.rng.nextDouble(20.0, 40.0)
         r.skills[SkillType.TEACHING] = (r.skill(SkillType.TEACHING) + gained).coerceAtMost(100.0)
         val secondary = secondarySkillFor(r)
@@ -556,10 +1030,6 @@ object LifecycleSystem {
             "${r.fullName} has come back to ${state.townName}, changed by years away studying.",
             sourceResidentId = r.id, buildingId = home, severity = 0.4
         )
-        // The parents already get a memory of this below (line ~480); the returning resident
-        // themselves did not — a genuine gap for what is, for them, the bigger personal
-        // milestone (leaving for education already gives *them* no memory either, since they're
-        // en route/away when GoalSystem.leaveForEducation fires — see that function's comment).
         ctx.addMemory(r, MemoryType.ACHIEVEMENT, "Coming home to ${state.townName}, different than when I left.", 70.0, e.id)
         GoalSystem.seedGoal(ctx, r, GoalType.FIND_JOB, "Home again, and it's time to find my feet.", e.id)
         for (pid in listOfNotNull(r.motherId, r.fatherId)) {
@@ -592,7 +1062,6 @@ object LifecycleSystem {
     private fun election(ctx: TickContext) {
         val state = ctx.state
         if (state.nextElectionAt <= 0 || ctx.now < state.nextElectionAt) return
-        // Candidates: politically interested adults with standing.
         val candidates = state.detailedResidents()
             .filter { it.inTown && it.politicalInterest > 0.35 && it.lifeStageAt(ctx.now) == LifeStage.ADULT }
             .sortedByDescending { it.politicalInterest * 50 + it.reputation + it.skill(com.ripple.town.core.model.SkillType.POLITICS) }
@@ -601,11 +1070,6 @@ object LifecycleSystem {
             state.nextElectionAt = ctx.now + 360L * SimTime.MINUTES_PER_DAY
             return
         }
-        // Real, belief-aware voter tally (VotingSystem) replaces the old single-aggregate
-        // formula (reputation + skill*0.6 + flat random noise). See VotingSystem's doc comment
-        // and docs/simulation-rules.md "Local politics: elections" for the full design writeup.
-        // Candidate selection/filtering above and everything below the winner computation is
-        // unchanged.
         val votes = VotingSystem.tally(ctx, candidates, state.candidacies)
         val topVoteCount = votes.values.maxOrNull() ?: 0
         val topCandidates = candidates.filter { votes[it.id] == topVoteCount }
@@ -637,7 +1101,6 @@ object LifecycleSystem {
                 val m = it.next()
                 m.emotionalIntensity -= m.decayPerYear * perDay
                 m.accuracy -= (m.decayPerYear * 0.5) * perDay
-                // Important memories persist for life; minor ones fade away entirely.
                 if (m.importance < 40 && m.emotionalIntensity <= 5) it.remove()
             }
         }
