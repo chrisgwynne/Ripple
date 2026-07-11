@@ -22,6 +22,25 @@ enum class DistrictType(val label: String) {
 }
 
 /**
+ * The evolving social/economic identity of a district — reclassified weekly by
+ * [com.ripple.town.core.simulation.DistrictCharacterSystem] from vacancy rate,
+ * wealth index, crime rate, and employment figures.
+ */
+enum class DistrictCharacter(val label: String) {
+    STABLE("Stable"),
+    PROSPEROUS("Prosperous"),
+    DEVELOPING("Developing"),
+    OVERCROWDED("Overcrowded"),
+    DECLINING("Declining"),
+    DERELICT("Derelict"),
+    REGENERATING("Regenerating"),
+    INDUSTRIAL("Industrial"),
+    HIGH_CRIME("High crime"),
+    GENTRIFYING("Gentrifying"),
+    FAMILY_SUBURB("Family suburb")
+}
+
+/**
  * A single named district within the town — a rectangular tile region with a
  * distinct type and aggregate social/economic character. Persisted in [WorldState].
  *
@@ -41,7 +60,13 @@ data class District(
     /** Wealth multiplier relative to town average (1.0 = average). */
     var wealthIndex: Double = 1.0,
     /** Normalised daily crime incidence rate 0..1, fed into CrimeSystem probability. */
-    var crimeRate: Double = 0.5
+    var crimeRate: Double = 0.5,
+    /** Evolving social character, reclassified weekly by DistrictCharacterSystem. */
+    var character: DistrictCharacter = DistrictCharacter.STABLE,
+    /** Fraction of buildings with no active occupants (0..1), updated weekly. */
+    var vacancyRate: Double = 0.0,
+    /** 0..100 composite wealth/employment score for this district; 50 = town average. */
+    var prosperityIndex: Double = 50.0
 ) {
     fun containsTile(x: Int, y: Int): Boolean =
         x in originX until originX + width && y in originY until originY + height

@@ -3,6 +3,7 @@ package com.ripple.town.data
 import androidx.compose.runtime.Immutable
 import com.ripple.town.core.model.Activity
 import com.ripple.town.core.model.Building
+import com.ripple.town.core.model.BuildingState
 import com.ripple.town.core.model.BuildingType
 import com.ripple.town.core.model.DetailLevel
 import com.ripple.town.core.model.LifeStage
@@ -188,6 +189,7 @@ data class BuildingUi(
      * Exposed as-is, no new simulation data invented — see `BuildingSheetContent` in
      * `TownSheets.kt` for what reads these.
      */
+    val buildingState: BuildingState = BuildingState.OCCUPIED,
     val ownerId: Long? = null,
     val businessDaysInTrouble: Int? = null,
     val businessDemand: Double? = null,
@@ -377,6 +379,7 @@ object SnapshotBuilder {
                 state.employeesOf(bz.id).mapNotNull { state.resident(it.residentId)?.fullName }
             } ?: emptyList(),
             visibleChanges = b.visibleChanges.takeLast(5),
+            buildingState = b.buildingState,
             ownerId = b.ownerId,
             businessDaysInTrouble = biz?.daysInTrouble,
             businessDemand = biz?.demand,

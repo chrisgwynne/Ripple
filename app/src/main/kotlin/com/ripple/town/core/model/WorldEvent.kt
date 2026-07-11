@@ -130,7 +130,25 @@ enum class EventType(val label: String) {
      *  news — always `PRIVATE`, low severity. Falls through every exhaustive-`when`'s `else ->`
      *  branch safely (verified against [com.ripple.town.core.simulation.ImportanceScorer] and
      *  [com.ripple.town.core.simulation.NewspaperGenerator] before adding). */
-    BELIEF_SHIFTED("Belief shift")
+    BELIEF_SHIFTED("Belief shift"),
+
+    // --- Dynamic town growth & decline (added 2026-07-11) ---
+    /** A residential or commercial building has had no occupants for long enough to become vacant. */
+    BUILDING_VACANT("Building vacant"),
+    /** A long-vacant building has deteriorated to a derelict state. */
+    BUILDING_DERELICT("Building derelict"),
+    /** A derelict building has been condemned as structurally unsafe. */
+    BUILDING_CONDEMNED("Building condemned"),
+    /** The planning committee has received a formal development proposal. */
+    DEVELOPMENT_PROPOSED("Development proposed"),
+    /** A development proposal has been approved and is awaiting funding. */
+    DEVELOPMENT_APPROVED("Development approved"),
+    /** A new building has been completed and opened for occupation. */
+    DEVELOPMENT_COMPLETE("Development complete"),
+    /** A district's social or economic character has shifted to a new classification. */
+    DISTRICT_CHARACTER_CHANGED("District character changed"),
+    /** The municipal budget balance has fallen below zero — deficit spending. */
+    BUDGET_SHORTFALL("Budget shortfall")
 }
 
 enum class EventVisibility {

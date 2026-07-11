@@ -56,6 +56,16 @@ fun BuildingType.toBusinessType(): BusinessType? = when (this) {
     else -> null
 }
 
+enum class BuildingState(val label: String) {
+    PLANNED("Planned"),
+    UNDER_CONSTRUCTION("Under construction"),
+    OCCUPIED("Occupied"),
+    VACANT("Vacant"),
+    DERELICT("Derelict"),
+    CONDEMNED("Condemned"),
+    DEMOLISHED("Demolished")
+}
+
 @Serializable
 data class Tile(val x: Int, val y: Int) {
     fun manhattan(other: Tile): Int = kotlin.math.abs(x - other.x) + kotlin.math.abs(y - other.y)
@@ -80,6 +90,14 @@ data class Building(
     var abandoned: Boolean = false,
     /** District this building belongs to; null for legacy/unassigned buildings. */
     var districtId: Long? = null,
+    /** Physical lifecycle state — drives visual rendering and vacancy progression. */
+    var buildingState: BuildingState = BuildingState.OCCUPIED,
+    /** Sim-minute timestamp when this building first had zero occupants/active business. */
+    var vacantSinceAt: Long? = null,
+    /** Sim-minute timestamp when construction is scheduled to complete (UNDER_CONSTRUCTION only). */
+    var constructionCompletesAt: Long? = null,
+    /** DevelopmentProject that created this building, if any. */
+    var developmentProjectId: Long? = null,
     /** Short strings describing visible changes over time ("Extension added", "Sign repainted"). */
     val visibleChanges: MutableList<String> = mutableListOf()
 ) {

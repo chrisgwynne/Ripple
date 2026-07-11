@@ -13,7 +13,8 @@ enum class GoalType(val label: String) {
     MOVE_HOME("Find a new home"),
     LEAVE_FOR_EDUCATION("Leave town for education"),
     RUN_FOR_OFFICE("Run for local office"),
-    RETIRE_WELL("Wind down towards retirement")
+    RETIRE_WELL("Wind down towards retirement"),
+    LEAVE_TOWN("Leave town for good")
 }
 
 enum class GoalStatus { ACTIVE, COMPLETED, ABANDONED }

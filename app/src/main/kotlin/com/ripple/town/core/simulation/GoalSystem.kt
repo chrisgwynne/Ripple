@@ -118,6 +118,22 @@ object GoalSystem {
         ) {
             seedGoal(ctx, r, GoalType.RUN_FOR_OFFICE, "Somebody has to speak for this town.")
         }
+
+        // Persistent despair drives some adults to leave entirely:
+        //   - Long-term unemployed + very low wealth + can't see a path
+        //   - OR high-crime district + high stress + low safety + a friend already left
+        if (stage == LifeStage.ADULT && r.inTown) {
+            val longUnemployed = state.employmentOf(r) == null &&
+                r.ageAt(ctx.now) in 20..65 && r.wealth < 300.0 && n.financialSecurity < 20.0
+            val districtCrime = r.homeBuildingId?.let { state.building(it) }
+                ?.let { state.districtAt(it.origin.x, it.origin.y)?.crimeRate } ?: 0.5
+            val crimeDisplaced = districtCrime > 0.75 && n.stress > 75.0 && n.safety < 25.0
+            if ((longUnemployed || crimeDisplaced) && ctx.rng.nextBoolean(0.015)) {
+                val reason = if (longUnemployed) "There's nothing left here for me."
+                             else "It's not safe anymore. I have to go."
+                seedGoal(ctx, r, GoalType.LEAVE_TOWN, reason)
+            }
+        }
     }
 
     private fun progressGoals(ctx: TickContext, r: Resident) {
@@ -194,6 +210,10 @@ object GoalSystem {
                 GoalType.REPAIR_RELATIONSHIP, GoalType.RETIRE_WELL -> {
                     goal.progress += 0.02
                     if (goal.progress >= 1.0) complete(ctx, r, goal, "Done quietly")
+                }
+                GoalType.LEAVE_TOWN -> {
+                    goal.progress += 0.015
+                    if (goal.progress >= 1.0) leaveForGood(ctx, r, goal)
                 }
             }
             // Abandonment under despair
@@ -355,6 +375,40 @@ object GoalSystem {
             earliestAt = ctx.now + 640 * day, latestAt = ctx.now + 1400 * day,
             note = LifecycleSystem.RETURNING_STUDENT_NOTE
         )
+    }
+
+    private fun leaveForGood(ctx: TickContext, r: Resident, goal: Goal) {
+        val state = ctx.state
+        // Vacate home slot.
+        val hh = r.householdId?.let { state.households[it] }
+        hh?.memberIds?.remove(r.id)
+        if (hh != null && hh.memberIds.isEmpty()) state.households.remove(hh.id)
+        r.householdId = null
+        r.homeBuildingId = null
+        // End employment.
+        state.employmentOf(r)?.let { emp ->
+            emp.endedAt = ctx.now
+            r.employmentId = null
+            r.occupation = ""
+        }
+        r.currentBuildingId = null
+        r.travelToBuildingId = null
+        r.leftTownAt = ctx.now
+        complete(ctx, r, goal, "Left for good")
+        val e = ctx.emit(
+            EventType.RESIDENT_LEFT_TOWN,
+            "${r.fullName} has left ${state.townName} and is not coming back.",
+            sourceResidentId = r.id, severity = 0.55,
+            causeIds = listOfNotNull(goal.causeEventId)
+        )
+        for (pid in listOfNotNull(r.motherId, r.fatherId)) {
+            val parent = state.resident(pid) ?: continue
+            if (parent.inTown) {
+                parent.needs.social -= 12.0
+                ctx.addMemory(parent, MemoryType.LOSS, "${r.firstName} has left town. I don't know when we'll next meet.", 70.0, e.id, listOf(r.id))
+            }
+        }
+        ConsequenceEngine.onEvent(ctx, e)
     }
 
     private fun moveHome(ctx: TickContext, r: Resident, newHomeId: Long, goal: Goal) {

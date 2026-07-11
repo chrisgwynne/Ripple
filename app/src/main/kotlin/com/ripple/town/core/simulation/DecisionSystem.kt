@@ -510,6 +510,7 @@ object DecisionSystem {
         GoalType.MOVE_HOME -> "Scanning the housing notices"
         GoalType.RUN_FOR_OFFICE -> "Drafting ideas for the town"
         GoalType.RETIRE_WELL -> "Putting affairs in order"
+        GoalType.LEAVE_TOWN -> "Thinking about moving away"
     }
 
     private fun bestFriendToVisit(state: WorldState, r: Resident): Resident? {

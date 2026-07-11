@@ -349,11 +349,41 @@ data class WorldState(
      * self-cleaning: entries are removed the moment they're eased. A new, safe-default field
      * (empty map) so existing checkpoints deserialize unchanged.
      */
-    val pendingPriceEasing: MutableMap<Long, PendingPriceEase> = mutableMapOf()
+    val pendingPriceEasing: MutableMap<Long, PendingPriceEase> = mutableMapOf(),
+
+    // --- Dynamic town growth & decline (added 2026-07-11) ---
+    /**
+     * Active and historical development projects — from TownNeedsPlanner proposals
+     * through construction to completion. Safe default (empty map) so existing
+     * checkpoints deserialize unchanged.
+     */
+    val developmentProjects: MutableMap<Long, DevelopmentProject> = mutableMapOf(),
+    /**
+     * The town's municipal finances: tax/rate income, service expenses, construction
+     * funding. Safe default (starting reserves £50k). See [MunicipalBudget].
+     */
+    var municipalBudget: MunicipalBudget = MunicipalBudget(),
+    /**
+     * Latest demand-vs-capacity snapshot for each [ServiceType], keyed by
+     * `ServiceType.name`. Recomputed monthly by [TownNeedsPlanner].
+     */
+    val servicePressures: MutableMap<String, ServicePressure> = mutableMapOf(),
+    var nextProjectId: Long = 1L
 ) {
     fun district(id: Long): District? = districts[id]
 
     fun districtAt(x: Int, y: Int): District? = districts.values.firstOrNull { it.containsTile(x, y) }
+
+    fun developmentProject(id: Long): DevelopmentProject? = developmentProjects[id]
+
+    fun servicePressure(service: ServiceType): ServicePressure? = servicePressures[service.name]
+
+    fun activeDevelopmentProjects(): List<DevelopmentProject> =
+        developmentProjects.values.filter {
+            it.stage != DevelopmentStage.COMPLETE &&
+            it.stage != DevelopmentStage.REJECTED &&
+            it.stage != DevelopmentStage.CANCELLED
+        }
 
     fun resident(id: Long): Resident? = residents[id]
 
