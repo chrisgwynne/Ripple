@@ -101,7 +101,7 @@ object CrimeSystem {
 
         val others = state.detailedResidents()
             .filter { it.inTown && it.lifeStageAt(ctx.now) == LifeStage.ADULT && it.id != constable?.id && it.id != culprit.id }
-        val pool = (others + culprit).sortedBy { it.id }
+        val pool = ctx.rng.shuffled(others + culprit)
         if (pool.isEmpty()) return
 
         val victimOwnerId = crime.businessId?.let { state.businesses[it]?.ownerId }
@@ -175,19 +175,19 @@ object CrimeSystem {
     fun updateShoplifting(ctx: TickContext) {
         val state = ctx.state
         var budget = MAX_SHOPLIFTING_CANDIDATES_PER_DAY
-        val openShops = state.businesses.values
-            .filter { it.open && it.type !in EconomySystem.PUBLIC_SERVICES && it.demand < LOW_FOOTFALL_DEMAND }
-            .sortedBy { it.id }
+        val openShops = ctx.rng.shuffled(
+            state.businesses.values.filter { it.open && it.type !in EconomySystem.PUBLIC_SERVICES && it.demand < LOW_FOOTFALL_DEMAND }
+        )
         if (openShops.isEmpty()) return
 
-        val candidates = state.detailedResidents()
-            .filter {
+        val candidates = ctx.rng.shuffled(
+            state.detailedResidents().filter {
                 it.inTown && it.lifeStageAt(ctx.now) != LifeStage.CHILD &&
                     !onCooldown(ctx, it.id) &&
                     (it.needs.financialSecurity < 30.0 || it.debt > 400.0) &&
                     it.personality.honesty < 0.55
             }
-            .sortedBy { it.id }
+        )
 
         for (r in candidates) {
             if (budget <= 0) break
@@ -242,22 +242,20 @@ object CrimeSystem {
         val state = ctx.state
         var budget = MAX_BURGLARY_CANDIDATES_PER_DAY
 
-        val burglars = state.detailedResidents()
-            .filter {
+        val burglars = ctx.rng.shuffled(
+            state.detailedResidents().filter {
                 it.inTown && it.lifeStageAt(ctx.now) == LifeStage.ADULT &&
                     !onCooldown(ctx, it.id) &&
                     it.needs.financialSecurity < 25.0 &&
                     it.personality.honesty < 0.45
             }
-            .sortedBy { it.id }
+        )
         if (burglars.isEmpty()) return
 
         // Homes with nobody currently inside them — the opportunity half of the equation.
-        val emptyHomes = state.homes()
-            .filter { home ->
-                state.residentsIn(home.id).isEmpty()
-            }
-            .sortedBy { it.id }
+        val emptyHomes = ctx.rng.shuffled(
+            state.homes().filter { home -> state.residentsIn(home.id).isEmpty() }
+        )
         if (emptyHomes.isEmpty()) return
 
         for (burglar in burglars) {
@@ -340,7 +338,7 @@ object CrimeSystem {
         for ((buildingId, present) in byBuilding) {
             if (budget <= 0) break
             if (present.size < 2) continue
-            val sorted = present.sortedBy { it.id }
+            val sorted = ctx.rng.shuffled(present)
             for (mugger in sorted) {
                 if (budget <= 0) break
                 if (onCooldown(ctx, mugger.id)) continue
@@ -400,20 +398,22 @@ object CrimeSystem {
         val state = ctx.state
         var budget = MAX_VEHICLE_THEFT_CANDIDATES_PER_DAY
 
-        val thieves = state.detailedResidents()
-            .filter {
+        val thieves = ctx.rng.shuffled(
+            state.detailedResidents().filter {
                 it.inTown && it.lifeStageAt(ctx.now) == LifeStage.ADULT &&
                     !onCooldown(ctx, it.id) &&
                     it.needs.financialSecurity < 28.0 && it.personality.honesty < 0.5
             }
-            .sortedBy { it.id }
+        )
         if (thieves.isEmpty()) return
 
         // Victims currently away from home (travelling or at another building) — genuinely
         // can't be watching their own property right now.
-        val awayFromHome = state.detailedResidents()
-            .filter { it.inTown && it.homeBuildingId != null && it.currentBuildingId != it.homeBuildingId && it.wealth > 50.0 }
-            .sortedBy { it.id }
+        val awayFromHome = ctx.rng.shuffled(
+            state.detailedResidents().filter {
+                it.inTown && it.homeBuildingId != null && it.currentBuildingId != it.homeBuildingId && it.wealth > 50.0
+            }
+        )
         if (awayFromHome.isEmpty()) return
 
         for (thief in thieves) {
@@ -464,9 +464,9 @@ object CrimeSystem {
         val state = ctx.state
         var budget = MAX_FRAUD_CANDIDATES_PER_DAY
 
-        val struggling = state.businesses.values
-            .filter { it.open && it.type !in EconomySystem.PUBLIC_SERVICES && it.daysInTrouble >= 3 }
-            .sortedBy { it.id }
+        val struggling = ctx.rng.shuffled(
+            state.businesses.values.filter { it.open && it.type !in EconomySystem.PUBLIC_SERVICES && it.daysInTrouble >= 3 }
+        )
         for (biz in struggling) {
             if (budget <= 0) break
             val owner = biz.ownerId?.let { state.resident(it) } ?: continue

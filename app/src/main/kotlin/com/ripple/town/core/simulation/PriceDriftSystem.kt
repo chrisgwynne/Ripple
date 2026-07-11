@@ -62,10 +62,9 @@ object PriceDriftSystem {
 
     fun updateDaily(ctx: TickContext) {
         val state = ctx.state
-        val candidates = state.businesses.values
-            .filter { it.open && it.type !in EconomySystem.PUBLIC_SERVICES }
-            .sortedBy { it.id }
-            .take(MAX_BUSINESSES_PER_DAY)
+        val candidates = ctx.rng.shuffled(
+            state.businesses.values.filter { it.open && it.type !in EconomySystem.PUBLIC_SERVICES }
+        ).take(MAX_BUSINESSES_PER_DAY)
 
         for (biz in candidates) {
             if (!ctx.rng.nextBoolean(DRIFT_CHANCE)) continue

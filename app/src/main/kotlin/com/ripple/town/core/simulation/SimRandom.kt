@@ -55,6 +55,18 @@ class SimRandom(seed: Long) {
 
     fun <T> pickOrNull(list: List<T>): T? = if (list.isEmpty()) null else pick(list)
 
+    /** Fisher-Yates shuffle — returns a new list in a deterministic-but-unpredictable order.
+     *  Use instead of `sortedBy { it.id }` wherever a budget cap means only the first N items
+     *  are processed, so all entities get a fair chance across ticks. */
+    fun <T> shuffled(list: List<T>): List<T> {
+        val result = list.toMutableList()
+        for (i in result.size - 1 downTo 1) {
+            val j = nextInt(i + 1)
+            val tmp = result[i]; result[i] = result[j]; result[j] = tmp
+        }
+        return result
+    }
+
     companion object {
         private const val DOUBLE_UNIT = 1.0 / (1L shl 53)
 
