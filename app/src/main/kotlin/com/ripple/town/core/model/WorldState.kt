@@ -465,7 +465,13 @@ data class WorldState(
      */
     val opportunities: MutableMap<Long, Opportunity> = mutableMapOf(),
     /** Monotonically increasing counter for assigning [Opportunity.id] values. */
-    var nextOpportunityId: Long = 1L
+    var nextOpportunityId: Long = 1L,
+    /**
+     * Set of project IDs for which a construction-delay notice has already been emitted,
+     * so the single-shot delay event in DevelopmentSystem.startConstruction fires only once
+     * per project. Safe default (empty set) so existing checkpoints deserialise unchanged.
+     */
+    val delayNotifiedProjects: MutableSet<Long> = mutableSetOf()
 ) {
     // -------------------------------------------------------------------------
     // Performance indexes — NOT serialized (class body, not constructor params).

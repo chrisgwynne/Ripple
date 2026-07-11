@@ -48,6 +48,11 @@ object DevelopmentSystem {
     const val REGENERATION_DAILY_PROBABILITY = 0.008
     /** Land value ceiling below which opportunistic regeneration can fire. */
     const val REGENERATION_MAX_VALUE = 15_000.0
+    /** Maximum number of projects that may be simultaneously in CONSTRUCTION stage.
+     *  Funded projects that arrive while this cap is full are simply deferred to the next tick. */
+    const val MAX_CONCURRENT_CONSTRUCTION = 3
+    /** Days a project may remain FUNDED before a "builders at capacity" delay notice is emitted. */
+    const val CONSTRUCTION_DELAY_DAYS = 14L
 
     fun updateDaily(ctx: TickContext) {
         val projects = ctx.state.developmentProjects.values.toList()
@@ -216,8 +221,31 @@ object DevelopmentSystem {
             .maxByOrNull { it.condition }
     }
 
+    /** Returns true when the number of CONSTRUCTION-stage projects is below the cap. */
+    private fun canStartConstruction(state: com.ripple.town.core.model.WorldState): Boolean {
+        val activeConstruction = state.developmentProjects.values.count {
+            it.stage == DevelopmentStage.CONSTRUCTION
+        }
+        return activeConstruction < MAX_CONCURRENT_CONSTRUCTION
+    }
+
     private fun startConstruction(ctx: TickContext, proj: DevelopmentProject) {
         val state = ctx.state
+        // Capacity cap: defer if the builder pool is already full.
+        if (!canStartConstruction(state)) {
+            // Emit a one-time delay notice once the project has been waiting too long.
+            val daysWaiting = SimTime.dayIndex(ctx.now) - SimTime.dayIndex(proj.stageChangedAt)
+            if (daysWaiting >= CONSTRUCTION_DELAY_DAYS &&
+                    proj.id !in state.delayNotifiedProjects) {
+                ctx.emit(
+                    EventType.DEVELOPMENT_APPROVED,
+                    "Construction of ${proj.buildingType.label} delayed - builders at capacity.",
+                    severity = 0.35, visibility = EventVisibility.PUBLIC
+                )
+                state.delayNotifiedProjects += proj.id
+            }
+            return
+        }
         val constructionDays = (proj.estimatedCost / 10_000.0 * DAYS_PER_10K).toLong().coerceAtLeast(1L)
         val completesAt = ctx.now + constructionDays * SimTime.MINUTES_PER_DAY
 

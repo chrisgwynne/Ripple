@@ -29,6 +29,15 @@ object TownNeedsPlanner {
 
     const val UPDATE_INTERVAL_DAYS = 30L
     private const val MIN_BUDGET_TO_PROPOSE = 5_000.0
+    // Housing-type selection thresholds (fraction of total households)
+    private const val ELDERLY_FRACTION_FOR_COTTAGE = 0.25
+    private const val SINGLE_FRACTION_FOR_FLAT     = 0.35
+    private const val LARGE_HH_FRACTION_FOR_HOUSE  = 0.30
+    // Per-unit cost estimates for each residential building type
+    private const val COST_FLAT    = 35_000.0
+    private const val COST_HOUSE   = 30_000.0
+    private const val COST_COTTAGE = 22_000.0
+    private const val COST_TERRACE = 25_000.0
 
     fun updateMonthly(ctx: TickContext) {
         val state = ctx.state
@@ -246,7 +255,15 @@ object TownNeedsPlanner {
 
     private fun propose(ctx: TickContext, type: DevelopmentType, deficit: Int) {
         val state = ctx.state
-        val (buildingType, capacity, cost) = developmentSpec(type)
+        val baseSpec = developmentSpec(type)
+        // For residential housing, choose building type from demographic context.
+        val (buildingType, capacity, cost) = if (type == DevelopmentType.HOUSING_RESIDENTIAL) {
+            val (hType, hCap) = selectHousingType(ctx)
+            val hCost = housingCost(hType)
+            Triple(hType, hCap, hCost)
+        } else {
+            Triple(baseSpec.buildingType, baseSpec.capacity, baseSpec.cost)
+        }
         val proj = DevelopmentProject(
             id = state.nextProjectId++,
             type = type,
@@ -266,6 +283,48 @@ object TownNeedsPlanner {
             "A new ${buildingType.label.lowercase()} has been proposed to address ${type.label.lowercase()} shortfall.",
             severity = 0.4, visibility = EventVisibility.PUBLIC
         )
+    }
+
+    /**
+     * Selects the most appropriate residential [BuildingType] and unit capacity
+     * based on the current demographic composition of the town:
+     * - Many elderly residents -> [BuildingType.COTTAGE] (2 units, accessible small homes)
+     * - Many single-adult households -> [BuildingType.FLAT] (8 units, high-density)
+     * - Many large (4+) households -> [BuildingType.HOUSE] (6 units, spacious family homes)
+     * - Otherwise -> [BuildingType.TERRACE] (6 units, mixed general housing)
+     */
+    private fun selectHousingType(ctx: TickContext): Pair<BuildingType, Int> {
+        val state = ctx.state
+        val totalHouseholds = state.households.values.count { hh ->
+            hh.memberIds.any { id -> state.residents[id]?.alive == true }
+        }.coerceAtLeast(1)
+        val elderlyCount = state.livingResidents().count { r ->
+            SimTime.ageYears(r.bornAt, state.time) > 65
+        }
+        val largeHouseholds = state.households.values.count { hh ->
+            hh.memberIds.count { id -> state.residents[id]?.alive == true } >= 4
+        }
+        val singleAdults = state.households.values.count { hh ->
+            hh.memberIds.count { id -> state.residents[id]?.alive == true } == 1
+        }
+        return when {
+            elderlyCount   > totalHouseholds * ELDERLY_FRACTION_FOR_COTTAGE ->
+                BuildingType.COTTAGE to 2
+            singleAdults   > totalHouseholds * SINGLE_FRACTION_FOR_FLAT ->
+                BuildingType.FLAT to 8
+            largeHouseholds > totalHouseholds * LARGE_HH_FRACTION_FOR_HOUSE ->
+                BuildingType.HOUSE to 6
+            else ->
+                BuildingType.TERRACE to 6
+        }
+    }
+
+    /** Estimated construction cost for each residential building type. */
+    private fun housingCost(type: BuildingType): Double = when (type) {
+        BuildingType.FLAT    -> COST_FLAT
+        BuildingType.HOUSE   -> COST_HOUSE
+        BuildingType.COTTAGE -> COST_COTTAGE
+        else                 -> COST_TERRACE  // TERRACE and any unexpected type
     }
 
     private fun serviceTypeToDevelopment(s: ServiceType): DevelopmentType? = when (s) {
@@ -299,7 +358,9 @@ object TownNeedsPlanner {
     private data class DevSpec(val buildingType: BuildingType, val capacity: Int, val cost: Double)
 
     private fun developmentSpec(type: DevelopmentType): DevSpec = when (type) {
-        DevelopmentType.HOUSING_RESIDENTIAL -> DevSpec(BuildingType.TERRACE,          6,  25_000.0)
+        // HOUSING_RESIDENTIAL building type + cost are set dynamically by selectHousingType();
+        // the DevSpec here is only a fallback used by non-HOUSING paths that call developmentSpec().
+        DevelopmentType.HOUSING_RESIDENTIAL -> DevSpec(BuildingType.TERRACE,          6,  COST_TERRACE)
         DevelopmentType.HOUSING_FLATS       -> DevSpec(BuildingType.FLAT,            18,  60_000.0)
         DevelopmentType.COMMERCIAL_RETAIL   -> DevSpec(BuildingType.GROCER,           3,  20_000.0)
         DevelopmentType.INDUSTRIAL          -> DevSpec(BuildingType.WORKSHOP,         4,  30_000.0)
