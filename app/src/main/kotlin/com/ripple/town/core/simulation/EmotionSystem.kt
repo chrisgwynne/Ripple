@@ -159,7 +159,49 @@ object EmotionSystem {
                     ActionCategory.GOAL_PURSUING -> 1.0 + 0.15 * weight
                     else -> 1.0
                 }
-                else -> 1.0
+                // Anger fuels effort and goal-pursuit but burns social bridges.
+                EmotionType.ANGER -> when (category) {
+                    ActionCategory.EFFORTFUL -> 1.0 + 0.15 * weight
+                    ActionCategory.GOAL_PURSUING -> 1.0 + 0.10 * weight
+                    ActionCategory.SOCIAL -> 1.0 - 0.25 * weight
+                    ActionCategory.LOW_KEY -> 1.0 - 0.15 * weight
+                    ActionCategory.AVOIDANT -> 1.0
+                }
+                // Shame drives withdrawal: avoidant/low-key up, social and goals down.
+                EmotionType.SHAME -> when (category) {
+                    ActionCategory.AVOIDANT, ActionCategory.LOW_KEY -> 1.0 + 0.2 * weight
+                    ActionCategory.SOCIAL -> 1.0 - 0.3 * weight
+                    ActionCategory.GOAL_PURSUING -> 1.0 - 0.15 * weight
+                    ActionCategory.EFFORTFUL -> 1.0
+                }
+                // Guilt motivates reparative effort and social repair; diffuses goal focus.
+                EmotionType.GUILT -> when (category) {
+                    ActionCategory.SOCIAL -> 1.0 + 0.2 * weight
+                    ActionCategory.EFFORTFUL -> 1.0 + 0.1 * weight
+                    ActionCategory.GOAL_PURSUING -> 1.0 - 0.1 * weight
+                    else -> 1.0
+                }
+                // Jealousy sharpens competitive drive; sours social interactions.
+                EmotionType.JEALOUSY -> when (category) {
+                    ActionCategory.GOAL_PURSUING -> 1.0 + 0.2 * weight
+                    ActionCategory.EFFORTFUL -> 1.0 + 0.1 * weight
+                    ActionCategory.SOCIAL -> 1.0 - 0.2 * weight
+                    else -> 1.0
+                }
+                // Regret is paralysing: low-key up, effortful and goal-pursuing down.
+                EmotionType.REGRET -> when (category) {
+                    ActionCategory.LOW_KEY -> 1.0 + 0.2 * weight
+                    ActionCategory.EFFORTFUL, ActionCategory.GOAL_PURSUING -> 1.0 - 0.2 * weight
+                    else -> 1.0
+                }
+                // Relief releases tension: social and effortful up, avoidant down.
+                EmotionType.RELIEF -> when (category) {
+                    ActionCategory.SOCIAL -> 1.0 + 0.2 * weight
+                    ActionCategory.EFFORTFUL -> 1.0 + 0.15 * weight
+                    ActionCategory.GOAL_PURSUING -> 1.0 + 0.1 * weight
+                    ActionCategory.AVOIDANT -> 1.0 - 0.15 * weight
+                    ActionCategory.LOW_KEY -> 1.0
+                }
             }
         }
         return modifier.coerceIn(0.5, 1.5)
