@@ -47,7 +47,8 @@ object EconomySystem {
             // derived rather than a free-floating reputation-only drift target, so this hourly
             // conversion into an actual customer count is unchanged in shape — only what feeds
             // `demand` changed, not how `demand` becomes footfall.
-            val expected = (biz.demand / 100.0) * sectorMultiplier * 2.2
+            val routeMult = routeFootfallMultiplier(ctx.state, biz.buildingId)
+            val expected = (biz.demand / 100.0) * sectorMultiplier * 2.2 * routeMult
             val customers = ctx.rng.nextGaussianLike(expected, 1.2, 0.0, 6.0).toInt()
             if (customers > 0) {
                 val spendEach = baseSpend(biz.type) * biz.priceLevel
@@ -390,6 +391,15 @@ object EconomySystem {
         return (1.0 - t).coerceIn(MIN_DISTANCE_WEIGHT, 1.0)
     }
     private const val MIN_DISTANCE_WEIGHT = 0.15
+
+    /** Best footfall multiplier across all routes connected to [buildingId]. Returns 1.0 if no
+     *  routes exist yet (seeds gracefully before TransportSystem has run). */
+    private fun routeFootfallMultiplier(state: WorldState, buildingId: Long): Double {
+        val connected = state.transportRoutes.values.filter {
+            it.fromBuildingId == buildingId || it.toBuildingId == buildingId
+        }
+        return if (connected.isEmpty()) 1.0 else connected.maxOf { it.footfallMultiplier }
+    }
 
     /** Household wealth/savings as a rough spending-capacity proxy, scaled to a gentle
      *  0.6x-1.6x multiplier around [WEALTH_WEIGHT_MIDPOINT] (a household at the midpoint reads as

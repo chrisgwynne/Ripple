@@ -2,6 +2,7 @@ package com.ripple.town.core.simulation
 
 import com.ripple.town.core.model.Building
 import com.ripple.town.core.model.BuildingType
+import com.ripple.town.core.model.TransportRoute
 import com.ripple.town.core.model.toBusinessType
 import com.ripple.town.core.model.DistrictType
 import com.ripple.town.core.model.Business
@@ -58,6 +59,7 @@ class WorldGenerator(private val seed: Long, private val townName: String = "Ash
         PopulationGenerator.buildProceduralPopulation(state, rng, targetCount = PROCEDURAL_POPULATION_TARGET)
         buildRelationships(state, rng)
         seedScenarios(state)
+        seedTransportRoutes(state)
 
         state.followedResidentId = state.residents.values
             .first { it.firstName == "Mara" && it.surname == "Vale" }.id
@@ -743,6 +745,35 @@ class WorldGenerator(private val seed: Long, private val townName: String = "Ash
 
         // 1. The bakery is already wobbling — nudge demand a touch lower to start
         state.businesses.values.first { it.type == BusinessType.BAKERY }.demand = 36.0
+    }
+
+    // ------------------------------------------------------------ transport routes
+
+    private fun seedTransportRoutes(state: WorldState) {
+        val homeTypes = setOf(
+            BuildingType.HOUSE, BuildingType.COTTAGE, BuildingType.TERRACE, BuildingType.FLAT
+        )
+        val nodes = state.buildings.values.filter {
+            it.type !in homeTypes &&
+                it.type != BuildingType.PARK &&
+                it.type != BuildingType.CEMETERY &&
+                it.type != BuildingType.VACANT
+        }
+        if (nodes.size < 2) return
+        val linked = mutableSetOf<Pair<Long, Long>>()
+        for (a in nodes) {
+            val nearest = nodes.filter { it.id != a.id }
+                .minByOrNull { a.origin.manhattan(it.origin) } ?: continue
+            val key = if (a.id < nearest.id) a.id to nearest.id else nearest.id to a.id
+            if (key in linked) continue
+            linked += key
+            val id = state.nextRouteId++
+            state.transportRoutes[id] = TransportRoute(
+                id = id,
+                fromBuildingId = key.first,
+                toBuildingId = key.second
+            )
+        }
     }
 
     companion object {
