@@ -65,11 +65,11 @@ object InteractionSystem {
         // Location bias: a handful of building types nudge the topic the way people
         // actually talk differently in a pub than a school gate.
         val locationTopic = when (building?.type) {
-            BuildingType.PUB -> if (ctx.rng.nextBoolean(0.5)) ConversationTopic.GOSSIP else null
-            BuildingType.CAFE -> if (ctx.rng.nextBoolean(0.35)) ConversationTopic.LOCAL_NEWS else null
-            BuildingType.SCHOOL -> if (ctx.rng.nextBoolean(0.5)) ConversationTopic.FAMILY else null
-            BuildingType.CLINIC -> if (ctx.rng.nextBoolean(0.5)) ConversationTopic.HEALTH else null
-            BuildingType.TOWN_HALL -> if (ctx.rng.nextBoolean(0.4)) ConversationTopic.LOCAL_NEWS else null
+            BuildingType.PUB, BuildingType.NIGHTCLUB -> if (ctx.rng.nextBoolean(0.5)) ConversationTopic.GOSSIP else null
+            BuildingType.CAFE, BuildingType.RESTAURANT, BuildingType.BAKERY -> if (ctx.rng.nextBoolean(0.35)) ConversationTopic.LOCAL_NEWS else null
+            BuildingType.SCHOOL, BuildingType.NURSERY, BuildingType.LIBRARY -> if (ctx.rng.nextBoolean(0.5)) ConversationTopic.FAMILY else null
+            BuildingType.CLINIC, BuildingType.HOSPITAL, BuildingType.PHARMACY -> if (ctx.rng.nextBoolean(0.5)) ConversationTopic.HEALTH else null
+            BuildingType.TOWN_HALL, BuildingType.COMMUNITY_CENTRE -> if (ctx.rng.nextBoolean(0.4)) ConversationTopic.LOCAL_NEWS else null
             else -> null
         }
         if (locationTopic != null) return locationTopic

@@ -531,15 +531,16 @@ class ProceduralSpriteProvider : SpriteProvider {
 
     fun footprintOf(type: BuildingType): Pair<Int, Int> = when (type) {
         BuildingType.TOWN_HALL -> 5 to 4
-        BuildingType.SCHOOL -> 5 to 4
-        BuildingType.FACTORY -> 5 to 4
+        BuildingType.SCHOOL, BuildingType.HOSPITAL -> 8 to 6
+        BuildingType.FACTORY, BuildingType.WAREHOUSE -> 6 to 5
         BuildingType.PARK -> 8 to 7
         BuildingType.CEMETERY -> 5 to 4
-        BuildingType.SPORTS_HALL -> 7 to 5
-        BuildingType.COMMUNITY_CENTRE -> 6 to 4
-        BuildingType.BAKERY, BuildingType.HARDWARE, BuildingType.PUB,
+        BuildingType.SPORTS_HALL, BuildingType.SWIMMING_POOL -> 7 to 5
+        BuildingType.COMMUNITY_CENTRE, BuildingType.CINEMA, BuildingType.NIGHTCLUB -> 6 to 4
+        BuildingType.SUPERMARKET, BuildingType.HOTEL, BuildingType.OFFICE -> 5 to 4
+        BuildingType.BAKERY, BuildingType.HARDWARE, BuildingType.PUB, BuildingType.RESTAURANT,
         BuildingType.CLINIC, BuildingType.VACANT, BuildingType.WORKSHOP,
-        BuildingType.FIRE_STATION, BuildingType.POLICE_STATION -> 4 to 3
+        BuildingType.FIRE_STATION, BuildingType.POLICE_STATION, BuildingType.GARAGE -> 4 to 3
         else -> 3 to 3
     }
 
@@ -547,28 +548,38 @@ class ProceduralSpriteProvider : SpriteProvider {
         BuildingType.HOUSE, BuildingType.COTTAGE, BuildingType.TERRACE, BuildingType.FLAT ->
             listOf(Color(0xFFE8D9B8), Color(0xFFDCC7A5), Color(0xFFD9CBB5), Color(0xFFE3D2AE))[(seed % 4).toInt()]
         BuildingType.TOWN_HALL -> Color(0xFFDED3BC)
-        BuildingType.CLINIC -> Color(0xFFE9E2D2)
-        BuildingType.SCHOOL -> Color(0xFFD9C7A2)
-        BuildingType.FACTORY -> Color(0xFFB3A48E)
-        BuildingType.PUB -> Color(0xFFCDA97E)
+        BuildingType.CLINIC, BuildingType.HOSPITAL -> Color(0xFFE9E2D2)
+        BuildingType.SCHOOL, BuildingType.NURSERY, BuildingType.LIBRARY -> Color(0xFFD9C7A2)
+        BuildingType.FACTORY, BuildingType.WAREHOUSE -> Color(0xFFB3A48E)
+        BuildingType.PUB, BuildingType.NIGHTCLUB -> Color(0xFFCDA97E)
+        BuildingType.RESTAURANT -> Color(0xFFD4A882)
+        BuildingType.HOTEL -> Color(0xFFDDD0B8)
+        BuildingType.OFFICE -> Color(0xFFCFD8E0)
+        BuildingType.SUPERMARKET -> Color(0xFFD8E4C8)
+        BuildingType.CINEMA -> Color(0xFF3A3A5E)
+        BuildingType.PHARMACY -> Color(0xFFCBDECC)
         BuildingType.FIRE_STATION -> Color(0xFFCEB89A)
         BuildingType.POLICE_STATION -> Color(0xFFD0D8E0)
-        BuildingType.SPORTS_HALL -> Color(0xFFE2DDD0)
+        BuildingType.SPORTS_HALL, BuildingType.SWIMMING_POOL -> Color(0xFFE2DDD0)
         BuildingType.COMMUNITY_CENTRE -> Color(0xFFD9C48C)
+        BuildingType.GARAGE -> Color(0xFFC0B8A8)
         else -> Color(0xFFE0CCA8)
     }
 
     private fun roofColorOf(type: BuildingType, seed: Long): Color = when (type) {
         BuildingType.HOUSE, BuildingType.COTTAGE, BuildingType.TERRACE, BuildingType.FLAT ->
             listOf(Color(0xFFA85B44), Color(0xFF96543F), Color(0xFF8E6B4A), Color(0xFFA0654B))[(seed % 4).toInt()]
-        BuildingType.TOWN_HALL -> Color(0xFF7D8FA3)
-        BuildingType.CLINIC -> Color(0xFF8FB6C9)
-        BuildingType.SCHOOL -> Color(0xFF97694C)
-        BuildingType.FACTORY -> Color(0xFF6E6A5F)
+        BuildingType.TOWN_HALL, BuildingType.OFFICE -> Color(0xFF7D8FA3)
+        BuildingType.CLINIC, BuildingType.HOSPITAL -> Color(0xFF8FB6C9)
+        BuildingType.SCHOOL, BuildingType.NURSERY, BuildingType.LIBRARY -> Color(0xFF97694C)
+        BuildingType.FACTORY, BuildingType.WAREHOUSE -> Color(0xFF6E6A5F)
         BuildingType.FIRE_STATION -> Color(0xFF5A5A5A)
         BuildingType.POLICE_STATION -> Color(0xFF2E3A4A)
-        BuildingType.SPORTS_HALL -> Color(0xFF5A6870)
+        BuildingType.SPORTS_HALL, BuildingType.SWIMMING_POOL -> Color(0xFF5A6870)
         BuildingType.COMMUNITY_CENTRE -> Color(0xFFB2593F)
+        BuildingType.CINEMA, BuildingType.NIGHTCLUB -> Color(0xFF282838)
+        BuildingType.HOTEL -> Color(0xFF8A7A6A)
+        BuildingType.SUPERMARKET -> Color(0xFF5A8A5A)
         else -> Color(0xFFA85B44)
     }
 
@@ -576,12 +587,17 @@ class ProceduralSpriteProvider : SpriteProvider {
         BuildingType.BAKERY -> Color(0xFFD9A648)
         BuildingType.CAFE -> Color(0xFFC98BA4)
         BuildingType.PUB -> Color(0xFF55713F)
-        BuildingType.GROCER -> Color(0xFF7C9B62)
-        BuildingType.BOOKSHOP -> Color(0xFF44506B)
+        BuildingType.GROCER, BuildingType.SUPERMARKET -> Color(0xFF7C9B62)
+        BuildingType.BOOKSHOP, BuildingType.LIBRARY -> Color(0xFF44506B)
         BuildingType.TAILOR -> Color(0xFF9B7FB0)
-        BuildingType.HARDWARE -> Color(0xFF8A6F52)
-        BuildingType.CLINIC -> Color(0xFFB2593F)
-        BuildingType.WORKSHOP -> Color(0xFF74563F)
+        BuildingType.HARDWARE, BuildingType.GARAGE -> Color(0xFF8A6F52)
+        BuildingType.CLINIC, BuildingType.HOSPITAL, BuildingType.PHARMACY -> Color(0xFF4A8A6A)
+        BuildingType.WORKSHOP, BuildingType.FACTORY, BuildingType.WAREHOUSE -> Color(0xFF74563F)
+        BuildingType.RESTAURANT, BuildingType.TAKEAWAY -> Color(0xFFB85A3A)
+        BuildingType.NIGHTCLUB -> Color(0xFF7A3A8A)
+        BuildingType.CINEMA -> Color(0xFF3A5A8A)
+        BuildingType.HOTEL -> Color(0xFF8A6A3A)
+        BuildingType.OFFICE -> Color(0xFF4A5A7A)
         else -> Color(0xFF8A6F52)
     }
 

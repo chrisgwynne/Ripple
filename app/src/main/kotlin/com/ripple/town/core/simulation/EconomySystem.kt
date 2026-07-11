@@ -151,7 +151,36 @@ object EconomySystem {
             in 10..16 -> 1.15
             else -> 0.8
         }
-        BusinessType.WORKSHOP, BusinessType.FACTORY -> 1.0
+        BusinessType.WORKSHOP, BusinessType.FACTORY, BusinessType.WAREHOUSE -> 1.0
+        BusinessType.RESTAURANT, BusinessType.TAKEAWAY -> when (hour) {
+            in 12..14 -> 1.5
+            in 18..21 -> 1.9
+            else -> 0.5
+        }
+        BusinessType.NIGHTCLUB -> when (hour) {
+            in 22..23 -> 2.2
+            in 20..21 -> 1.4
+            else -> 0.3
+        }
+        BusinessType.CINEMA -> when (hour) {
+            in 17..21 -> 1.7
+            in 14..16 -> 1.2
+            else -> 0.6
+        }
+        BusinessType.HOTEL -> when (hour) {
+            in 14..17 -> 1.3
+            else -> 0.9
+        }
+        BusinessType.SUPERMARKET -> when (hour) {
+            in 12..14 -> 1.3
+            in 17..19 -> 1.4
+            else -> 1.0
+        }
+        BusinessType.SWIMMING_POOL -> when (hour) {
+            in 6..8 -> 1.4
+            in 17..19 -> 1.3
+            else -> 0.8
+        }
         else -> 1.0
     }
 
@@ -173,7 +202,13 @@ object EconomySystem {
             BusinessType.BAKERY -> 1.15
             BusinessType.BOOKSHOP -> 1.15
             BusinessType.GROCER, BusinessType.HARDWARE -> 1.05
-            BusinessType.TAILOR, BusinessType.WORKSHOP, BusinessType.FACTORY -> 1.0
+            BusinessType.TAILOR, BusinessType.WORKSHOP, BusinessType.FACTORY, BusinessType.WAREHOUSE, BusinessType.GARAGE -> 1.0
+            BusinessType.RESTAURANT, BusinessType.TAKEAWAY -> 1.2
+            BusinessType.NIGHTCLUB -> 1.6
+            BusinessType.CINEMA -> 1.3
+            BusinessType.SUPERMARKET -> 1.1
+            BusinessType.HOTEL -> 1.1
+            BusinessType.SWIMMING_POOL -> 1.2
             else -> 1.0
         }
     }
@@ -270,9 +305,11 @@ object EconomySystem {
      * (see [catchmentDemand]'s flat floor for these two types instead).
      */
     private fun catchmentRadiusTiles(type: BusinessType): Int = when (type) {
-        BusinessType.GROCER, BusinessType.BAKERY -> 40
-        BusinessType.CAFE, BusinessType.PUB -> 48
-        BusinessType.HARDWARE, BusinessType.BOOKSHOP, BusinessType.TAILOR -> 60
+        BusinessType.GROCER, BusinessType.BAKERY, BusinessType.SUPERMARKET -> 40
+        BusinessType.CAFE, BusinessType.PUB, BusinessType.TAKEAWAY, BusinessType.RESTAURANT -> 48
+        BusinessType.HARDWARE, BusinessType.BOOKSHOP, BusinessType.TAILOR, BusinessType.PHARMACY -> 60
+        BusinessType.NIGHTCLUB, BusinessType.CINEMA, BusinessType.SWIMMING_POOL -> 80
+        BusinessType.HOTEL -> 100
         else -> 0
     }
 
@@ -977,7 +1014,10 @@ object EconomySystem {
      * them, and no further.
      */
     private fun maxEmployeeCapacity(type: BusinessType): Int = when (type) {
-        BusinessType.WORKSHOP, BusinessType.FACTORY -> 12
+        BusinessType.WORKSHOP, BusinessType.FACTORY, BusinessType.WAREHOUSE -> 12
+        BusinessType.HOSPITAL, BusinessType.SUPERMARKET -> 10
+        BusinessType.HOTEL, BusinessType.CINEMA, BusinessType.NIGHTCLUB, BusinessType.SWIMMING_POOL -> 8
+        BusinessType.OFFICE, BusinessType.RESTAURANT, BusinessType.SCHOOL -> 6
         else -> 4
     }
 
@@ -1053,12 +1093,23 @@ object EconomySystem {
         BusinessType.BAKERY -> 4.5
         BusinessType.CAFE -> 6.0
         BusinessType.PUB -> 9.0
+        BusinessType.RESTAURANT -> 14.0
+        BusinessType.TAKEAWAY -> 7.0
         BusinessType.GROCER -> 11.0
+        BusinessType.SUPERMARKET -> 15.0
         BusinessType.HARDWARE -> 14.0
         BusinessType.BOOKSHOP -> 8.0
         BusinessType.TAILOR -> 18.0
+        BusinessType.PHARMACY -> 10.0
         BusinessType.WORKSHOP -> 25.0
+        BusinessType.OFFICE -> 20.0
+        BusinessType.HOTEL -> 22.0
+        BusinessType.GARAGE -> 16.0
         BusinessType.FACTORY -> 40.0
+        BusinessType.WAREHOUSE -> 30.0
+        BusinessType.NIGHTCLUB -> 20.0
+        BusinessType.CINEMA -> 18.0
+        BusinessType.SWIMMING_POOL -> 8.0
         else -> 0.0
     }
 
@@ -1118,15 +1169,24 @@ object EconomySystem {
     // pass does not own or revisit (the brief's own audit confirmed wages/living-costs were
     // healthy, not broken). Re-verified by rerunning the calibration report after this retune.
     fun cogsFraction(type: BusinessType): Double = when (type) {
-        BusinessType.BAKERY -> 0.30   // flour, dairy, ingredients — bottom of the brief's 30-55% band
-        BusinessType.CAFE -> 0.30     // beans, milk, food stock
-        BusinessType.PUB -> 0.30      // drink stock — real-world pubs run some of the thinner COGS of any food/drink trade
-        BusinessType.GROCER -> 0.35   // thin-margin resale, but not the ceiling of the 30-55% band
-        BusinessType.HARDWARE -> 0.40 // wholesale cost of stocked goods, bottom of the 40-60% band
-        BusinessType.BOOKSHOP -> 0.35 // wholesale cost of stock
-        BusinessType.TAILOR -> 0.30   // fabric/materials, more labour-value-add than a pure reseller
-        BusinessType.WORKSHOP -> 0.35 // timber/materials
-        BusinessType.FACTORY -> 0.40  // raw materials at production scale
+        BusinessType.BAKERY -> 0.30
+        BusinessType.CAFE -> 0.30
+        BusinessType.PUB -> 0.30
+        BusinessType.RESTAURANT -> 0.35
+        BusinessType.TAKEAWAY -> 0.30
+        BusinessType.GROCER -> 0.35
+        BusinessType.SUPERMARKET -> 0.40
+        BusinessType.HARDWARE -> 0.40
+        BusinessType.BOOKSHOP -> 0.35
+        BusinessType.TAILOR -> 0.30
+        BusinessType.PHARMACY -> 0.35
+        BusinessType.WORKSHOP -> 0.35
+        BusinessType.FACTORY -> 0.40
+        BusinessType.WAREHOUSE -> 0.30
+        BusinessType.NIGHTCLUB -> 0.20
+        BusinessType.CINEMA -> 0.15
+        BusinessType.HOTEL -> 0.25
+        BusinessType.SWIMMING_POOL -> 0.10
         else -> 0.0
     }
 
@@ -1364,10 +1424,13 @@ object EconomySystem {
     }
 
     fun salaryFor(type: BusinessType): Double = when (type) {
-        BusinessType.FACTORY -> 46.0
-        BusinessType.CLINIC -> 52.0
-        BusinessType.SCHOOL -> 54.0
-        BusinessType.TOWN_HALL -> 50.0
+        BusinessType.FACTORY, BusinessType.WAREHOUSE -> 46.0
+        BusinessType.CLINIC, BusinessType.HOSPITAL -> 52.0
+        BusinessType.SCHOOL, BusinessType.NURSERY, BusinessType.LIBRARY -> 54.0
+        BusinessType.TOWN_HALL, BusinessType.FIRE_STATION, BusinessType.POLICE_STATION -> 50.0
+        BusinessType.OFFICE -> 48.0
+        BusinessType.GARAGE -> 44.0
+        BusinessType.RESTAURANT, BusinessType.HOTEL -> 42.0
         else -> 40.0
     }
 
@@ -1375,20 +1438,33 @@ object EconomySystem {
         BusinessType.BAKERY -> "Bakery assistant"
         BusinessType.CAFE -> "Café worker"
         BusinessType.PUB -> "Bar worker"
+        BusinessType.RESTAURANT -> "Waiter"
+        BusinessType.TAKEAWAY -> "Takeaway worker"
         BusinessType.GROCER -> "Grocery assistant"
+        BusinessType.SUPERMARKET -> "Supermarket assistant"
         BusinessType.HARDWARE -> "Shop assistant"
         BusinessType.BOOKSHOP -> "Bookseller"
         BusinessType.TAILOR -> "Seamster"
+        BusinessType.PHARMACY -> "Pharmacy assistant"
         BusinessType.WORKSHOP -> "Workshop hand"
-        BusinessType.FACTORY -> "Joinery worker"
+        BusinessType.OFFICE -> "Office worker"
+        BusinessType.HOTEL -> "Hotel receptionist"
+        BusinessType.GARAGE -> "Mechanic"
+        BusinessType.FACTORY -> "Factory worker"
+        BusinessType.WAREHOUSE -> "Warehouse operative"
         BusinessType.CLINIC -> "Clinic assistant"
+        BusinessType.HOSPITAL -> "Hospital worker"
         BusinessType.SCHOOL -> "Classroom assistant"
+        BusinessType.NURSERY -> "Nursery worker"
+        BusinessType.LIBRARY -> "Librarian"
         BusinessType.TOWN_HALL -> "Clerk"
         BusinessType.FIRE_STATION -> "Firefighter"
         BusinessType.POLICE_STATION -> "Police officer"
         BusinessType.SPORTS_HALL -> "Sports centre worker"
+        BusinessType.SWIMMING_POOL -> "Lifeguard"
         BusinessType.COMMUNITY_CENTRE -> "Community worker"
-        BusinessType.NURSERY -> "Nursery worker"
+        BusinessType.CINEMA -> "Cinema usher"
+        BusinessType.NIGHTCLUB -> "Door staff"
     }
 
     private fun relevantSkillFor(type: BusinessType): com.ripple.town.core.model.SkillType = when (type) {
@@ -2035,7 +2111,12 @@ object EconomySystem {
     const val STRUGGLE_NOTICE_DAYS = 5
     const val CLOSURE_DAYS = 18
     const val EXPANSION_BALANCE = 9_000.0
-    val PUBLIC_SERVICES = setOf(BusinessType.CLINIC, BusinessType.SCHOOL, BusinessType.TOWN_HALL)
+    val PUBLIC_SERVICES = setOf(
+        BusinessType.CLINIC, BusinessType.HOSPITAL, BusinessType.SCHOOL, BusinessType.NURSERY,
+        BusinessType.LIBRARY, BusinessType.TOWN_HALL, BusinessType.FIRE_STATION,
+        BusinessType.POLICE_STATION, BusinessType.SPORTS_HALL, BusinessType.SWIMMING_POOL,
+        BusinessType.COMMUNITY_CENTRE
+    )
 
     // ============================================================
     // Staffing ramp (Economy Calibration Gate, Phase 2, added 2026-07-11) — see

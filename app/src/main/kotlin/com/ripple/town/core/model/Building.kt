@@ -3,30 +3,49 @@ package com.ripple.town.core.model
 import kotlinx.serialization.Serializable
 
 enum class BuildingType(val label: String) {
+    // Residential
     HOUSE("House"),
     COTTAGE("Cottage"),
     TERRACE("Terraced house"),
     FLAT("Flats"),
+    // Food & drink
     BAKERY("Bakery"),
     CAFE("Café"),
     PUB("Pub"),
+    RESTAURANT("Restaurant"),
+    TAKEAWAY("Takeaway"),
+    // Retail
     GROCER("Grocer"),
+    SUPERMARKET("Supermarket"),
     HARDWARE("Hardware shop"),
     BOOKSHOP("Bookshop"),
     TAILOR("Tailor"),
+    PHARMACY("Pharmacy"),
+    // Services / commercial
     WORKSHOP("Workshop"),
+    OFFICE("Office"),
+    HOTEL("Hotel"),
+    GARAGE("Garage"),
+    // Civic / public
     SCHOOL("School"),
+    NURSERY("Nursery"),
+    LIBRARY("Library"),
     CLINIC("Clinic"),
+    HOSPITAL("Hospital"),
     TOWN_HALL("Town hall"),
-    PARK("Park"),
-    FACTORY("Small factory"),
-    CEMETERY("Cemetery"),
-    VACANT("Vacant building"),
     FIRE_STATION("Fire station"),
     POLICE_STATION("Police station"),
     SPORTS_HALL("Sports hall"),
+    SWIMMING_POOL("Swimming pool"),
     COMMUNITY_CENTRE("Community centre"),
-    NURSERY("Nursery")
+    CINEMA("Cinema"),
+    NIGHTCLUB("Nightclub"),
+    // Outdoor / infrastructure
+    PARK("Park"),
+    FACTORY("Small factory"),
+    WAREHOUSE("Warehouse"),
+    CEMETERY("Cemetery"),
+    VACANT("Vacant building"),
 }
 
 val BuildingType.isHome: Boolean
@@ -40,20 +59,33 @@ fun BuildingType.toBusinessType(): BusinessType? = when (this) {
     BuildingType.BAKERY           -> BusinessType.BAKERY
     BuildingType.CAFE             -> BusinessType.CAFE
     BuildingType.PUB              -> BusinessType.PUB
+    BuildingType.RESTAURANT       -> BusinessType.RESTAURANT
+    BuildingType.TAKEAWAY         -> BusinessType.TAKEAWAY
     BuildingType.GROCER           -> BusinessType.GROCER
+    BuildingType.SUPERMARKET      -> BusinessType.SUPERMARKET
     BuildingType.HARDWARE         -> BusinessType.HARDWARE
     BuildingType.BOOKSHOP         -> BusinessType.BOOKSHOP
     BuildingType.TAILOR           -> BusinessType.TAILOR
+    BuildingType.PHARMACY         -> BusinessType.PHARMACY
     BuildingType.WORKSHOP         -> BusinessType.WORKSHOP
+    BuildingType.OFFICE           -> BusinessType.OFFICE
+    BuildingType.HOTEL            -> BusinessType.HOTEL
+    BuildingType.GARAGE           -> BusinessType.GARAGE
     BuildingType.SCHOOL           -> BusinessType.SCHOOL
+    BuildingType.NURSERY          -> BusinessType.NURSERY
+    BuildingType.LIBRARY          -> BusinessType.LIBRARY
     BuildingType.CLINIC           -> BusinessType.CLINIC
+    BuildingType.HOSPITAL         -> BusinessType.HOSPITAL
     BuildingType.TOWN_HALL        -> BusinessType.TOWN_HALL
     BuildingType.FACTORY          -> BusinessType.FACTORY
+    BuildingType.WAREHOUSE        -> BusinessType.WAREHOUSE
     BuildingType.FIRE_STATION     -> BusinessType.FIRE_STATION
     BuildingType.POLICE_STATION   -> BusinessType.POLICE_STATION
     BuildingType.SPORTS_HALL      -> BusinessType.SPORTS_HALL
+    BuildingType.SWIMMING_POOL    -> BusinessType.SWIMMING_POOL
     BuildingType.COMMUNITY_CENTRE -> BusinessType.COMMUNITY_CENTRE
-    BuildingType.NURSERY          -> BusinessType.NURSERY
+    BuildingType.CINEMA           -> BusinessType.CINEMA
+    BuildingType.NIGHTCLUB        -> BusinessType.NIGHTCLUB
     // PARK, HOUSE, COTTAGE, TERRACE, FLAT, CEMETERY, VACANT — no business entity
     else -> null
 }
@@ -110,12 +142,21 @@ data class Building(
 }
 
 enum class BusinessType(val label: String) {
-    BAKERY("Bakery"), CAFE("Café"), PUB("Pub"), GROCER("Grocer"), HARDWARE("Hardware shop"),
-    BOOKSHOP("Bookshop"), TAILOR("Tailor"), WORKSHOP("Furniture workshop"), FACTORY("Factory"),
-    CLINIC("Clinic"), SCHOOL("School"), TOWN_HALL("Town hall"),
+    // Food & drink
+    BAKERY("Bakery"), CAFE("Café"), PUB("Pub"), RESTAURANT("Restaurant"), TAKEAWAY("Takeaway"),
+    // Retail
+    GROCER("Grocer"), SUPERMARKET("Supermarket"), HARDWARE("Hardware shop"),
+    BOOKSHOP("Bookshop"), TAILOR("Tailor"), PHARMACY("Pharmacy"),
+    // Services / commercial
+    WORKSHOP("Furniture workshop"), OFFICE("Offices"), HOTEL("Hotel"), GARAGE("Garage"),
+    // Industry
+    FACTORY("Factory"), WAREHOUSE("Warehouse"),
+    // Civic
+    SCHOOL("School"), NURSERY("Nursery"), LIBRARY("Library"),
+    CLINIC("Clinic"), HOSPITAL("Hospital"), TOWN_HALL("Town hall"),
     FIRE_STATION("Fire station"), POLICE_STATION("Police station"),
-    SPORTS_HALL("Sports hall"), COMMUNITY_CENTRE("Community centre"),
-    NURSERY("Nursery")
+    SPORTS_HALL("Sports hall"), SWIMMING_POOL("Swimming pool"),
+    COMMUNITY_CENTRE("Community centre"), CINEMA("Cinema"), NIGHTCLUB("Nightclub"),
 }
 
 @Serializable

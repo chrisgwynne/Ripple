@@ -202,17 +202,38 @@ class WorldGenerator(private val seed: Long, private val townName: String = "Ash
     private fun buildProceduralCivicBusinesses(state: WorldState) {
         // BusinessType to (demand, balance, employeeCapacity) — civic services are publicly funded
         val civicParams = mapOf(
+            // Civic services (publicly funded, no owner)
             BusinessType.FIRE_STATION     to Triple(40.0, 25_000.0, 6),
             BusinessType.POLICE_STATION   to Triple(45.0, 30_000.0, 8),
             BusinessType.COMMUNITY_CENTRE to Triple(50.0, 15_000.0, 4),
-            BusinessType.SPORTS_HALL      to Triple(55.0, 20_000.0, 4),
-            BusinessType.SCHOOL           to Triple(50.0, 18_000.0, 4),
+            BusinessType.SPORTS_HALL      to Triple(55.0, 20_000.0, 5),
+            BusinessType.SWIMMING_POOL    to Triple(58.0, 18_000.0, 4),
+            BusinessType.SCHOOL           to Triple(50.0, 18_000.0, 6),
+            BusinessType.NURSERY          to Triple(48.0, 12_000.0, 3),
+            BusinessType.LIBRARY          to Triple(42.0, 10_000.0, 3),
             BusinessType.CLINIC           to Triple(55.0, 22_000.0, 4),
-            BusinessType.GROCER           to Triple(65.0, 8_000.0,  3),
-            BusinessType.PUB              to Triple(60.0, 6_000.0,  3),
-            BusinessType.FACTORY          to Triple(60.0, 12_000.0, 6),
-            BusinessType.BOOKSHOP         to Triple(40.0, 5_000.0,  2),
+            BusinessType.HOSPITAL         to Triple(62.0, 40_000.0, 12),
+            BusinessType.TOWN_HALL        to Triple(35.0, 30_000.0, 6),
+            // Commercial (start pre-seeded but player/sim can change ownership)
+            BusinessType.GROCER           to Triple(65.0,  8_000.0, 3),
+            BusinessType.SUPERMARKET      to Triple(72.0, 15_000.0, 6),
+            BusinessType.PUB              to Triple(60.0,  6_000.0, 3),
+            BusinessType.RESTAURANT       to Triple(58.0,  7_000.0, 4),
+            BusinessType.TAKEAWAY         to Triple(62.0,  4_500.0, 2),
+            BusinessType.CAFE             to Triple(55.0,  4_000.0, 2),
+            BusinessType.BAKERY           to Triple(52.0,  4_000.0, 2),
+            BusinessType.BOOKSHOP         to Triple(40.0,  5_000.0, 2),
+            BusinessType.HARDWARE         to Triple(45.0,  6_000.0, 2),
+            BusinessType.PHARMACY         to Triple(50.0,  7_000.0, 2),
+            BusinessType.TAILOR           to Triple(38.0,  4_500.0, 2),
+            BusinessType.FACTORY          to Triple(60.0, 12_000.0, 8),
+            BusinessType.WAREHOUSE        to Triple(45.0, 10_000.0, 4),
             BusinessType.WORKSHOP         to Triple(45.0, 10_000.0, 4),
+            BusinessType.OFFICE           to Triple(42.0, 12_000.0, 5),
+            BusinessType.HOTEL            to Triple(50.0, 14_000.0, 5),
+            BusinessType.GARAGE           to Triple(44.0,  7_000.0, 3),
+            BusinessType.CINEMA           to Triple(55.0, 10_000.0, 4),
+            BusinessType.NIGHTCLUB        to Triple(60.0,  8_000.0, 4),
         )
         // Only create for civic lots whose buildings don't already have a Business
         val existingBuildingIds = state.businesses.values.map { it.buildingId }.toSet()
