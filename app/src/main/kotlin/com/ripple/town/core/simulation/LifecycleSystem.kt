@@ -2,6 +2,7 @@ package com.ripple.town.core.simulation
 
 import com.ripple.town.core.model.Activity
 import com.ripple.town.core.model.DetailLevel
+import com.ripple.town.core.model.DistrictCharacter
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.Gender
 import com.ripple.town.core.model.GoalType
@@ -55,7 +56,20 @@ object LifecycleSystem {
         // Budget health check: don't attract migrants when the town is in deep deficit.
         if (state.municipalBudget.balance < -30_000.0) return
         // Probability: 1.5% base + 0.5% per open job slot, capped at 5%.
-        val prob = (0.015 + openJobs * 0.005).coerceAtMost(0.05)
+        val baseProbRaw = (0.015 + openJobs * 0.005).coerceAtMost(0.05)
+        // Audit #39: district character affects migration attractiveness.
+        // Each DECLINING/DERELICT district lowers prob by 5%; each PROSPEROUS/GENTRIFYING raises it by 3%.
+        val districtChars = ctx.state.districts.values.map { it.character }
+        val migrationMod = districtChars.sumOf { char ->
+            when (char) {
+                DistrictCharacter.DECLINING,
+                DistrictCharacter.DERELICT   -> -0.05
+                DistrictCharacter.PROSPEROUS,
+                DistrictCharacter.GENTRIFYING -> 0.03
+                else -> 0.0
+            }
+        }
+        val prob = (baseProbRaw + migrationMod).coerceIn(0.005, 0.05)
         if (ctx.rng.nextBoolean(prob)) {
             newFamilyArrives(ctx, null)
         }

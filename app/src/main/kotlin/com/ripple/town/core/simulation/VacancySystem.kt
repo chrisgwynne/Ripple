@@ -3,6 +3,7 @@ package com.ripple.town.core.simulation
 import com.ripple.town.core.model.BuildingState
 import com.ripple.town.core.model.BuildingType
 import com.ripple.town.core.model.CIVIC_BUILDING_TYPES
+import com.ripple.town.core.model.DistrictCharacter
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.EventVisibility
 import com.ripple.town.core.model.SimTime
@@ -25,6 +26,11 @@ object VacancySystem {
     const val DAYS_TO_DERELICT = 60L
     /** Days vacant before a DERELICT building becomes CONDEMNED. */
     const val DAYS_TO_CONDEMNED = 120L
+    /**
+     * In DECLINING or DERELICT districts, decay thresholds are scaled by this factor so
+     * buildings rot ~15% faster than in neutral districts (audit #39).
+     */
+    const val DISTRICT_DECAY_MULTIPLIER = 0.85
 
     // Core 7 civic types imported from CIVIC_BUILDING_TYPES; PARK/CEMETERY added here because
     // they have no associated Business and shouldn't decay either.
@@ -72,7 +78,17 @@ object VacancySystem {
             val vacantSince = building.vacantSinceAt ?: continue
             val daysVacant = (ctx.now - vacantSince) / SimTime.MINUTES_PER_DAY
 
-            if (building.buildingState == BuildingState.VACANT && daysVacant >= DAYS_TO_DERELICT) {
+            // Audit #39: DECLINING/DERELICT districts decay 15% faster — effective thresholds shrink.
+            val districtChar = building.districtId?.let { ctx.state.districts[it]?.character }
+            val decayMultiplier = when (districtChar) {
+                DistrictCharacter.DECLINING,
+                DistrictCharacter.DERELICT -> DISTRICT_DECAY_MULTIPLIER
+                else -> 1.0
+            }
+            val effectiveDaysToDerelict = (DAYS_TO_DERELICT * decayMultiplier).toLong()
+            val effectiveDaysToCondemned = (DAYS_TO_CONDEMNED * decayMultiplier).toLong()
+
+            if (building.buildingState == BuildingState.VACANT && daysVacant >= effectiveDaysToDerelict) {
                 building.buildingState = BuildingState.DERELICT
                 building.condition = (building.condition - 15.0).coerceAtLeast(0.0)
                 ctx.emit(
@@ -81,7 +97,7 @@ object VacancySystem {
                     buildingId = building.id, severity = 0.4, visibility = EventVisibility.PUBLIC
                 )
             } else if (building.buildingState == BuildingState.DERELICT &&
-                daysVacant >= DAYS_TO_DERELICT + DAYS_TO_CONDEMNED) {
+                daysVacant >= effectiveDaysToDerelict + effectiveDaysToCondemned) {
                 building.buildingState = BuildingState.CONDEMNED
                 building.condition = (building.condition - 25.0).coerceAtLeast(0.0)
                 building.value = (building.value * 0.3).coerceAtLeast(0.0)

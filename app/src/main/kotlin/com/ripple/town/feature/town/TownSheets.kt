@@ -938,6 +938,25 @@ fun TownOverviewSheetContent(world: WorldUi, viewModel: TownViewModel? = null) {
             StatBar("Health", stats.averageHealth)
             SectionTitle("Economy")
             Text("Average savings: ${stats.averageWealth.toInt()} coins", style = MaterialTheme.typography.bodyMedium)
+            world.plausibilityScore?.let { score ->
+                SectionTitle("Simulation health")
+                Text(
+                    "Liveliness: ${score.toInt()}/100",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = when {
+                        score >= 70 -> RippleColors.DeepGreen
+                        score >= 40 -> MaterialTheme.colorScheme.onSurface
+                        else -> RippleColors.DeepBrick
+                    }
+                )
+                world.plausibilityIssues.forEach { issue ->
+                    Text(
+                        "• $issue",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             if (world.emergenceRecords.isNotEmpty()) {
                 SectionTitle("Town stories")
                 world.emergenceRecords.forEach { record ->

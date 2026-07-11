@@ -378,7 +378,7 @@ private fun LivingSummaryCard(r: ResidentUi, dialogueLine: String?) {
 
             if (!dialogueLine.isNullOrBlank()) {
                 Text(
-                    "“$dialogueLine”",
+                    "\"$dialogueLine\"",
                     style = MaterialTheme.typography.bodyMedium,
                     fontStyle = FontStyle.Italic,
                     modifier = Modifier.padding(top = 6.dp)
@@ -870,31 +870,31 @@ private fun TimelineTab(events: List<EventUi>, viewModel: TownViewModel) {
 
 // ------------------------------------------------------------------ story (memories) card body
 
-/** Renamed from “Memories” to “Story” per the redesign brief — label change only, the
+/** Renamed from "Memories" to "Story" per the redesign brief — label change only, the
  * underlying importance-sorted memory list is unchanged. Intensity-decay display: each memory's
  * `intensity` (0..1, decays via CivilisationHistorySystem's annual pass) is shown as a short
- * label (“Vivid”/”Fading”/”Dim”) + the description text is alpha-shifted so a dim memory reads
+ * label ("Vivid"/"Fading"/"Dim") + the description text is alpha-shifted so a dim memory reads
  * visually lighter than a vivid one — purely a display layer, no simulation state changes. */
 @Composable
 private fun MemoriesTab(r: ResidentUi) {
-    if (r.memories.isEmpty()) { EmptyNote(“Nothing has marked them deeply yet.”); return }
+    if (r.memories.isEmpty()) { EmptyNote("Nothing has marked them deeply yet."); return }
     // Already importance-ranked (SnapshotBuilder sorts by importance and caps at 10) — shown
     // in that order rather than re-sorted, so the most defining memories read first.
     r.memories.forEach { m ->
         val decayLabel = when {
-            m.intensity >= 0.65 -> “Vivid”
-            m.intensity >= 0.35 -> “Fading”
-            else -> “Dim”
+            m.intensity >= 0.65 -> "Vivid"
+            m.intensity >= 0.35 -> "Fading"
+            else -> "Dim"
         }
         val textAlpha = (0.5f + m.intensity.coerceIn(0.0, 1.0) * 0.5f).toFloat()
         Column(Modifier.padding(vertical = 4.dp)) {
             Text(
-                “”${m.description}””,
+                "\"${m.description}\"",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = textAlpha)
             )
             Text(
-                “${m.typeLabel} · ${SimTime.formatDate(m.createdAt)} · $decayLabel”,
+                "${m.typeLabel} · ${SimTime.formatDate(m.createdAt)} · $decayLabel",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

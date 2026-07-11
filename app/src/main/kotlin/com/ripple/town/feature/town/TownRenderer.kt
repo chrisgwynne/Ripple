@@ -189,6 +189,10 @@ fun TownRenderer(
 
         drawIntoCanvas { canvas ->
             val paint = Paint().apply { filterQuality = FilterQuality.None }
+            // Pre-allocated dimmed paint for BACKGROUND (non-detailed) residents at full zoom
+            // — same FilterQuality, just 50% alpha so they read as ambient crowd rather than
+            // named characters. Only allocated once per draw call, not per resident.
+            val bgPaint = Paint().apply { filterQuality = FilterQuality.None; alpha = 0.5f }
             // Ground
             canvas.save()
             canvas.translate(camera.offsetX, camera.offsetY)
@@ -318,7 +322,7 @@ fun TownRenderer(
                     srcSize = IntSize(bmp.width, bmp.height),
                     dstOffset = IntOffset(drawX.toInt(), drawY.toInt()),
                     dstSize = IntSize(SPRITE_W, SPRITE_H),
-                    paint = paint
+                    paint = if (r.detailed || r.id == followId) paint else bgPaint
                 )
             }
             // Ambient life, part 4: a bird crossing the map. Deliberately the cheapest

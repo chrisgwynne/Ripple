@@ -48,7 +48,13 @@ data class WorldUi(
     val map: TownMap,
     val emergenceRecords: List<EmergenceRecord> = emptyList(),
     /** Sorted list of district names + their approximate map centre. */
-    val districtNav: List<DistrictNavEntry> = emptyList()
+    val districtNav: List<DistrictNavEntry> = emptyList(),
+    /** Liveliness score from the last NarrativePlausibilityReport (0=robotic, 100=alive).
+     *  Null until the engine has produced at least one report (~first month of sim time). */
+    val plausibilityScore: Double? = null,
+    /** Short human-readable descriptions of the most severe plausibility issues found,
+     *  capped at 3 so the UI stays scannable. Empty when none were flagged. */
+    val plausibilityIssues: List<String> = emptyList()
 ) {
     val residentsById: Map<Long, ResidentUi> by lazy { residents.associateBy { it.id } }
     val buildingsById: Map<Long, BuildingUi> by lazy { buildings.associateBy { it.id } }
@@ -278,7 +284,13 @@ object SnapshotBuilder {
             map = state.map,
             districtNav = districtNav,
             emergenceRecords = state.plausibilityData.emergenceRecords
-                .sortedByDescending { it.surpriseScore }.take(10)
+                .sortedByDescending { it.surpriseScore }.take(10),
+            plausibilityScore = state.lastNarrativeReport?.overallScore,
+            plausibilityIssues = state.lastNarrativeReport?.issues
+                ?.sortedByDescending { it.severity }
+                ?.take(3)
+                ?.map { it.description }
+                .orEmpty()
         )
     }
 

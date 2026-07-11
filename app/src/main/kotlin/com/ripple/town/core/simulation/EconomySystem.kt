@@ -3,6 +3,7 @@ package com.ripple.town.core.simulation
 import com.ripple.town.core.model.Building
 import com.ripple.town.core.model.BuildingType
 import com.ripple.town.core.model.Business
+import com.ripple.town.core.model.DistrictCharacter
 import com.ripple.town.core.model.BusinessHealthState
 import com.ripple.town.core.model.BusinessType
 import com.ripple.town.core.model.DelayedEffect
@@ -1324,6 +1325,10 @@ object EconomySystem {
      *  "acceptable local competition" per the brief — beyond this, the gate treats the sector as
      *  saturated for this specific location even if the raw demand number alone looks marginal. */
     const val FORMATION_MAX_LOCAL_COMPETITORS = 3
+    /** GENTRIFYING/PROSPEROUS district: projected demand boosted by 10% (audit #39). */
+    const val DISTRICT_FORMATION_BOOST = 1.10
+    /** DERELICT district: projected demand reduced by 30% — near-empty streets undercut viability (audit #39). */
+    const val DISTRICT_FORMATION_PENALTY = 0.70
 
     data class FormationViability(
         val viable: Boolean,
@@ -1379,8 +1384,19 @@ object EconomySystem {
         // Neutral standing (a brand-new business starts at parity — see GoalSystem.openBusiness's
         // demand=reputation=45.0 convention) — no self business exists yet to exclude.
         val neutralStanding = standingMultiplierFor(reputation = 45.0, priceLevel = 1.0)
-        val projectedDemand = catchmentDemandFor(ctx, building, type, neutralStanding, excludeBusinessId = null)
+        val rawDemand = catchmentDemandFor(ctx, building, type, neutralStanding, excludeBusinessId = null)
             ?: CONTRACT_SECTOR_BASELINE_DEMAND
+
+        // Audit #39: district character adjusts projected demand before viability check.
+        // GENTRIFYING/PROSPEROUS → +10% (growing consumer base), DERELICT → -30% (near-empty streets).
+        val districtChar = building.districtId?.let { ctx.state.districts[it]?.character }
+        val districtFormationMultiplier = when (districtChar) {
+            DistrictCharacter.GENTRIFYING,
+            DistrictCharacter.PROSPEROUS  -> DISTRICT_FORMATION_BOOST
+            DistrictCharacter.DERELICT    -> DISTRICT_FORMATION_PENALTY
+            else -> 1.0
+        }
+        val projectedDemand = rawDemand * districtFormationMultiplier
 
         val breakEven = breakEvenCustomersProjected(ctx, building, type)
         // Average achievable daily customers at the projected demand level, using the same

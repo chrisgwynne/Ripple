@@ -1,5 +1,6 @@
 ﻿package com.ripple.town.core.simulation
 
+import com.ripple.town.core.model.DistrictCharacter
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.EventVisibility
 import com.ripple.town.core.model.LifeStage
@@ -200,7 +201,8 @@ object CrimeSystem {
             val dishonesty = (1.0 - r.personality.honesty) * 0.3
             val opportunity = ((LOW_FOOTFALL_DEMAND - target.demand) / LOW_FOOTFALL_DEMAND).coerceIn(0.0, 1.0) * 0.2
             val risk = (desperation + dishonesty + opportunity).coerceIn(0.0, SHOPLIFTING_MAX_CHANCE) *
-                ctx.state.policyModifiers.crimeMultiplier
+                ctx.state.policyModifiers.crimeMultiplier *
+                districtCrimeMultiplier(ctx, target.buildingId)
             if (!ctx.rng.nextBoolean(risk)) continue
 
             markCooldown(ctx, r.id)
@@ -271,7 +273,8 @@ object CrimeSystem {
             val dishonesty = (0.45 - burglar.personality.honesty).coerceAtLeast(0.0) * 0.5
             val lowStakes = ((50.0 - burglar.reputation).coerceAtLeast(0.0) / 50.0) * 0.15
             val risk = (desperation + dishonesty + lowStakes).coerceIn(0.0, BURGLARY_MAX_CHANCE) *
-                ctx.state.policyModifiers.crimeMultiplier
+                ctx.state.policyModifiers.crimeMultiplier *
+                districtCrimeMultiplier(ctx, target.id)
             if (!ctx.rng.nextBoolean(risk)) continue
 
             markCooldown(ctx, burglar.id)
@@ -355,7 +358,8 @@ object CrimeSystem {
                 val rel = state.relationship(mugger.id, victim.id)
                 val grudge = ((rel?.resentment ?: 0.0) / 100.0) * 0.3
                 val risk = (desperation + impulsiveness + grudge).coerceIn(0.0, MUGGING_MAX_CHANCE) *
-                    ctx.state.policyModifiers.crimeMultiplier
+                    ctx.state.policyModifiers.crimeMultiplier *
+                    districtCrimeMultiplier(ctx, buildingId)
                 if (!ctx.rng.nextBoolean(risk)) continue
 
                 markCooldown(ctx, mugger.id)
@@ -479,7 +483,8 @@ object CrimeSystem {
             val pressure = (biz.daysInTrouble.toDouble() / EconomySystem.CLOSURE_DAYS).coerceIn(0.0, 1.0) * 0.3
             val dishonesty = (0.4 - owner.personality.honesty).coerceAtLeast(0.0) * 0.4
             val risk = (pressure + dishonesty).coerceIn(0.0, FRAUD_MAX_CHANCE) *
-                ctx.state.policyModifiers.crimeMultiplier
+                ctx.state.policyModifiers.crimeMultiplier *
+                districtCrimeMultiplier(ctx, biz.buildingId)
             if (!ctx.rng.nextBoolean(risk)) continue
 
             markCooldown(ctx, owner.id)
@@ -540,7 +545,8 @@ object CrimeSystem {
             val resentmentTerm = (rel.resentment / 100.0) * 0.15
             val volatility = (aggressor.personality.impulsiveness - aggressor.personality.courage).coerceAtLeast(0.0) * 0.1
             val risk = (resentmentTerm + volatility).coerceIn(0.0, ARSON_MAX_CHANCE) *
-                ctx.state.policyModifiers.crimeMultiplier
+                ctx.state.policyModifiers.crimeMultiplier *
+                districtCrimeMultiplier(ctx, targetBiz.buildingId)
             if (!ctx.rng.nextBoolean(risk)) continue
 
             markCooldown(ctx, aggressor.id)
@@ -635,4 +641,29 @@ object CrimeSystem {
     const val VEHICLE_THEFT_MAX_CHANCE = 0.08
     const val FRAUD_MAX_CHANCE = 0.06
     const val ARSON_MAX_CHANCE = 0.04
+
+    // ---- District character crime multipliers (audit #39) ----
+    /** +20% crime probability in DECLINING or DERELICT districts. */
+    const val DISTRICT_CRIME_BOOST = 1.20
+    /** -10% crime probability in GENTRIFYING or PROSPEROUS districts. */
+    const val DISTRICT_CRIME_REDUCTION = 0.90
+
+    /**
+     * Returns a multiplier (applied on top of [policyModifiers.crimeMultiplier]) that reflects
+     * the character of the district containing [buildingId]. DECLINING/DERELICT areas see a
+     * +20% boost to crime probability; GENTRIFYING/PROSPEROUS areas see a -10% reduction.
+     * Returns 1.0 when the building has no district or the district is neutral.
+     */
+    fun districtCrimeMultiplier(ctx: TickContext, buildingId: Long?): Double {
+        if (buildingId == null) return 1.0
+        val districtId = ctx.state.building(buildingId)?.districtId ?: return 1.0
+        val character = ctx.state.districts[districtId]?.character ?: return 1.0
+        return when (character) {
+            DistrictCharacter.DECLINING,
+            DistrictCharacter.DERELICT  -> DISTRICT_CRIME_BOOST
+            DistrictCharacter.GENTRIFYING,
+            DistrictCharacter.PROSPEROUS -> DISTRICT_CRIME_REDUCTION
+            else -> 1.0
+        }
+    }
 }
