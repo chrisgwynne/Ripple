@@ -3,6 +3,7 @@ package com.ripple.town.core.simulation
 import com.ripple.town.core.model.Activity
 import com.ripple.town.core.model.BuildingType
 import com.ripple.town.core.model.DetailLevel
+import com.ripple.town.core.model.DistrictCharacter
 import com.ripple.town.core.model.MemoryType
 import com.ripple.town.core.model.Resident
 import com.ripple.town.core.model.SimTime
@@ -131,6 +132,30 @@ object NeedsSystem {
             val target = financialTarget(r.wealth, r.debt)
             n.financialSecurity += (target - n.financialSecurity) * 0.02
 
+            // District social character — applied once per day on the DETAILED path.
+            // Prosperous/gentrifying areas ease daily stress; declining/high-crime areas
+            // raise it. This is a small bounded daily nudge, not a per-tick drift, to match
+            // the "small additive modifier" convention (see traumaRecoveryDamping, above).
+            if (ctx.now % SimTime.MINUTES_PER_DAY == 0L) {
+                val homeDistrict = r.homeBuildingId
+                    ?.let { ctx.state.building(it) }
+                    ?.districtId
+                    ?.let { ctx.state.districts[it] }
+                if (homeDistrict != null) {
+                    when (homeDistrict.character) {
+                        DistrictCharacter.PROSPEROUS,
+                        DistrictCharacter.GENTRIFYING ->
+                            n.stress -= PROSPEROUS_STRESS_RELIEF
+
+                        DistrictCharacter.DECLINING,
+                        DistrictCharacter.HIGH_CRIME ->
+                            n.stress += DECLINING_STRESS_PENALTY
+
+                        else -> Unit
+                    }
+                }
+            }
+
             n.clampAll()
         }
     }
@@ -248,4 +273,9 @@ object NeedsSystem {
     }
 
     const val NOISE_RADIUS = 6
+
+    /** Daily stress reduction for residents in PROSPEROUS or GENTRIFYING districts. */
+    const val PROSPEROUS_STRESS_RELIEF = 0.1
+    /** Daily stress increase for residents in DECLINING or HIGH_CRIME districts. */
+    const val DECLINING_STRESS_PENALTY = 0.15
 }

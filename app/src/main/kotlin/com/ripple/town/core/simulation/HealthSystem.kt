@@ -2,6 +2,7 @@ package com.ripple.town.core.simulation
 
 import com.ripple.town.core.model.Activity
 import com.ripple.town.core.model.DetailLevel
+import com.ripple.town.core.model.DistrictCharacter
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.EventVisibility
 import com.ripple.town.core.model.HealthCondition
@@ -131,6 +132,18 @@ object HealthSystem {
         val heavyWork = employment != null && ctx.state.businesses[employment.businessId]?.type == com.ripple.town.core.model.BusinessType.FACTORY
         if (heavyWork) risk += 0.002
 
+        // HIGH_CRIME district raises illness-onset probability by a small multiplicative
+        // factor — chronic stress, poor sanitation, and reduced healthcare access all
+        // contribute in real communities. Gate: only applies when home district is resolved.
+        val homeDistrictCharacter = r.homeBuildingId
+            ?.let { ctx.state.building(it) }
+            ?.districtId
+            ?.let { ctx.state.districts[it] }
+            ?.character
+        if (homeDistrictCharacter == DistrictCharacter.HIGH_CRIME) {
+            risk *= HIGH_CRIME_ONSET_MULTIPLIER
+        }
+
         if (!ctx.rng.nextBoolean(risk)) return
 
         val type = when {
@@ -187,6 +200,9 @@ object HealthSystem {
             LifecycleSystem.die(ctx, r, cause, causeIds = listOfNotNull(diagnosisEvent?.id))
         }
     }
+
+    /** Multiplicative increase to illness-onset probability for residents in HIGH_CRIME districts. */
+    const val HIGH_CRIME_ONSET_MULTIPLIER = 1.10
 
     /** The most recent `ILLNESS_DIAGNOSED` event for this resident matching [condition]'s type,
      *  from this tick or the bounded recent-events window — mirrors
