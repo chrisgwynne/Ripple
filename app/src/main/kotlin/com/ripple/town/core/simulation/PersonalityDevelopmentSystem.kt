@@ -156,10 +156,10 @@ object PersonalityDevelopmentSystem {
         val scale = if (stage == LifeStage.CHILD || stage == LifeStage.TEEN) CHILD_TEEN_MULTIPLIER else ADULT_ELDER_MULTIPLIER
         val reasonKey = "leadership"
         if (onCooldown(ctx, r, reasonKey)) return
-        applyDrift(ctx, r, TRAIT_COURAGE, DELTA_MIN * scale, reasonKey,
-            "Carrying real responsibility for others has been steadying.", emptyList())
-        applyDrift(ctx, r, TRAIT_AMBITION, DELTA_MIN * scale, reasonKey,
-            "Carrying real responsibility for others has been steadying.", emptyList())
+        val leadershipReason = "Carrying real responsibility for others has been steadying."
+        applyDrift(ctx, r, TRAIT_COURAGE, DELTA_MIN * scale, reasonKey, leadershipReason, emptyList())
+        applyDrift(ctx, r, TRAIT_AMBITION, DELTA_MIN * scale, reasonKey, leadershipReason, emptyList())
+        applyDrift(ctx, r, TRAIT_CURIOSITY, DELTA_MIN * scale, reasonKey, leadershipReason, emptyList())
         markCooldown(ctx, r, reasonKey)
     }
 
@@ -180,10 +180,10 @@ object PersonalityDevelopmentSystem {
     fun evaluateParenthood(ctx: TickContext, parent: Resident, birthEventId: Long) {
         val stage = parent.lifeStageAt(ctx.now)
         val scale = if (stage == LifeStage.CHILD || stage == LifeStage.TEEN) CHILD_TEEN_MULTIPLIER else ADULT_ELDER_MULTIPLIER
-        applyDrift(ctx, parent, TRAIT_PATIENCE, DELTA_MIN * scale, "parenthood:$birthEventId",
-            "Becoming a parent again has taught patience.", listOf(birthEventId))
-        applyDrift(ctx, parent, TRAIT_EMPATHY, DELTA_MIN * scale, "parenthood:$birthEventId",
-            "Becoming a parent again has taught patience.", listOf(birthEventId))
+        val reason = "Becoming a parent again has taught patience."
+        applyDrift(ctx, parent, TRAIT_PATIENCE, DELTA_MIN * scale, "parenthood:$birthEventId", reason, listOf(birthEventId))
+        applyDrift(ctx, parent, TRAIT_EMPATHY, DELTA_MIN * scale, "parenthood:$birthEventId", reason, listOf(birthEventId))
+        applyDrift(ctx, parent, TRAIT_KINDNESS, DELTA_MIN * scale, "parenthood:$birthEventId", reason, listOf(birthEventId))
     }
 
     /** Crime/punishment: called from `CrimeSystem.investigate` once accuracy is known. True

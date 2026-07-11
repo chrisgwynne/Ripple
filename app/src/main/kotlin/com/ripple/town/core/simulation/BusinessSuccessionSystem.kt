@@ -66,8 +66,13 @@ object BusinessSuccessionSystem {
         biz.ownerId = heir.id
         // The heir was working there as an employee; they now run the place, so that
         // employment record ends the same way any change of role would.
-        state.employmentOf(heir)?.let { it.endedAt = ctx.now }
-        heir.employmentId = null
+        // Guard: only null out employmentId when a real record was found and terminated —
+        // nulling it unconditionally would orphan the field if the record is already missing.
+        val heirEmp = state.employmentOf(heir)
+        if (heirEmp != null) {
+            heirEmp.endedAt = ctx.now
+            heir.employmentId = null
+        }
 
         // The retiring owner steps back — no longer chasing income from this business,
         // but not unemployed in the "needs a job" sense either; a settled retirement.

@@ -27,6 +27,8 @@ object WorldConsistencyValidator {
         val violations = mutableListOf<Violation>()
         val now = state.time
         val nurseryCovers = CaregiverSystem.hasNursery(state)
+        // Build lookup sets once so per-resident checks stay O(1).
+        val buildingIds = state.buildings.keys
 
         for (r in state.livingResidents()) {
             if (!r.inTown || r.detailLevel != DetailLevel.DETAILED) continue
@@ -70,6 +72,47 @@ object WorldConsistencyValidator {
                             "with no nursery to cover."
                     )
                 }
+            }
+
+            // --- Referential integrity ---
+
+            // Home building must exist in the map.
+            val hid = r.homeBuildingId
+            if (hid != null && hid !in buildingIds) {
+                violations += Violation(
+                    r.id,
+                    "${r.fullName} has homeBuildingId=$hid which no longer exists."
+                )
+            }
+
+            // Partner must be alive.
+            r.partnerId?.let { pid ->
+                val partner = state.resident(pid)
+                if (partner == null || !partner.alive) {
+                    violations += Violation(
+                        r.id,
+                        "${r.fullName} still has partnerId=$pid but that resident is dead or missing."
+                    )
+                }
+            }
+
+            // Caregiver must be alive.
+            r.caregiverId?.let { cid ->
+                val caregiver = state.resident(cid)
+                if (caregiver == null || !caregiver.alive) {
+                    violations += Violation(
+                        r.id,
+                        "${r.fullName} still has caregiverId=$cid but that resident is dead or missing."
+                    )
+                }
+            }
+
+            // employmentId must have a matching record.
+            if (r.employmentId != null && state.employmentOf(r) == null) {
+                violations += Violation(
+                    r.id,
+                    "${r.fullName} has employmentId=${r.employmentId} but no matching employment record."
+                )
             }
         }
 
