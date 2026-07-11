@@ -398,7 +398,11 @@ data class WorldState(
     // --- Human society evolution (2026-07-11) ---
     val legacyRecords: MutableList<LegacyRecord> = mutableListOf(),
     var townCulture: TownCulture = TownCulture(),
-    var nextLegacyId: Long = 1L
+    var nextLegacyId: Long = 1L,
+    val institutionRecords: MutableMap<Long, InstitutionRecord> = mutableMapOf(),
+    val communityGroups: MutableMap<Long, CommunityGroup> = mutableMapOf(),
+    var nextInstitutionId: Long = 1L,
+    var nextGroupId: Long = 1L
 ) {
     fun district(id: Long): District? = districts[id]
 

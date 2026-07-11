@@ -307,7 +307,8 @@ data class Resident(
     // --- Human society evolution (2026-07-11) ---
     val aspirations: MutableList<Aspiration> = mutableListOf(),
     val identityFacets: MutableList<IdentityFacet> = mutableListOf(),
-    var lifeSatisfaction: LifeSatisfaction = LifeSatisfaction()
+    var lifeSatisfaction: LifeSatisfaction = LifeSatisfaction(),
+    val hobbies: MutableList<HobbyEngagement> = mutableListOf()
 ) {
     val fullName: String get() = "$firstName $surname"
 

@@ -160,8 +160,15 @@ class SimulationCoordinator(
             IdentitySystem.updateDaily(ctx)
             LifeSatisfactionSystem.updateDaily(ctx)
             LegacySystem.updateDaily(ctx)
+            HobbySystem.updateDaily(ctx)
             if (dayIndex % TownCultureSystem.UPDATE_INTERVAL_DAYS == 0L) {
                 TownCultureSystem.updateMonthly(ctx)
+            }
+            if (dayIndex % InstitutionSystem.UPDATE_INTERVAL_DAYS == 0L) {
+                InstitutionSystem.updateMonthly(ctx)
+            }
+            if (dayIndex % CommunitySystem.UPDATE_INTERVAL_DAYS == 0L) {
+                CommunitySystem.updateFortnightly(ctx)
             }
         }
         // 12b. Per-tick life-event dispatch: society systems react to every new event this tick.
