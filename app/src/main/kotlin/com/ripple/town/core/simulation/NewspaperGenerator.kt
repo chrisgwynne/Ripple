@@ -2,8 +2,10 @@ package com.ripple.town.core.simulation
 
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.EventVisibility
+import com.ripple.town.core.model.GovernmentRecord
 import com.ripple.town.core.model.NewspaperIssue
 import com.ripple.town.core.model.NewspaperStory
+import com.ripple.town.core.model.PolicyStatus
 import com.ripple.town.core.model.SimTime
 import com.ripple.town.core.model.StoryCategory
 import com.ripple.town.core.model.Weather
@@ -140,6 +142,14 @@ object NewspaperGenerator {
         if (report != null && rng.nextBoolean(0.08) && report.mostSurprisingStory != null) {
             add(StoryCategory.HUMAN_INTEREST, "Only in ${state.townName}", report.mostSurprisingStory!!)
         }
+        // Politics: approval rating, recently passed policies, political legacy
+        if (state.currentGovernmentId != null && rng.nextBoolean(0.35)) {
+            val govRec = state.governmentRecords.find { it.id == state.currentGovernmentId }
+            if (govRec != null) {
+                val (polHeadline, polBody) = politicalStory(state, govRec, state.publicOpinionData.approvalRating, rng)
+                add(StoryCategory.TOWN_NEWS, polHeadline, polBody)
+            }
+        }
 
         state.lastNewspaperAt = state.time
         return issue
@@ -210,7 +220,8 @@ object NewspaperGenerator {
         EventType.ILLNESS_DIAGNOSED, EventType.ILLNESS_RECOVERED, EventType.WORKPLACE_ACCIDENT -> StoryCategory.HEALTH
         EventType.WEATHER_DAMAGE -> StoryCategory.WEATHER
         EventType.ELECTION_WON, EventType.ELECTION_CALLED,
-        EventType.PETITION_STARTED, EventType.PETITION_RESOLVED, EventType.PROTEST_DISRUPTION -> StoryCategory.TOWN_NEWS
+        EventType.PETITION_STARTED, EventType.PETITION_RESOLVED, EventType.PROTEST_DISRUPTION,
+        EventType.POLITICAL_SCANDAL -> StoryCategory.TOWN_NEWS
         EventType.MEETING, EventType.FRIENDSHIP_FORMED, EventType.COMMUNITY_EVENT,
         EventType.RUMOUR_SPREAD, EventType.BUILDING_REPAIRED, EventType.SKILL_MILESTONE,
         EventType.APOLOGY, EventType.INJURY,
@@ -332,6 +343,14 @@ object NewspaperGenerator {
             EventType.PROTEST_DISRUPTION -> rng.pick(listOf(
                 "Voices raised outside the town hall", "Feelings run high at public gathering"
             ))
+            EventType.POLITICAL_SCANDAL -> {
+                val r = e.sourceResidentId?.let { state.resident(it) }
+                rng.pick(listOf(
+                    "Questions for ${r?.surname ?: "the councillor"}",
+                    "A cloud over the town hall",
+                    "Conduct questioned: calls for answers grow"
+                ))
+            }
             else -> e.type.label
         }
     }
@@ -401,5 +420,73 @@ object NewspaperGenerator {
         }
         return if (everyday.isNotEmpty()) rng.pick(everyday)
         else rng.pick(NOTICES).replace("{town}", state.townName)
+    }
+
+    private fun politicalStory(
+        state: WorldState,
+        govRec: GovernmentRecord,
+        approval: Double,
+        rng: SimRandom
+    ): Pair<String, String> {
+        // Recent major policy
+        val recentPolicy = state.activePolicies.values
+            .filter { it.status == PolicyStatus.PASSED.name }
+            .maxByOrNull { it.passedAt ?: 0L }
+        // Corruption on the current government
+        val hasCorruption = govRec.corruption
+        // Build headline + body from the most notable thing this week
+        return when {
+            hasCorruption -> {
+                val headline = rng.pick(listOf(
+                    "A cloud hangs over the town hall",
+                    "Questions the administration has yet to answer",
+                    "Trust dented at the top"
+                ))
+                val body = "The current administration continues to face questions about conduct. " +
+                    "Public confidence stands at ${approval.toInt()}%. " +
+                    "The Argus will continue to follow developments."
+                headline to body
+            }
+            approval >= 65.0 -> {
+                val headline = rng.pick(listOf(
+                    "${govRec.leaderName}'s stock remains high",
+                    "Public confidence in the administration",
+                    "A town broadly satisfied with its leadership"
+                ))
+                val body = "Approval of the ${govRec.partyName} administration sits at ${approval.toInt()}% " +
+                    (if (recentPolicy != null) "— with ${recentPolicy.title.lowercase()} among the measures drawing approval. " else ". ") +
+                    "Not everyone agrees, of course."
+                headline to body
+            }
+            approval <= 35.0 -> {
+                val headline = rng.pick(listOf(
+                    "Discontent with the current administration",
+                    "Support for the council falls again",
+                    "A difficult month for ${govRec.leaderName}"
+                ))
+                val body = "Approval of the current administration has fallen to ${approval.toInt()}%. " +
+                    "Residents cite a range of concerns. Whether the council can recover ground remains to be seen."
+                headline to body
+            }
+            recentPolicy != null -> {
+                val headline = rng.pick(listOf(
+                    "Council moves on ${recentPolicy.title.lowercase()}",
+                    "New measure: ${recentPolicy.title}",
+                    "Policy update from the town hall"
+                ))
+                val body = "The ${govRec.partyName} administration has passed ${recentPolicy.title.lowercase()}. " +
+                    "Supporters say it was overdue; critics are less sure. Approval stands at ${approval.toInt()}%."
+                headline to body
+            }
+            else -> {
+                val headline = rng.pick(listOf(
+                    "The administration in brief",
+                    "Town hall: no major news this week"
+                ))
+                val body = "The ${govRec.partyName} administration reports a quiet week at the town hall. " +
+                    "Approval is at ${approval.toInt()}%."
+                headline to body
+            }
+        }
     }
 }

@@ -60,7 +60,8 @@ object BudgetSystem {
             if (!r.inTown) continue
             if (r.lifeStageAt(state.time) == LifeStage.CHILD) continue
             val wealthAboveBase = maxOf(0.0, r.wealth - 1_000.0)
-            taxIncome += RESIDENT_DAILY_BASE_TAX + wealthAboveBase * RESIDENT_TAX_RATE
+            taxIncome += (RESIDENT_DAILY_BASE_TAX + wealthAboveBase * RESIDENT_TAX_RATE) *
+                state.policyModifiers.councilTaxMultiplier
         }
         budget.balance += taxIncome
         budget.taxRevenueThisYear += taxIncome
@@ -70,7 +71,8 @@ object BudgetSystem {
         for (biz in state.businesses.values) {
             if (!biz.open) continue
             if (biz.type in CIVIC_BUSINESS_TYPES) continue
-            ratesIncome += biz.balance.coerceAtLeast(0.0) * BUSINESS_RATE
+            ratesIncome += biz.balance.coerceAtLeast(0.0) * BUSINESS_RATE *
+                state.policyModifiers.businessRatesMultiplier
         }
         budget.balance += ratesIncome
         budget.businessRateRevenueThisYear += ratesIncome

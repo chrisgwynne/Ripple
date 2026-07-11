@@ -197,7 +197,8 @@ object CrimeSystem {
                 (r.debt / 1000.0).coerceIn(0.0, 0.2)
             val dishonesty = (1.0 - r.personality.honesty) * 0.3
             val opportunity = ((LOW_FOOTFALL_DEMAND - target.demand) / LOW_FOOTFALL_DEMAND).coerceIn(0.0, 1.0) * 0.2
-            val risk = (desperation + dishonesty + opportunity).coerceIn(0.0, SHOPLIFTING_MAX_CHANCE)
+            val risk = (desperation + dishonesty + opportunity).coerceIn(0.0, SHOPLIFTING_MAX_CHANCE) *
+                ctx.state.policyModifiers.crimeMultiplier
             if (!ctx.rng.nextBoolean(risk)) continue
 
             markCooldown(ctx, r.id)
@@ -269,7 +270,8 @@ object CrimeSystem {
             val desperation = ((25.0 - burglar.needs.financialSecurity).coerceAtLeast(0.0) / 25.0) * 0.35
             val dishonesty = (0.45 - burglar.personality.honesty).coerceAtLeast(0.0) * 0.5
             val lowStakes = ((50.0 - burglar.reputation).coerceAtLeast(0.0) / 50.0) * 0.15
-            val risk = (desperation + dishonesty + lowStakes).coerceIn(0.0, BURGLARY_MAX_CHANCE)
+            val risk = (desperation + dishonesty + lowStakes).coerceIn(0.0, BURGLARY_MAX_CHANCE) *
+                ctx.state.policyModifiers.crimeMultiplier
             if (!ctx.rng.nextBoolean(risk)) continue
 
             markCooldown(ctx, burglar.id)
@@ -352,7 +354,8 @@ object CrimeSystem {
                 val impulsiveness = mugger.personality.impulsiveness * 0.15
                 val rel = state.relationship(mugger.id, victim.id)
                 val grudge = ((rel?.resentment ?: 0.0) / 100.0) * 0.3
-                val risk = (desperation + impulsiveness + grudge).coerceIn(0.0, MUGGING_MAX_CHANCE)
+                val risk = (desperation + impulsiveness + grudge).coerceIn(0.0, MUGGING_MAX_CHANCE) *
+                    ctx.state.policyModifiers.crimeMultiplier
                 if (!ctx.rng.nextBoolean(risk)) continue
 
                 markCooldown(ctx, mugger.id)
@@ -421,7 +424,8 @@ object CrimeSystem {
 
             val desperation = ((28.0 - thief.needs.financialSecurity).coerceAtLeast(0.0) / 28.0) * 0.3
             val dishonesty = (0.5 - thief.personality.honesty).coerceAtLeast(0.0) * 0.4
-            val risk = (desperation + dishonesty).coerceIn(0.0, VEHICLE_THEFT_MAX_CHANCE)
+            val risk = (desperation + dishonesty).coerceIn(0.0, VEHICLE_THEFT_MAX_CHANCE) *
+                ctx.state.policyModifiers.crimeMultiplier
             if (!ctx.rng.nextBoolean(risk)) continue
 
             markCooldown(ctx, thief.id)
@@ -472,7 +476,8 @@ object CrimeSystem {
 
             val pressure = (biz.daysInTrouble.toDouble() / EconomySystem.CLOSURE_DAYS).coerceIn(0.0, 1.0) * 0.3
             val dishonesty = (0.4 - owner.personality.honesty).coerceAtLeast(0.0) * 0.4
-            val risk = (pressure + dishonesty).coerceIn(0.0, FRAUD_MAX_CHANCE)
+            val risk = (pressure + dishonesty).coerceIn(0.0, FRAUD_MAX_CHANCE) *
+                ctx.state.policyModifiers.crimeMultiplier
             if (!ctx.rng.nextBoolean(risk)) continue
 
             markCooldown(ctx, owner.id)
@@ -532,7 +537,8 @@ object CrimeSystem {
 
             val resentmentTerm = (rel.resentment / 100.0) * 0.15
             val volatility = (aggressor.personality.impulsiveness - aggressor.personality.courage).coerceAtLeast(0.0) * 0.1
-            val risk = (resentmentTerm + volatility).coerceIn(0.0, ARSON_MAX_CHANCE)
+            val risk = (resentmentTerm + volatility).coerceIn(0.0, ARSON_MAX_CHANCE) *
+                ctx.state.policyModifiers.crimeMultiplier
             if (!ctx.rng.nextBoolean(risk)) continue
 
             markCooldown(ctx, aggressor.id)

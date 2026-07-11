@@ -311,7 +311,9 @@ data class Resident(
     var lifeSatisfaction: LifeSatisfaction = LifeSatisfaction(),
     val hobbies: MutableList<HobbyEngagement> = mutableListOf(),
     // --- Caregiver system (2026-07-11): resident responsible for this child when needsCaregiver ---
-    var caregiverId: Long? = null
+    var caregiverId: Long? = null,
+    // --- Government, Politics & Public Policy (2026-07-11) ---
+    var partyId: Long? = null
 ) {
     val fullName: String get() = "$firstName $surname"
 

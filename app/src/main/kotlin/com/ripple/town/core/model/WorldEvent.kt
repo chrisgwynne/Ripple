@@ -150,7 +150,9 @@ enum class EventType(val label: String) {
     /** The municipal budget balance has fallen below zero — deficit spending. */
     BUDGET_SHORTFALL("Budget shortfall"),
     /** An under-5 child has no assigned caregiver and the town has no nursery. */
-    CHILD_WELFARE_CONCERN("Child welfare concern")
+    CHILD_WELFARE_CONCERN("Child welfare concern"),
+    /** A council member or mayor is found to have engaged in corrupt conduct. */
+    POLITICAL_SCANDAL("Political scandal")
 }
 
 enum class EventVisibility {

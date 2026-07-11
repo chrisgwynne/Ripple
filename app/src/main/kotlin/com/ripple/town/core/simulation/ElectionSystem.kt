@@ -120,7 +120,9 @@ object ElectionSystem {
             val trackRecord = (petitionSuccesses(state, candidate.id) * TRACK_RECORD_BONUS_PER_SUCCESS)
                 .coerceAtMost(MAX_TRACK_RECORD_BONUS)
             val familiarity = averageFamiliarity(state, candidate.id) / FAMILIARITY_SUPPORT_DIVISOR
-            val gain = CAMPAIGN_SUPPORT_GAIN_BASE + trackRecord + familiarity + ctx.rng.nextDouble(-1.0, 2.0)
+            val traits = ctx.state.leadershipTraits[candidate.id]
+            val traitBonus = (traits?.charisma ?: 0.5) * 2.0 + (traits?.communication ?: 0.5) * 1.5
+            val gain = CAMPAIGN_SUPPORT_GAIN_BASE + trackRecord + familiarity + traitBonus + ctx.rng.nextDouble(-1.0, 2.0)
             candidacy.support = (candidacy.support + gain).coerceAtLeast(0.0)
             candidacy.actionsTaken++
 

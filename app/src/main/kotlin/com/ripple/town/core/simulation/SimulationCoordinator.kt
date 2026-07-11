@@ -68,6 +68,7 @@ class SimulationCoordinator(
         state.time += SimTime.MINUTES_PER_TICK
         val newDay = state.time % SimTime.MINUTES_PER_DAY < SimTime.MINUTES_PER_TICK
         val dayIndex = SimTime.dayIndex(state.time)
+        val prevMayorId = state.mayorId
 
         // 2. Needs, weather, travel arrivals.
         NeedsSystem.update(ctx)
@@ -190,11 +191,33 @@ class SimulationCoordinator(
             if (dayIndex % NarrativePlausibilityEngine.UPDATE_INTERVAL_DAYS == 0L) {
                 NarrativePlausibilityEngine.updateMonthly(ctx)
             }
+            // Government, Politics & Public Policy (2026-07-11): policy effects fire daily;
+            // public opinion, party membership, and corruption checked on their own intervals;
+            // annual legacy finalisation runs last.
+            if (state.politicalParties.isEmpty()) PoliticsSystem.seedParties(ctx)
+            PolicyEngine.updateDaily(ctx)
+            if (dayIndex % PublicOpinionSystem.UPDATE_INTERVAL_DAYS == 0L) {
+                PublicOpinionSystem.updateWeekly(ctx)
+            }
+            if (dayIndex % PoliticsSystem.UPDATE_INTERVAL_DAYS == 0L) {
+                PoliticsSystem.updateMonthly(ctx)
+            }
+            if (dayIndex % CorruptionSystem.UPDATE_INTERVAL_DAYS == 0L) {
+                CorruptionSystem.updateMonthly(ctx)
+            }
+            if (dayIndex % PoliticalHistorySystem.UPDATE_INTERVAL_DAYS == 0L) {
+                PoliticalHistorySystem.updateAnnually(ctx)
+            }
             // Consistency check: run after all daily systems to catch impossible states created
             // this tick (e.g. a caregiver dying with no replacement assigned yet).
             // Violations are collected; in debug builds replace with WorldConsistencyValidator.assertValid(ctx.state).
             val consistencyViolations = WorldConsistencyValidator.validate(ctx.state)
             if (consistencyViolations.isNotEmpty()) lastConsistencyViolations = consistencyViolations
+        }
+        // Mayor change detection: if LifecycleSystem elected a new mayor this tick, open a new
+        // government record and enact the winning party's manifesto policies.
+        if (state.mayorId != null && state.mayorId != prevMayorId) {
+            PoliticsSystem.onElectionResult(ctx, state.mayorId!!)
         }
         // 12b. Per-tick life-event dispatch: society systems react to every new event this tick.
         for (event in ctx.newEvents) {

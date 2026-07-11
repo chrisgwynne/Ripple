@@ -410,7 +410,20 @@ data class WorldState(
     // --- Narrative Plausibility Engine (2026-07-11) ---
     var narrativeTuning: NarrativeTuning = NarrativeTuning(),
     val plausibilityData: NarrativePlausibilityData = NarrativePlausibilityData(),
-    var lastNarrativeReport: NarrativePlausibilityReport? = null
+    var lastNarrativeReport: NarrativePlausibilityReport? = null,
+    // --- Government, Politics & Public Policy (2026-07-11) ---
+    val politicalParties: MutableMap<Long, PoliticalParty> = mutableMapOf(),
+    val governmentRecords: MutableList<GovernmentRecord> = mutableListOf(),
+    val activePolicies: MutableMap<Long, PolicyRecord> = mutableMapOf(),
+    var policyModifiers: PolicyModifiers = PolicyModifiers(),
+    val publicOpinionData: PublicOpinionData = PublicOpinionData(),
+    val leadershipTraits: MutableMap<Long, LeadershipTraits> = mutableMapOf(),
+    val corruptionIncidents: MutableList<CorruptionIncident> = mutableListOf(),
+    var currentGovernmentId: Long? = null,
+    var nextPartyId: Long = 1L,
+    var nextPolicyId: Long = 1L,
+    var nextGovernmentId: Long = 1L,
+    var nextCorruptionId: Long = 1L
 ) {
     fun district(id: Long): District? = districts[id]
 
