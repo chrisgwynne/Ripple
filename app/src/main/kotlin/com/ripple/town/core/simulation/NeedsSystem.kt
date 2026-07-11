@@ -7,6 +7,7 @@ import com.ripple.town.core.model.MemoryType
 import com.ripple.town.core.model.Resident
 import com.ripple.town.core.model.SimTime
 import com.ripple.town.core.model.SkillType
+import com.ripple.town.core.model.TimeOfDay
 import com.ripple.town.core.model.Weather
 
 /**
@@ -51,7 +52,9 @@ object NeedsSystem {
             // decay mechanic. Without this, a resident who just lost their business/livelihood
             // can be soothed back to "calm" by a single nap or relaxing session, which reads as
             // the simulation not registering the event at all. See traumaRecoveryDamping().
-            val recoveryDamping = traumaRecoveryDamping(ctx.now, r)
+            // Combine per-resident trauma damping with the narrative engine's global damper.
+            // recoveryDamper > 1.0 = engine detected suspiciously instant recovery → slow it down.
+            val recoveryDamping = traumaRecoveryDamping(ctx.now, r) / ctx.state.narrativeTuning.recoveryDamper
 
             // Activity effects
             when (r.activity) {
@@ -76,6 +79,27 @@ object NeedsSystem {
                 Activity.CELEBRATING -> { n.social += 1.6; n.stress -= 0.5 * recoveryDamping; n.purpose += 0.3 }
                 Activity.MOURNING -> { n.stress += 0.4; n.comfort -= 0.2 }
                 else -> {}
+            }
+
+            // sleepPressureVariance: disciplined residents feel heightened energy drain at night,
+            // desynchronising sleep onset when the engine detects everyone going to bed in unison.
+            val spv = ctx.state.narrativeTuning.sleepPressureVariance
+            if (spv > 0.0 && SimTime.timeOfDay(ctx.now) == TimeOfDay.NIGHT) {
+                n.energy -= spv * r.personality.discipline
+            }
+
+            // routineVariance: small per-tick noise on routine activity effects when the engine
+            // detects overly synchronised resident schedules.
+            val rv = ctx.state.narrativeTuning.routineVariance
+            if (rv > 0.0) {
+                when (r.activity) {
+                    Activity.SLEEPING -> { n.energy += ctx.rng.nextDouble(-rv, rv); n.stress += ctx.rng.nextDouble(-rv, rv) }
+                    Activity.WORKING -> n.purpose += ctx.rng.nextDouble(-rv, rv)
+                    Activity.SOCIALISING, Activity.COMMUNITY -> n.social += ctx.rng.nextDouble(-rv, rv)
+                    Activity.RELAXING -> n.comfort += ctx.rng.nextDouble(-rv, rv)
+                    Activity.EXERCISING -> n.energy += ctx.rng.nextDouble(-rv, rv)
+                    else -> {}
+                }
             }
 
             // Hunger and exhaustion feed back into health and stress
