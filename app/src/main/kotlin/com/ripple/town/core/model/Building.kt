@@ -216,7 +216,19 @@ enum class Weather(val label: String) {
     CLEAR("Clear"), CLOUDY("Cloudy"), RAIN("Rain"), STORM("Storm"), FOG("Fog"), SNOW("Snow")
 }
 
-enum class TileType { GRASS, ROAD, PATH, WATER, TREE, FLOWERS, PLAZA }
+enum class TileType {
+    GRASS, ROAD, PATH, WATER, TREE, FLOWERS, PLAZA,
+    /** Agricultural land — light, open feel on rural fringe and farm plots. */
+    FARMLAND,
+    /** Shallow inland water (lake, pond) — distinct from deep river WATER. */
+    SHALLOW_WATER,
+    /** Sand/shingle on lakeside or riverside banks. */
+    SAND,
+    /** Dense woodland — impassable, decorative tree cover on rural edges. */
+    WOODLAND,
+    /** Industrial hard-standing (tarmac yard, loading area). */
+    HARDSTANDING
+}
 
 @Serializable
 data class TownMap(
@@ -230,6 +242,8 @@ data class TownMap(
 
     fun isWalkable(x: Int, y: Int): Boolean {
         val t = tileAt(x, y)
-        return t == TileType.ROAD || t == TileType.PATH || t == TileType.PLAZA || t == TileType.GRASS
+        return t == TileType.ROAD || t == TileType.PATH || t == TileType.PLAZA ||
+               t == TileType.GRASS || t == TileType.FARMLAND || t == TileType.SAND ||
+               t == TileType.HARDSTANDING
     }
 }

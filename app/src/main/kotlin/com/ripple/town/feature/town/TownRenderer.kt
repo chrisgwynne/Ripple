@@ -132,7 +132,7 @@ fun TownRenderer(
                 detectTransformGestures { centroid, pan, zoom, _ ->
                     // Any manual gesture takes over from automatic tracking.
                     if (pan != Offset.Zero || zoom != 1f) camera.isFollowing = false
-                    val newScale = (camera.scale * zoom).coerceIn(1.4f, 9f)
+                    val newScale = (camera.scale * zoom).coerceIn(0.5f, 9f)
                     // Zoom about the gesture centroid.
                     val scaleChange = newScale / camera.scale
                     camera.offsetX = centroid.x - (centroid.x - camera.offsetX) * scaleChange + pan.x
@@ -466,6 +466,34 @@ private fun renderGround(map: TownMap, seed: Long): ImageBitmap {
                     rect(gx + 2, gy + 2, 1f, 1f, RippleColors.Flowers)
                     rect(gx + 5, gy + 4, 1f, 1f, Color(0xFFE9D96F))
                     rect(gx + 3, gy + 6, 1f, 1f, RippleColors.Flowers)
+                }
+                TileType.FARMLAND -> {
+                    // Light tan field with faint row lines
+                    val fieldBase = if (checker) Color(0xFFD4C48A) else Color(0xFFCBBB7E)
+                    rect(gx, gy, TILE_PX.toFloat(), TILE_PX.toFloat(), fieldBase)
+                    if (y % 2 == 0) rect(gx, gy, TILE_PX.toFloat(), 1f, Color(0xFFB8A45C))
+                }
+                TileType.SHALLOW_WATER -> {
+                    // Lighter blue/teal for inland lake
+                    rect(gx, gy, TILE_PX.toFloat(), TILE_PX.toFloat(), if (checker) Color(0xFF7EC8D8) else Color(0xFF6BBCCC))
+                    // Surface glint
+                    if ((x * 5 + y * 11 + seed).mod(7L) == 0L) rect(gx + 2, gy + 3, 3f, 1f, Color(0xAAFFFFFF))
+                }
+                TileType.SAND -> {
+                    rect(gx, gy, TILE_PX.toFloat(), TILE_PX.toFloat(), if (checker) Color(0xFFE8D5A3) else Color(0xFFDECA94))
+                    if ((x * 3 + y * 7 + seed).mod(9L) == 0L) rect(gx + 4, gy + 5, 1f, 1f, Color(0xFFC8B07A))
+                }
+                TileType.WOODLAND -> {
+                    // Dense dark green canopy
+                    rect(gx, gy, TILE_PX.toFloat(), TILE_PX.toFloat(), if (checker) Color(0xFF2D6B2D) else Color(0xFF275C27))
+                    rect(gx + 1, gy + 1, 6f, 6f, Color(0xFF347A34))
+                    rect(gx + 2, gy, 4f, 1f, Color(0xFF347A34))
+                    if ((x * 9 + y * 5 + seed).mod(5L) == 0L) rect(gx + 3, gy + 3, 2f, 2f, Color(0xFF1E4E1E))
+                }
+                TileType.HARDSTANDING -> {
+                    // Tarmac grey for industrial yards
+                    rect(gx, gy, TILE_PX.toFloat(), TILE_PX.toFloat(), if (checker) Color(0xFF6A6A6A) else Color(0xFF5E5E5E))
+                    if ((x + y) % 6 == 0) rect(gx, gy, TILE_PX.toFloat(), 1f, Color(0xFF555555))
                 }
             }
         }

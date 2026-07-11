@@ -18,7 +18,26 @@ enum class DistrictType(val label: String) {
     /** Institutional zone: fire, police, sports, community buildings. */
     CIVIC_QUARTER("Civic Quarter"),
     /** Industrial north-east: factory, warehouse, workshop, worker housing. */
-    MILL_LANE("Mill Lane")
+    MILL_LANE("Mill Lane"),
+
+    // -------- Expansion districts (added with 320×200 map) --------
+
+    /** Historic area: narrow streets, older terraces, old church, cemetery. */
+    OLD_TOWN("Old Town"),
+    /** Prosperous: larger homes, landscaped streets, low crime, higher values. */
+    WEALTHY_QUARTER("Wealthy Quarter"),
+    /** Lakeside mix: walking paths, cafés, scenic housing, flood risk. */
+    RIVERSIDE("Riverside"),
+    /** Heavy industry, warehouses, workshops, recycling depot, lorry yards. */
+    INDUSTRIAL_ESTATE("Industrial Estate"),
+    /** Offices, technology firms, professional services, landscaped parking. */
+    BUSINESS_PARK("Business Park"),
+    /** Out-of-town retail: supermarket, cinema, fast food, petrol station. */
+    RETAIL_PARK("Retail Park"),
+    /** Pubs, bars, nightclub, restaurants, takeaways, taxi rank. */
+    NIGHTLIFE_QUARTER("Nightlife Quarter"),
+    /** Farms, cottages, woodland trails, scattered houses, future development. */
+    RURAL_FRINGE("Rural Fringe")
 }
 
 /**
