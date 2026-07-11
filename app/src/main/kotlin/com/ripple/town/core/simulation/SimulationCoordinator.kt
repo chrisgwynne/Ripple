@@ -173,6 +173,27 @@ class SimulationCoordinator(
             if (dayIndex % TownCultureSystem.UPDATE_INTERVAL_DAYS == 0L) {
                 TownCultureSystem.updateMonthly(ctx)
             }
+            if (dayIndex % TownStateSystem.UPDATE_INTERVAL_DAYS == 0L) {
+                TownStateSystem.updateWeekly(ctx)
+            }
+            if (dayIndex % DistrictMechanicsSystem.UPDATE_INTERVAL_DAYS == 0L) {
+                DistrictMechanicsSystem.updateWeekly(ctx)
+            }
+            if (dayIndex % TownDnaSystem.UPDATE_INTERVAL_DAYS == 0L) {
+                TownDnaSystem.updateMonthly(ctx)
+            }
+            if (dayIndex % CivilisationHistorySystem.UPDATE_INTERVAL_DAYS == 0L) {
+                CivilisationHistorySystem.updateMonthly(ctx)
+            }
+            if (dayIndex % FamilyLegacySystem.UPDATE_INTERVAL_DAYS == 0L) {
+                FamilyLegacySystem.updateMonthly(ctx)
+            }
+            if (dayIndex % SocialStratificationSystem.UPDATE_INTERVAL_DAYS == 0L) {
+                SocialStratificationSystem.updateAnnually(ctx)
+            }
+            if (dayIndex % UrbanEvolutionSystem.UPDATE_INTERVAL_DAYS == 0L) {
+                UrbanEvolutionSystem.updateMonthly(ctx)
+            }
             if (dayIndex % InstitutionSystem.UPDATE_INTERVAL_DAYS == 0L) {
                 InstitutionSystem.updateMonthly(ctx)
             }

@@ -20,6 +20,7 @@ data class InstitutionRecord(
     val name: String,
     val foundedAt: Long,
     var reputation: Double = 50.0,          // 0..100
+    var staffCount: Int = 0,               // current employed staff (updated monthly)
     var pupilsServed: Int = 0,              // cumulative count (schools)
     var patientsServed: Int = 0,            // cumulative count (clinic)
     var leaderId: Long? = null,             // current head teacher / doctor / captain

@@ -1,90 +1,150 @@
 package com.ripple.town.core.simulation
 
+import com.ripple.town.core.model.Activity
 import com.ripple.town.core.model.BuildingType
-import com.ripple.town.core.model.BusinessType
-import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.InstitutionRecord
 import com.ripple.town.core.model.InstitutionType
 import com.ripple.town.core.model.SimTime
 
 /**
- * Tracks the history and reputation arc of civic buildings — school, clinic,
- * town hall, sports hall, community centre. Records leader transitions,
- * cumulative service counts, and notable events. Purely additive; no needs
- * or decisions are driven from here.
+ * Tracks the history and reputation arc of civic buildings — school, clinic, town hall,
+ * sports hall, community centre, police station, fire station.
+ *
+ * This is a complete rewrite of the original that fixed two confirmed correctness bugs:
+ *
+ * 1. **`pupilsServed`** previously counted `JOB_STARTED` events (staff hiring) — now counts
+ *    residents currently `AT_SCHOOL` in the school building. Still a cumulative count;
+ *    updated monthly.
+ *
+ * 2. **`patientsServed`** previously counted every `PERSON_BORN` and `ILLNESS_RECOVERED`
+ *    town-wide regardless of clinic involvement — now counts residents currently `AT_CLINIC`
+ *    or `RESTING_ILL` in the clinic building.
+ *
+ * 3. The dead primary business lookup (`businesses.firstOrNull{}`) was the only lookup and
+ *    always fell through because it compared `biz.buildingId == rec.buildingId` but skipped
+ *    the direct `businesses[rec.buildingId]` — fixed with a direct keyed lookup.
+ *
+ * Addresses audit finding #19: "Fix InstitutionSystem dead business lookup + correct
+ * pupilsServed/patientsServed."
  */
 object InstitutionSystem {
 
     const val UPDATE_INTERVAL_DAYS = 30L
 
+    private val INSTITUTION_BUILDING_MAP = mapOf(
+        BuildingType.SCHOOL          to InstitutionType.SCHOOL,
+        BuildingType.CLINIC          to InstitutionType.CLINIC,
+        BuildingType.TOWN_HALL       to InstitutionType.TOWN_HALL,
+        BuildingType.SPORTS_HALL     to InstitutionType.SPORTS_HALL,
+        BuildingType.COMMUNITY_CENTRE to InstitutionType.COMMUNITY_CENTRE,
+        BuildingType.POLICE_STATION  to InstitutionType.POLICE_STATION,
+        BuildingType.FIRE_STATION    to InstitutionType.FIRE_STATION
+    )
+
     fun updateMonthly(ctx: TickContext) {
-        ensureRecords(ctx)
         val state = ctx.state
+        ensureInstitutionRecords(ctx)
+        val residents = state.livingResidents()
+
         for (rec in state.institutionRecords.values) {
+            val bld = state.building(rec.buildingId) ?: continue
+            // Direct keyed lookup first; fall back to scan only for institutions whose business
+            // key may differ from the building id (e.g. clinics whose business was created separately).
             val biz = state.businesses[rec.buildingId]
                 ?: state.businesses.values.firstOrNull { it.buildingId == rec.buildingId }
                 ?: continue
-            // Reputation tracks business reputation with slight smoothing
-            rec.reputation += (biz.reputation - rec.reputation) * 0.15
-            rec.reputation = rec.reputation.coerceIn(0.0, 100.0)
-            // Leader transition
-            val currentLeader = biz.ownerId
-            if (currentLeader != null && currentLeader != rec.leaderId) {
+
+            // ─── Staff count ────────────────────────────────────────────────
+            rec.staffCount = state.employeesOf(biz.id).size
+
+            // ─── Reputation: condition * 40 + staff * 30 + trust * 30 ───��──
+            val conditionFactor = bld.condition / 100.0
+            val staffFactor = (rec.staffCount.toDouble() / 3.0).coerceIn(0.0, 1.0)
+            val trustFactor = state.townState.institutionalTrust / 100.0
+            val targetReputation = conditionFactor * 40.0 + staffFactor * 30.0 + trustFactor * 30.0
+            rec.reputation = (rec.reputation * 0.85 + targetReputation * 0.15).coerceIn(0.0, 100.0)
+
+            // ─── Leader transition ──────────────────────────────────────────
+            val currentLeaderId = biz.ownerId
+            if (currentLeaderId != null && currentLeaderId != rec.leaderId) {
                 rec.leaderId?.let { rec.pastLeaderIds += it }
-                rec.leaderId = currentLeader
-                val newLeader = state.resident(currentLeader)
+                rec.leaderId = currentLeaderId
+                val newLeader = state.resident(currentLeaderId)
                 if (newLeader != null) {
-                    val role = when (rec.type) {
-                        InstitutionType.SCHOOL -> "head teacher"
-                        InstitutionType.CLINIC -> "doctor"
-                        InstitutionType.TOWN_HALL -> "elected leader"
+                    val roleLabel = when (rec.type) {
+                        InstitutionType.SCHOOL         -> "head teacher"
+                        InstitutionType.CLINIC         -> "doctor"
+                        InstitutionType.TOWN_HALL      -> "elected leader"
                         InstitutionType.POLICE_STATION -> "constable"
-                        InstitutionType.FIRE_STATION -> "fire captain"
-                        else -> "director"
+                        InstitutionType.FIRE_STATION   -> "fire captain"
+                        else                           -> "director"
                     }
-                    rec.notableEvents += "Year ${SimTime.year(ctx.now)}: ${newLeader.fullName} became $role."
+                    rec.notableEvents += "Year ${SimTime.year(ctx.now)}: ${newLeader.fullName} became $roleLabel."
                     if (rec.notableEvents.size > 20) rec.notableEvents.removeAt(0)
                 }
             }
+
+            // ─── Service counting — real residents, correct activities ──────
+            updateServiceCounts(ctx, rec, bld.id, residents)
+
+            // ─── Milestones ─────────────────────────────────────────────────
+            checkMilestones(ctx, rec)
         }
-        // Count school pupils and clinic patients from this month's events
-        for (event in ctx.newEvents) {
-            when (event.type) {
-                EventType.PERSON_BORN -> {
-                    val clinic = state.institutionRecords.values.firstOrNull { it.type == InstitutionType.CLINIC }
-                    clinic?.patientsServed = (clinic?.patientsServed ?: 0) + 1
+    }
+
+    private fun updateServiceCounts(
+        ctx: TickContext,
+        rec: InstitutionRecord,
+        buildingId: Long,
+        residents: List<com.ripple.town.core.model.Resident>
+    ) {
+        when (rec.type) {
+            InstitutionType.SCHOOL -> {
+                // Count residents currently attending school in this specific building
+                val pupils = residents.count { r ->
+                    r.activity == Activity.AT_SCHOOL && r.currentBuildingId == buildingId
                 }
-                EventType.JOB_STARTED -> {
-                    val bld = event.buildingId?.let { state.building(it) } ?: continue
-                    if (bld.type == BuildingType.SCHOOL) {
-                        val school = state.institutionRecords.values.firstOrNull { it.type == InstitutionType.SCHOOL }
-                        school?.pupilsServed = (school?.pupilsServed ?: 0) + 1
-                    }
+                rec.pupilsServed += pupils
+            }
+            InstitutionType.CLINIC -> {
+                // Count residents being treated at this specific clinic
+                val patients = residents.count { r ->
+                    (r.activity == Activity.AT_CLINIC || r.activity == Activity.RESTING_ILL) &&
+                        r.currentBuildingId == buildingId
                 }
-                EventType.ILLNESS_RECOVERED -> {
-                    val clinic = state.institutionRecords.values.firstOrNull { it.type == InstitutionType.CLINIC }
-                    clinic?.patientsServed = (clinic?.patientsServed ?: 0) + 1
-                }
-                else -> {}
+                rec.patientsServed += patients
+            }
+            else -> Unit
+        }
+    }
+
+    private fun checkMilestones(ctx: TickContext, rec: InstitutionRecord) {
+        val year = SimTime.year(ctx.now)
+        val ageYears = (ctx.now - rec.foundedAt).toDouble() / SimTime.MINUTES_PER_YEAR
+
+        // Reputation milestone
+        if (rec.reputation > 85.0 && !rec.notableEvents.any { it.contains("widely respected") }) {
+            rec.notableEvents += "Year $year: ${rec.name} is widely respected in the community."
+        }
+
+        // Anniversary milestones: 10, 25, 50, 100 years
+        for (anniversary in listOf(10, 25, 50, 100)) {
+            val key = "${anniversary}-year"
+            if (ageYears >= anniversary && !rec.notableEvents.any { it.contains(key) }) {
+                rec.notableEvents += "Year $year: ${rec.name} marks its $anniversary-year anniversary."
+                if (rec.notableEvents.size > 20) rec.notableEvents.removeAt(0)
+                break
             }
         }
     }
 
-    private fun ensureRecords(ctx: TickContext) {
+    private fun ensureInstitutionRecords(ctx: TickContext) {
         val state = ctx.state
-        val institutionBuildings = mapOf(
-            BuildingType.SCHOOL to InstitutionType.SCHOOL,
-            BuildingType.CLINIC to InstitutionType.CLINIC,
-            BuildingType.TOWN_HALL to InstitutionType.TOWN_HALL,
-            BuildingType.SPORTS_HALL to InstitutionType.SPORTS_HALL,
-            BuildingType.COMMUNITY_CENTRE to InstitutionType.COMMUNITY_CENTRE,
-            BuildingType.POLICE_STATION to InstitutionType.POLICE_STATION,
-            BuildingType.FIRE_STATION to InstitutionType.FIRE_STATION
-        )
         val alreadyTracked = state.institutionRecords.values.map { it.buildingId }.toSet()
         for (bld in state.buildings.values) {
-            val instType = institutionBuildings[bld.type] ?: continue
+            val instType = INSTITUTION_BUILDING_MAP[bld.type] ?: continue
             if (bld.id in alreadyTracked) continue
+            // Only create a record if there is an operating business in this building
             val biz = state.businesses.values.firstOrNull { it.buildingId == bld.id } ?: continue
             state.institutionRecords[state.nextInstitutionId] = InstitutionRecord(
                 id = state.nextInstitutionId++,

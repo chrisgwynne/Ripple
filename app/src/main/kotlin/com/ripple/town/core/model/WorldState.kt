@@ -423,7 +423,17 @@ data class WorldState(
     var nextPartyId: Long = 1L,
     var nextPolicyId: Long = 1L,
     var nextGovernmentId: Long = 1L,
-    var nextCorruptionId: Long = 1L
+    var nextCorruptionId: Long = 1L,
+
+    // --- Civilisation simulation layer (2026-07-11) ---
+    var townState: TownState = TownState(),
+    var townDna: TownDna = TownDna(),
+    val familyLegacies: MutableMap<String, FamilyLegacy> = mutableMapOf(),
+    val historicalMilestones: MutableList<HistoricalMilestone> = mutableListOf(),
+    val civilisationSnapshots: MutableList<CivilisationSnapshot> = mutableListOf(),
+    var nextFamilyLegacyId: Long = 1L,
+    var nextMilestoneId: Long = 1L,
+    var nextSnapshotId: Long = 1L
 ) {
     fun district(id: Long): District? = districts[id]
 
