@@ -60,7 +60,13 @@ data class WorldUi(
     val plausibilityIssues: List<String> = emptyList(),
     /** Political snapshot for the Town Overview "Politics" tab. Null until the
      *  simulation has elected its first mayor (mayorId non-null). */
-    val politics: PoliticsSummaryUi? = null
+    val politics: PoliticsSummaryUi? = null,
+    /**
+     * Last 3 distinct culture-description strings from [WorldState.townCultureHistory],
+     * newest first — used by [TownSheets] to render a "Town character" trajectory block.
+     * Empty until [TownCultureSystem] has run at least once. Safe default (empty list).
+     */
+    val townCharacterHistory: List<String> = emptyList()
 ) {
     val residentsById: Map<Long, ResidentUi> by lazy { residents.associateBy { it.id } }
     val buildingsById: Map<Long, BuildingUi> by lazy { buildings.associateBy { it.id } }
@@ -357,7 +363,12 @@ object SnapshotBuilder {
                 ?.take(3)
                 ?.map { it.description }
                 .orEmpty(),
-            politics = buildPoliticsUi(state)
+            politics = buildPoliticsUi(state),
+            townCharacterHistory = state.townCultureHistory
+                .asReversed()
+                .distinctBy { it.description }
+                .take(3)
+                .map { it.description }
         )
     }
 

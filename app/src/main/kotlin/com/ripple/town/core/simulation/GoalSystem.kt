@@ -396,6 +396,7 @@ object GoalSystem {
             openedAt = ctx.now
         )
         state.businesses[biz.id] = biz
+        state.indexBusiness(biz)
         val emp = com.ripple.town.core.model.Employment(
             id = state.nextEmploymentId++, residentId = r.id, businessId = biz.id,
             role = "Owner", dailySalary = EconomySystem.salaryFor(type).coerceAtMost(45.0), startedAt = ctx.now

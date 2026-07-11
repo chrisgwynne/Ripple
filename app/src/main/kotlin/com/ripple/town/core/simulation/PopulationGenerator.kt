@@ -266,7 +266,9 @@ object PopulationGenerator {
         rel.respect = rng.nextDouble(45.0, 75.0)
         rel.sharedHistory = rng.nextDouble(30.0, 85.0)
         rel.clampAll()
-        state.relationships[Relationship.keyOf(a.id, b.id)] = rel
+        val relKey = Relationship.keyOf(a.id, b.id)
+        state.relationships[relKey] = rel
+        state.indexRelationship(relKey, rel)
 
         return listOf(a, b)
     }
@@ -300,7 +302,9 @@ object PopulationGenerator {
         val rel = Relationship.create(parent.id, child.id, RelationshipKind.FAMILY)
         rel.familiarity = 85.0; rel.trust = 72.0; rel.affection = 68.0; rel.respect = 58.0; rel.sharedHistory = 70.0
         rel.clampAll()
-        state.relationships[Relationship.keyOf(parent.id, child.id)] = rel
+        val parentChildKey = Relationship.keyOf(parent.id, child.id)
+        state.relationships[parentChildKey] = rel
+        state.indexRelationship(parentChildKey, rel)
     }
 
     private fun linkSiblings(state: WorldState, a: Resident, b: Resident) {
@@ -309,7 +313,9 @@ object PopulationGenerator {
         val rel = Relationship.create(a.id, b.id, RelationshipKind.FAMILY)
         rel.familiarity = 70.0; rel.trust = 55.0; rel.affection = 50.0; rel.respect = 45.0; rel.sharedHistory = 55.0
         rel.clampAll()
-        state.relationships[Relationship.keyOf(a.id, b.id)] = rel
+        val siblingKey = Relationship.keyOf(a.id, b.id)
+        state.relationships[siblingKey] = rel
+        state.indexRelationship(siblingKey, rel)
     }
 
     private fun randomAdultGender(rng: SimRandom): Gender = when (rng.nextInt(20)) {

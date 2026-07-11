@@ -255,6 +255,7 @@ object DevelopmentSystem {
                 openedAt = ctx.now
             )
             state.businesses[biz.id] = biz
+            state.indexBusiness(biz)
         }
 
         proj.stage = DevelopmentStage.COMPLETE

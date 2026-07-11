@@ -247,11 +247,13 @@ class WorldGenerator(private val seed: Long, private val townName: String = "Ash
             val bizType = building.type.toBusinessType() ?: continue
             val (demand, balance, empCap) = civicParams[bizType] ?: continue
             val bizId = state.nextBusinessId++
-            state.businesses[bizId] = Business(
+            val newBiz = Business(
                 id = bizId, buildingId = building.id, name = building.name, type = bizType,
                 ownerId = null, balance = balance, demand = demand,
                 employeeCapacity = empCap, openedAt = 0L
             )
+            state.businesses[bizId] = newBiz
+            state.indexBusiness(newBiz)
         }
     }
 
@@ -540,6 +542,7 @@ class WorldGenerator(private val seed: Long, private val townName: String = "Ash
                 employeeCapacity = capacity, openedAt = 0L
             )
             state.businesses[id] = b
+            state.indexBusiness(b)
             if (owner != null) building.ownerId = owner.id
             return b
         }

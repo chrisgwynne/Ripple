@@ -1867,6 +1867,7 @@ object EconomySystem {
             daysInTrouble = biz.daysInTrouble
         )
         state.businesses[newBiz.id] = newBiz
+        state.indexBusiness(newBiz)
         // Employment.businessId is a val — re-point existing staff to the new record by replacing
         // each Employment (same id/residentId/role/salary/shift, businessId swapped) rather than
         // ending and re-hiring them (this is a continuation of the same job, not a new one).
@@ -2099,6 +2100,7 @@ object EconomySystem {
             openedAt = ctx.now
         )
         state.businesses[biz.id] = biz
+        state.indexBusiness(biz)
         val emp = com.ripple.town.core.model.Employment(
             id = state.nextEmploymentId++, residentId = founder.id, businessId = biz.id,
             role = "Owner", dailySalary = 45.0, startedAt = ctx.now

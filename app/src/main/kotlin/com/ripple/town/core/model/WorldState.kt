@@ -443,6 +443,46 @@ data class WorldState(
     var nextMilestoneId: Long = 1L,
     var nextSnapshotId: Long = 1L
 ) {
+    // -------------------------------------------------------------------------
+    // Performance indexes — NOT serialized (class body, not constructor params).
+    // Both are rebuilt automatically on construction (from the deserialized or
+    // freshly-generated maps), and kept in sync at every write site via
+    // [indexBusiness] / [indexRelationship].
+    // -------------------------------------------------------------------------
+
+    /** buildingId → businessId for O(1) building→business lookup.
+     *  Use [businessAt] rather than `businesses.values.find { it.buildingId == x }`. */
+    val buildingToBusinessId: MutableMap<Long, Long> =
+        businesses.values.associate { it.buildingId to it.id }.toMutableMap()
+
+    /** residentId → mutable list of relationship keys for O(degree) lookup.
+     *  Use [relationshipsOf] rather than `relationships.values.filter { it.involves(id) }`. */
+    val residentRelationshipKeys: MutableMap<Long, MutableList<Long>> = run {
+        val m = mutableMapOf<Long, MutableList<Long>>()
+        for ((key, rel) in relationships) {
+            m.getOrPut(rel.aId) { mutableListOf() } += key
+            m.getOrPut(rel.bId) { mutableListOf() } += key
+        }
+        m
+    }
+
+    /** Register (or re-register) [biz] in [buildingToBusinessId].
+     *  Call immediately after every `businesses[id] = biz` write. */
+    fun indexBusiness(biz: Business) {
+        buildingToBusinessId[biz.buildingId] = biz.id
+    }
+
+    /** Register (or re-register) [rel] in [residentRelationshipKeys].
+     *  Call immediately after every `relationships[key] = rel` write. */
+    fun indexRelationship(key: Long, rel: Relationship) {
+        residentRelationshipKeys.getOrPut(rel.aId) { mutableListOf() }.let { if (key !in it) it += key }
+        residentRelationshipKeys.getOrPut(rel.bId) { mutableListOf() }.let { if (key !in it) it += key }
+    }
+
+    /** O(1) building → business lookup via [buildingToBusinessId]. */
+    fun businessAt(buildingId: Long): Business? =
+        buildingToBusinessId[buildingId]?.let { businesses[it] }
+
     fun district(id: Long): District? = districts[id]
 
     fun districtAt(x: Int, y: Int): District? = districts.values.firstOrNull { it.containsTile(x, y) }
@@ -470,11 +510,18 @@ data class WorldState(
     fun relationship(x: Long, y: Long): Relationship? =
         relationships[Relationship.keyOf(x, y)]
 
-    fun relationshipOrCreate(x: Long, y: Long): Relationship =
-        relationships.getOrPut(Relationship.keyOf(x, y)) { Relationship.create(x, y) }
+    fun relationshipOrCreate(x: Long, y: Long): Relationship {
+        val key = Relationship.keyOf(x, y)
+        return relationships.getOrPut(key) {
+            val rel = Relationship.create(x, y)
+            indexRelationship(key, rel)
+            rel
+        }
+    }
 
+    /** O(degree) relationship lookup via [residentRelationshipKeys]. */
     fun relationshipsOf(id: Long): List<Relationship> =
-        relationships.values.filter { it.involves(id) }
+        residentRelationshipKeys[id]?.mapNotNull { relationships[it] } ?: emptyList()
 
     fun household(id: Long): Household? = households[id]
 

@@ -55,6 +55,8 @@ import com.ripple.town.core.simulation.InterventionEngine
 import com.ripple.town.data.DeathSummary
 import com.ripple.town.data.DistrictSummaryUi
 import com.ripple.town.data.EventUi
+import com.ripple.town.data.PartyStandingUi
+import com.ripple.town.data.PoliticsSummaryUi
 import com.ripple.town.data.TownStatsUi
 import com.ripple.town.data.WorldUi
 
@@ -923,6 +925,7 @@ fun TownOverviewSheetContent(world: WorldUi, viewModel: TownViewModel? = null) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 FilterChip(selected = tab == 0, onClick = { tab = 0 }, label = { Text("At a glance") })
                 FilterChip(selected = tab == 1, onClick = { tab = 1 }, label = { Text("Chronicle") })
+                FilterChip(selected = tab == 2, onClick = { tab = 2 }, label = { Text("Politics") })
             }
             Spacer(Modifier.height(4.dp))
         }
@@ -960,6 +963,20 @@ fun TownOverviewSheetContent(world: WorldUi, viewModel: TownViewModel? = null) {
             StatBar("Health", stats.averageHealth)
             SectionTitle("Economy")
             Text("Average savings: ${stats.averageWealth.toInt()} coins", style = MaterialTheme.typography.bodyMedium)
+            if (world.townCharacterHistory.isNotEmpty()) {
+                SectionTitle("Town character")
+                world.townCharacterHistory.forEachIndexed { index, description ->
+                    Text(
+                        if (index == 0) description.replaceFirstChar { it.uppercase() }
+                        else "Previously: $description",
+                        style = if (index == 0) MaterialTheme.typography.bodyMedium
+                                else MaterialTheme.typography.bodySmall,
+                        color = if (index == 0) MaterialTheme.colorScheme.onSurface
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = if (index == 0) 0.dp else 2.dp)
+                    )
+                }
+            }
             if (world.districts.isNotEmpty()) {
                 DistrictsPanelContent(world)
             }
@@ -1015,8 +1032,10 @@ fun TownOverviewSheetContent(world: WorldUi, viewModel: TownViewModel? = null) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-        } else if (viewModel != null) {
+        } else if (tab == 1 && viewModel != null) {
             TownChronicleTab(viewModel)
+        } else if (tab == 2 && viewModel != null) {
+            PoliticsTabContent(world)
         }
     }
 }
@@ -1134,6 +1153,122 @@ private fun emojiFor(category: StoryCategory, type: EventType?): String = when (
     StoryCategory.TOWN_NEWS -> "🏛️"
     StoryCategory.HUMAN_INTEREST -> "👥"
 }
+
+// ─────────────────────────────────────────── Politics tab ──────────────────
+
+/**
+ * "Politics" tab inside the Town Overview sheet.
+ * Shows the mayor, approval bar, current administration summary, party standings,
+ * active/recent policies, and an election countdown when a campaign is live.
+ * All data comes from [WorldUi.politics] (a [PoliticsSummaryUi]), which is null
+ * until the first election has been held — the tab handles the nil state gracefully.
+ */
+@Composable
+private fun PoliticsTabContent(world: WorldUi) {
+    val pol = world.politics
+    if (pol == null) {
+        EmptyNote("No government has been formed yet.")
+        return
+    }
+
+    Column(Modifier.verticalScroll(rememberScrollState())) {
+        // ── Mayor + approval ───────────────────────────────────────────────
+        SectionTitle("Mayor")
+        Text(pol.mayorName, style = MaterialTheme.typography.titleMedium)
+        Spacer(Modifier.height(2.dp))
+        StatBar("Approval", pol.mayorApproval.toDouble())
+        Spacer(Modifier.height(2.dp))
+        Text(
+            pol.currentAdminSummary,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        // ── Election banner ────────────────────────────────────────────────
+        if (pol.isElectionActive) {
+            Spacer(Modifier.height(8.dp))
+            Surface(
+                shape = MaterialTheme.shapes.small,
+                color = RippleColors.DeepBrick.copy(alpha = 0.12f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    "Election campaign underway — ${pol.daysUntilNextElection} day${if (pol.daysUntilNextElection == 1) "" else "s"} remaining",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = RippleColors.DeepBrick,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                )
+            }
+        } else if (pol.daysUntilNextElection > 0) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "Next election in ${pol.daysUntilNextElection} day${if (pol.daysUntilNextElection == 1) "" else "s"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        // ── Party standings ────────────────────────────────────────────────
+        if (pol.parties.isNotEmpty()) {
+            SectionTitle("Parties")
+            pol.parties.forEach { party ->
+                PartyRow(party)
+            }
+        }
+
+        // ── Active policies ────────────────────────────────────────────────
+        if (pol.recentPolicies.isNotEmpty()) {
+            SectionTitle("Active policies")
+            pol.recentPolicies.forEach { title ->
+                Text(
+                    "• $title",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(vertical = 2.dp)
+                )
+            }
+        } else {
+            SectionTitle("Active policies")
+            EmptyNote("No policies on record yet.")
+        }
+
+        Spacer(Modifier.height(8.dp))
+    }
+}
+
+@Composable
+private fun PartyRow(party: PartyStandingUi) {
+    val nameColor = if (party.isGoverning) RippleColors.DeepGreen
+    else MaterialTheme.colorScheme.onSurface
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Governing indicator dot
+        Box(
+            Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(if (party.isGoverning) RippleColors.DeepGreen else MaterialTheme.colorScheme.outlineVariant)
+        )
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                party.name + if (party.isGoverning) " (governing)" else "",
+                style = MaterialTheme.typography.bodyMedium,
+                color = nameColor
+            )
+        }
+        Text(
+            "${party.seats} seat${if (party.seats == 1) "" else "s"}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Town Chronicle: a continuously-growing, low-stakes running feed — distinct from the weekly
