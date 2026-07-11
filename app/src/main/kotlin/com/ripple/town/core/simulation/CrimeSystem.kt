@@ -194,13 +194,15 @@ object CrimeSystem {
             // Prior desperation, if a JOB_LOST/DEBT_CRISIS event is recent, is the real cause;
             // fall back to no cause link if nothing plausible is on record (never invent one).
             val priorCause = mostRecentDesperationCause(ctx, r)
+            val dayStart = ctx.now - com.ripple.town.core.model.SimTime.minuteOfDay(ctx.now)
             val crime = ctx.emit(
                 EventType.SHOPLIFTING,
                 "Something has gone missing from ${target.name} — a quiet till, easily overlooked.",
                 sourceResidentId = r.id, businessId = target.id,
                 severity = 0.3, visibility = EventVisibility.HIDDEN,
                 causeIds = listOfNotNull(priorCause?.id),
-                payload = desperationCausePayload(priorCause)
+                payload = desperationCausePayload(priorCause),
+                atTime = HumanScheduler.realisticTimeToday(ScheduledActivity.CRIME_PETTY, dayStart, ctx.rng)
             )
             r.needs.safety -= 4.0
             ConsequenceEngine.onEvent(ctx, crime)
@@ -267,6 +269,7 @@ object CrimeSystem {
                 burglar.wealth += taken
             }
             val priorCause = mostRecentDesperationCause(ctx, burglar)
+            val dayStart = ctx.now - com.ripple.town.core.model.SimTime.minuteOfDay(ctx.now)
             val crime = ctx.emit(
                 EventType.BURGLARY,
                 "A home on the quiet side of town was broken into while the family was out.",
@@ -274,7 +277,8 @@ object CrimeSystem {
                 targetResidentIds = victims.map { it.id },
                 severity = 0.55, visibility = EventVisibility.HIDDEN,
                 causeIds = listOfNotNull(priorCause?.id),
-                payload = desperationCausePayload(priorCause)
+                payload = desperationCausePayload(priorCause),
+                atTime = HumanScheduler.realisticTimeToday(ScheduledActivity.CRIME_BURGLARY, dayStart, ctx.rng)
             )
             for (v in victims) {
                 v.needs.safety -= 14.0
@@ -341,6 +345,7 @@ object CrimeSystem {
                 victim.wealth -= amount
                 mugger.wealth += amount
                 val priorCause = mostRecentDesperationCause(ctx, mugger)
+                val dayStart = ctx.now - com.ripple.town.core.model.SimTime.minuteOfDay(ctx.now)
                 val crime = ctx.emit(
                     EventType.MUGGING,
                     "${victim.fullName} was confronted and robbed near ${state.building(buildingId)?.name ?: "the high street"}.",
@@ -348,7 +353,8 @@ object CrimeSystem {
                     targetResidentIds = listOf(victim.id),
                     severity = 0.6, visibility = EventVisibility.HIDDEN,
                     causeIds = listOfNotNull(priorCause?.id),
-                    payload = desperationCausePayload(priorCause)
+                    payload = desperationCausePayload(priorCause),
+                    atTime = HumanScheduler.realisticTimeToday(ScheduledActivity.CRIME_VIOLENT, dayStart, ctx.rng)
                 )
                 victim.needs.safety -= 18.0
                 victim.needs.stress += 14.0
@@ -408,12 +414,14 @@ object CrimeSystem {
             victim.wealth -= amount
             thief.wealth += amount
             val priorCause = mostRecentDesperationCause(ctx, thief)
+            val dayStart = ctx.now - com.ripple.town.core.model.SimTime.minuteOfDay(ctx.now)
             val crime = ctx.emit(
                 EventType.VEHICLE_THEFT,
                 "${victim.fullName}'s cart went missing while they were out.",
                 sourceResidentId = thief.id, targetResidentIds = listOf(victim.id),
                 severity = 0.4, visibility = EventVisibility.HIDDEN,
-                causeIds = listOfNotNull(priorCause?.id)
+                causeIds = listOfNotNull(priorCause?.id),
+                atTime = HumanScheduler.realisticTimeToday(ScheduledActivity.CRIME_PETTY, dayStart, ctx.rng)
             )
             victim.needs.safety -= 8.0
             victim.needs.stress += 8.0
@@ -457,12 +465,14 @@ object CrimeSystem {
             owner.wealth += amount
             biz.balance -= amount
             val struggleEvent = mostRecentEventOfType(ctx, EventType.BUSINESS_STRUGGLING, owner.id, biz.id)
+            val dayStart = ctx.now - com.ripple.town.core.model.SimTime.minuteOfDay(ctx.now)
             val crime = ctx.emit(
                 EventType.FRAUD,
                 "The books at ${biz.name} don't quite add up.",
                 sourceResidentId = owner.id, businessId = biz.id,
                 severity = 0.5, visibility = EventVisibility.HIDDEN,
-                causeIds = listOfNotNull(struggleEvent?.id)
+                causeIds = listOfNotNull(struggleEvent?.id),
+                atTime = HumanScheduler.realisticTimeToday(ScheduledActivity.CRIME_FRAUD, dayStart, ctx.rng)
             )
             ConsequenceEngine.onEvent(ctx, crime)
             if (ctx.rng.nextBoolean(0.4)) investigate(ctx, crime)
@@ -518,13 +528,15 @@ object CrimeSystem {
                 if (it.visibleChanges.size > 6) it.visibleChanges.removeAt(0)
             }
             val rivalryEvent = mostRecentEventOfType(ctx, EventType.RIVALRY_FORMED, aggressor.id, null)
+            val dayStart = ctx.now - com.ripple.town.core.model.SimTime.minuteOfDay(ctx.now)
             val crime = ctx.emit(
                 EventType.ARSON_ATTEMPT,
                 "Scorch marks were found by ${targetBiz.name}'s door this morning — a fire that, thankfully, didn't take hold.",
                 sourceResidentId = aggressor.id, businessId = targetBiz.id, buildingId = targetBiz.buildingId,
                 targetResidentIds = listOf(target.id),
                 severity = 0.7, visibility = EventVisibility.HIDDEN,
-                causeIds = listOfNotNull(rivalryEvent?.id)
+                causeIds = listOfNotNull(rivalryEvent?.id),
+                atTime = HumanScheduler.realisticTimeToday(ScheduledActivity.CRIME_BURGLARY, dayStart, ctx.rng)
             )
             target.needs.safety -= 12.0
             target.needs.stress += 10.0

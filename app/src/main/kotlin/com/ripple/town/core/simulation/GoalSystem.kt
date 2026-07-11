@@ -61,6 +61,10 @@ object GoalSystem {
         val stage = r.lifeStageAt(ctx.now)
         if (stage == LifeStage.CHILD) return
         val n = r.needs
+        // Breathing space: after completing or abandoning a major life goal, residents don't
+        // immediately leap into the next big thing.  FIND_JOB and PAY_OFF_DEBT are exempt —
+        // financial pressure doesn't respect a grieving period.
+        val inBreathingSpace = ctx.now < r.majorEventCooldownUntil
 
         // Need income + no job -> find one. Threshold nudged by childhood-to-adulthood influence:
         // a resident who grew up around real financial hardship reads "money is tight" a little
@@ -86,7 +90,7 @@ object GoalSystem {
         val startBusinessAmbitionBar = 0.45 * MemoryRecallSystem.childhoodInfluenceModifier(
             r, MemoryRecallSystem.ChildhoodSituation.BUSINESS_FAILURE
         )
-        if (vacant != null && stage == LifeStage.ADULT && state.employmentOf(r) == null &&
+        if (!inBreathingSpace && vacant != null && stage == LifeStage.ADULT && state.employmentOf(r) == null &&
             (r.skill(SkillType.CARPENTRY) > 55 || r.skill(SkillType.COOKING) > 60 || r.skill(SkillType.BUSINESS) > 55) &&
             (r.ideaSeeds.isNotEmpty() || r.memories.any { it.type == MemoryType.INSPIRATION }) &&
             r.personality.ambition > startBusinessAmbitionBar
@@ -97,8 +101,8 @@ object GoalSystem {
             )
         }
 
-        // Lonely single adults look for company
-        if (n.social < 30 && r.partnerId == null && stage == LifeStage.ADULT && r.personality.sociability > 0.35) {
+        // Lonely single adults look for company — but not right after losing someone or closing a business
+        if (!inBreathingSpace && n.social < 30 && r.partnerId == null && stage == LifeStage.ADULT && r.personality.sociability > 0.35) {
             seedGoal(ctx, r, GoalType.FIND_PARTNER, "The evenings have grown very quiet.")
         }
 
@@ -338,11 +342,15 @@ object GoalSystem {
         r.occupation = if (type == BusinessType.WORKSHOP) "Workshop owner" else "${type.label} owner"
         r.needs.purpose += 25.0
         complete(ctx, r, goal, "The doors are open")
+        val dayStart = ctx.now - SimTime.minuteOfDay(ctx.now)
+        val openTime = HumanScheduler.realisticTimeToday(ScheduledActivity.BUSINESS_OPEN, dayStart, ctx.rng)
+        HumanScheduler.recordFired(ScheduledActivity.BUSINESS_OPEN, ctx.now, ctx.state.activityCooldowns)
         val e = ctx.emit(
             EventType.BUSINESS_OPENED,
             "$name has opened in the old granary.",
             sourceResidentId = r.id, businessId = biz.id, buildingId = building.id,
-            severity = 0.6, causeIds = listOfNotNull(goal.causeEventId)
+            severity = 0.6, causeIds = listOfNotNull(goal.causeEventId),
+            atTime = openTime
         )
         ctx.addMemory(r, MemoryType.ACHIEVEMENT, "Turning the key on my own ${type.label.lowercase()}.", 85.0, e.id)
         ConsequenceEngine.onEvent(ctx, e)
@@ -439,6 +447,14 @@ object GoalSystem {
         goal.status = GoalStatus.COMPLETED
         goal.resolvedAt = ctx.now
         goal.progress = 1.0
+        val cooldownDays = when (goal.type) {
+            GoalType.START_BUSINESS -> 60L
+            GoalType.FIND_PARTNER, GoalType.MOVE_HOME -> 30L
+            else -> 0L
+        }
+        if (cooldownDays > 0) {
+            r.majorEventCooldownUntil = maxOf(r.majorEventCooldownUntil, ctx.now + cooldownDays * SimTime.MINUTES_PER_DAY)
+        }
         ctx.emit(
             EventType.GOAL_COMPLETED,
             "${r.fullName}: ${goal.type.label.lowercase()} — $note.",
@@ -451,6 +467,14 @@ object GoalSystem {
     private fun abandon(ctx: TickContext, r: Resident, goal: Goal, note: String) {
         goal.status = GoalStatus.ABANDONED
         goal.resolvedAt = ctx.now
+        val cooldownDays = when (goal.type) {
+            GoalType.START_BUSINESS, GoalType.LEAVE_FOR_EDUCATION -> 30L
+            GoalType.FIND_PARTNER -> 20L
+            else -> 0L
+        }
+        if (cooldownDays > 0) {
+            r.majorEventCooldownUntil = maxOf(r.majorEventCooldownUntil, ctx.now + cooldownDays * SimTime.MINUTES_PER_DAY)
+        }
         ctx.emit(
             EventType.GOAL_ABANDONED,
             "${r.fullName} has quietly let go of a plan: ${goal.type.label.lowercase()}. $note.",

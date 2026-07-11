@@ -4,6 +4,8 @@ import com.ripple.town.core.model.Building
 import com.ripple.town.core.model.BuildingType
 import com.ripple.town.core.model.BusinessType
 import com.ripple.town.core.model.EventType
+import com.ripple.town.core.model.LifeStage
+import com.ripple.town.core.model.SimCalendar
 import com.ripple.town.core.model.SimTime
 import com.ripple.town.core.model.Tile
 import com.ripple.town.core.model.TileType
@@ -52,6 +54,7 @@ object SeasonalEventSystem {
 
     private val HARVEST_BUSINESS_TYPES = setOf(BusinessType.BAKERY, BusinessType.GROCER, BusinessType.PUB)
     private val WINTER_BUSINESS_TYPES = setOf(BusinessType.CAFE, BusinessType.HARDWARE, BusinessType.TAILOR)
+    private val OUTDOOR_SUMMER_TYPES = setOf(BusinessType.CAFE, BusinessType.GROCER, BusinessType.PUB)
 
     /** Daily chance of a flood while it's raining/storming, and how far from water it can reach. */
     const val FLOOD_CHANCE_RAIN = 0.05
@@ -74,7 +77,45 @@ object SeasonalEventSystem {
             runWinterMarket(ctx)
         }
 
+        applySeasonalDailyEffects(ctx)
         maybeFlood(ctx)
+    }
+
+    private fun applySeasonalDailyEffects(ctx: TickContext) {
+        when (SimCalendar.season(ctx.now)) {
+            SimCalendar.Season.WINTER -> {
+                // Cold weather drains comfort (heating costs) and health resilience
+                for (r in ctx.state.detailedResidents()) {
+                    if (!r.inTown) continue
+                    r.needs.comfort = (r.needs.comfort - 0.4).coerceAtLeast(0.0)
+                    // Slight daily health drain in winter: cold suppresses resilience
+                    val drain = if (r.lifeStageAt(ctx.now) == LifeStage.ELDER) 0.15 else 0.05
+                    r.needs.health = (r.needs.health - drain).coerceAtLeast(0.0)
+                }
+            }
+            SimCalendar.Season.SUMMER -> {
+                // Long days lift outdoor business demand
+                for (biz in ctx.state.businesses.values) {
+                    if (biz.open && biz.type in OUTDOOR_SUMMER_TYPES) {
+                        biz.demand = (biz.demand + 0.3).coerceAtMost(100.0)
+                    }
+                }
+            }
+            SimCalendar.Season.AUTUMN -> {
+                // School restart: parents of school-age children get a small social lift
+                // (community re-engagement) on the first school day of the autumn term
+                if (SimCalendar.isSchoolDay(ctx.now) && !SimCalendar.isSchoolDay(ctx.now - SimTime.MINUTES_PER_DAY)) {
+                    for (r in ctx.state.detailedResidents()) {
+                        if (!r.inTown) continue
+                        val hasSchoolChild = r.childIds.any { cid ->
+                            ctx.state.resident(cid)?.lifeStageAt(ctx.now) == LifeStage.CHILD
+                        }
+                        if (hasSchoolChild) r.needs.social = (r.needs.social + 3.0).coerceAtMost(100.0)
+                    }
+                }
+            }
+            SimCalendar.Season.SPRING -> Unit // spring birth boost handled in LifecycleSystem
+        }
     }
 
     private fun runHarvestFair(ctx: TickContext) {

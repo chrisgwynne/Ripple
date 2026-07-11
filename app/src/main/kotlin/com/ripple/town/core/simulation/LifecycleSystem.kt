@@ -14,6 +14,7 @@ import com.ripple.town.core.model.Relationship
 import com.ripple.town.core.model.RelationshipKind
 import com.ripple.town.core.model.RelationshipStatus
 import com.ripple.town.core.model.Resident
+import com.ripple.town.core.model.SimCalendar
 import com.ripple.town.core.model.SimTime
 import com.ripple.town.core.model.SkillType
 import com.ripple.town.core.model.SpriteConfig
@@ -76,7 +77,9 @@ object LifecycleSystem {
             if (ageA !in 20..44 || ageB !in 20..44) continue
             if (rel.affection < 55) continue
             val existingKids = a.childIds.count { state.resident(it)?.alive == true }
-            val chance = 0.0012 * (rel.affection / 100.0) * (1.0 / (1 + existingKids))
+            // Spring gives a small birth-rate uplift — more conceptions in the warmer months.
+            val springFactor = if (SimCalendar.season(ctx.now) == SimCalendar.Season.SPRING) 1.15 else 1.0
+            val chance = 0.0012 * (rel.affection / 100.0) * (1.0 / (1 + existingKids)) * springFactor
             if (!ctx.rng.nextBoolean(chance)) continue
             bear(ctx, a, b)
         }
@@ -129,12 +132,16 @@ object LifecycleSystem {
             rel.familiarity = 90.0; rel.affection = 85.0; rel.trust = 80.0; rel.dependency = 70.0
         }
         state.birthsToday += 1
+        // Births happen at realistic daytime hours, not at the midnight tick that fires updateDaily.
+        val dayStart = ctx.now - SimTime.minuteOfDay(ctx.now)
+        val birthTime = HumanScheduler.realisticTimeToday(ScheduledActivity.BIRTH, dayStart, ctx.rng)
         val e = ctx.emit(
             EventType.PERSON_BORN,
             "${parentA.fullName} and ${parentB.fullName} have welcomed a baby: ${child.firstName}.",
             sourceResidentId = child.id,
             targetResidentIds = listOf(parentA.id, parentB.id),
-            severity = 0.5
+            severity = 0.5,
+            atTime = birthTime
         )
         ctx.addMemory(parentA, MemoryType.ACHIEVEMENT, "The day ${child.firstName} was born.", 90.0, e.id, listOf(child.id))
         ctx.addMemory(parentB, MemoryType.ACHIEVEMENT, "The day ${child.firstName} was born.", 90.0, e.id, listOf(child.id))
@@ -207,17 +214,23 @@ object LifecycleSystem {
             partner.relationshipStatus = RelationshipStatus.WIDOWED
             partner.partnerId = null
             partner.needs.stress += 25.0
+            // Breathing space: widowed partner should not immediately seek new companionship.
+            partner.majorEventCooldownUntil = ctx.now + 180 * SimTime.MINUTES_PER_DAY
         }
         // Household shrinks.
         r.householdId?.let { hid -> state.households[hid]?.memberIds?.remove(r.id) }
 
         val age = r.ageAt(ctx.now)
+        // Deaths should appear in the event log at a realistic hour — not midnight when the tick fires.
+        val dayStart = ctx.now - SimTime.minuteOfDay(ctx.now)
+        val deathTime = HumanScheduler.realisticTimeToday(ScheduledActivity.DAYTIME_GENERAL, dayStart, ctx.rng)
         val death = ctx.emit(
             EventType.PERSON_DIED,
             "${r.fullName} has died, aged $age. Cause: $cause.",
             sourceResidentId = r.id,
             targetResidentIds = listOfNotNull(partner?.id) + r.childIds.filter { state.resident(it)?.alive == true },
             severity = 0.85,
+            atTime = deathTime,
             // "bornAt" lets a UI-side era summary (see WorldRepository.detectFollowedDeath)
             // query the full span of events/memories the deceased's life covered, without the
             // engine itself needing to read back through history it doesn't keep in WorldState.
