@@ -248,6 +248,7 @@ object AnomalyDetector {
             detectedAt = ctx.now, relatedResidentIds = residents,
             relatedBuildingIds = buildings, metric = metric
         )
+        if (ctx.state.anomalyRecords.size > 200) ctx.state.anomalyRecords.removeAt(0)
     }
 
     /** Return a recently-detected anomaly (within 90 days) for the newspaper. */

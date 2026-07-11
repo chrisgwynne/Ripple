@@ -320,6 +320,7 @@ object PoliticsSystem {
             finalApproval = state.publicOpinionData.approvalRating
         )
         state.currentGovernmentId = govId
+        if (state.governmentRecords.size > 200) state.governmentRecords.removeAt(0)
         if (party != null) PolicyEngine.enactManifestoPolicies(ctx, party)
     }
 

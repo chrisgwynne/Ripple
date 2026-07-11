@@ -76,6 +76,11 @@ object TownEraSystem {
             id = state.nextEraId++, type = type, name = name, description = description,
             startedAt = ctx.now, triggerEventId = triggerEventId
         )
+        // Keep at most 100 total eras — evict the oldest ended ones first
+        if (state.townEras.size > 100) {
+            val oldest = state.townEras.firstOrNull { it.endedAt != null }
+            if (oldest != null) state.townEras.remove(oldest) else state.townEras.removeAt(0)
+        }
     }
 
     // ---- Daily update --------------------------------------------------------------------------

@@ -121,5 +121,6 @@ object LegacySystem {
             relatedResidentIds = relatedIds,
             relatedBuildingId = relatedBuildingId
         )
+        if (state.legacyRecords.size > 500) state.legacyRecords.removeAt(0)
     }
 }
