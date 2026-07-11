@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -54,6 +55,7 @@ import com.ripple.town.core.model.InterventionVerb
 import com.ripple.town.core.simulation.InterventionEngine
 import com.ripple.town.data.CommunityGroupUi
 import com.ripple.town.data.DeathSummary
+import com.ripple.town.data.DevelopmentProjectUi
 import com.ripple.town.data.DistrictSummaryUi
 import com.ripple.town.data.EventUi
 import com.ripple.town.data.FamilyLegacyUi
@@ -156,6 +158,93 @@ private fun OpportunityRow(opp: OpportunityUi) {
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+    }
+}
+
+// --------------------------------------------------- development pipeline panel
+
+/**
+ * Development pipeline panel in the "At a glance" tab, placed between the Opportunities
+ * panel and the Districts panel. Shows active town development projects (up to 6),
+ * sorted CONSTRUCTION → FUNDED → APPROVED → PROPOSED. Hidden when list is empty.
+ */
+@Composable
+private fun DevelopmentPipelinePanel(world: WorldUi) {
+    if (world.developmentPipeline.isEmpty()) return
+    SectionTitle("In development (${world.developmentPipeline.size})")
+    world.developmentPipeline.forEach { proj -> DevelopmentProjectRow(proj) }
+}
+
+@Composable
+private fun DevelopmentProjectRow(proj: DevelopmentProjectUi) {
+    val stageColor = when (proj.stage) {
+        "Under construction" -> RippleColors.DeepGreen
+        "Funded" -> RippleColors.WarmGreen
+        "Approved" -> RippleColors.Gold
+        else -> RippleColors.SoftInk
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                proj.label,
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.weight(1f)
+            )
+            Surface(
+                shape = MaterialTheme.shapes.extraSmall,
+                color = stageColor.copy(alpha = 0.15f)
+            ) {
+                Text(
+                    proj.stage,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = stageColor,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(
+                proj.districtName,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                proj.estimatedCost,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        if (proj.stage == "Under construction" && proj.progressPercent > 0) {
+            Spacer(Modifier.height(3.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                LinearProgressIndicator(
+                    progress = { proj.progressPercent / 100f },
+                    modifier = Modifier.weight(1f).height(4.dp),
+                    color = RippleColors.DeepGreen,
+                    trackColor = RippleColors.DeepGreen.copy(alpha = 0.2f)
+                )
+                Text(
+                    "${proj.progressPercent}%",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
 }
 
@@ -1164,6 +1253,7 @@ fun TownOverviewSheetContent(world: WorldUi, viewModel: TownViewModel? = null) {
                 DistrictsPanelContent(world)
             }
             OpportunitiesPanel(world)
+            DevelopmentPipelinePanel(world)
             if (world.families.isNotEmpty()) {
                 FamiliesPanelContent(world)
             }

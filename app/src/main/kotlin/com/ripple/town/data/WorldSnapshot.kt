@@ -18,6 +18,7 @@ import com.ripple.town.core.model.SpriteConfig
 import com.ripple.town.core.model.TimeOfDay
 import com.ripple.town.core.model.TownMap
 import com.ripple.town.core.model.Weather
+import com.ripple.town.core.model.DevelopmentStage
 import com.ripple.town.core.model.OpportunityStatus
 import com.ripple.town.core.model.RelationshipKind
 import com.ripple.town.core.model.WorldState
@@ -79,7 +80,10 @@ data class WorldUi(
     /** Population statistics panel: births/deaths/migration over last 30 sim-days. */
     val populationStats: PopulationStatsUi = PopulationStatsUi(),
     /** Top 5 OPEN opportunities sorted by capital required ascending. */
-    val opportunities: List<OpportunityUi> = emptyList()
+    val opportunities: List<OpportunityUi> = emptyList(),
+    /** Active development pipeline: top 6 non-complete/non-cancelled/non-rejected projects,
+     *  sorted CONSTRUCTION → FUNDED → APPROVED → PROPOSED. Empty until any projects exist. */
+    val developmentPipeline: List<DevelopmentProjectUi> = emptyList()
 ) {
     val residentsById: Map<Long, ResidentUi> by lazy { residents.associateBy { it.id } }
     val buildingsById: Map<Long, BuildingUi> by lazy { buildings.associateBy { it.id } }
@@ -186,6 +190,19 @@ data class OpportunityUi(
     val district: String,        // district name, or "Town-wide"
     val evidence: String,
     val capitalRequired: String  // formatted £ string, e.g. "£12,000"
+)
+
+/**
+ * A single development project in the town's active pipeline, surfaced in the "At a glance" panel.
+ */
+@Immutable
+data class DevelopmentProjectUi(
+    val id: Long,
+    val label: String,          // e.g. "New school", "Conversion: Vacant pub"
+    val stage: String,          // human-readable, e.g. "Proposed", "Under construction"
+    val districtName: String,
+    val progressPercent: Int,   // 0-100 construction progress (0 if not yet in construction)
+    val estimatedCost: String   // formatted "£25,000"
 )
 
 @Immutable
@@ -461,6 +478,43 @@ object SnapshotBuilder {
                 OpportunityUi(type = typeLabel, district = districtName, evidence = opp.evidence, capitalRequired = capital)
             }
 
+        // ── Development pipeline (top 6 active, sorted by stage priority) ────
+        val stageOrder = mapOf(
+            DevelopmentStage.CONSTRUCTION to 0,
+            DevelopmentStage.FUNDED to 1,
+            DevelopmentStage.APPROVED to 2,
+            DevelopmentStage.PROPOSED to 3
+        )
+        val excludedStages = setOf(DevelopmentStage.COMPLETE, DevelopmentStage.CANCELLED, DevelopmentStage.REJECTED)
+        val developmentPipelineList = state.developmentProjects.values
+            .filter { it.stage !in excludedStages }
+            .sortedBy { stageOrder.getOrDefault(it.stage, 99) }
+            .take(6)
+            .map { proj ->
+                val rawLabel = proj.buildingType.label
+                val projectLabel = when {
+                    proj.note.contains("Conversion", ignoreCase = true) -> "Conversion: $rawLabel"
+                    proj.note.contains("Renovat", ignoreCase = true) -> "Renovation: $rawLabel"
+                    else -> rawLabel
+                }
+                val stageLabel = proj.stage.label
+                val districtName = proj.districtId?.let { state.districts[it]?.name } ?: "Town centre"
+                val progressPct = if (proj.stage == DevelopmentStage.CONSTRUCTION) {
+                    val elapsed = (state.time - proj.stageChangedAt).toFloat()
+                    val expectedDuration = (proj.estimatedCost / 1000.0 * SimTime.MINUTES_PER_DAY).coerceAtLeast(1.0).toFloat()
+                    ((elapsed / expectedDuration) * 100).toInt().coerceIn(0, 95)
+                } else 0
+                val costStr = "£${proj.estimatedCost.toInt().toString().reversed().chunked(3).joinToString(",").reversed()}"
+                DevelopmentProjectUi(
+                    id = proj.id,
+                    label = projectLabel,
+                    stage = stageLabel,
+                    districtName = districtName,
+                    progressPercent = progressPct,
+                    estimatedCost = costStr
+                )
+            }
+
         return WorldUi(
             worldSeed = state.seed,
             townName = state.townName,
@@ -537,7 +591,8 @@ object SnapshotBuilder {
                     )
                 },
             populationStats = populationStats,
-            opportunities = opportunitiesList
+            opportunities = opportunitiesList,
+            developmentPipeline = developmentPipelineList
         )
     }
 
