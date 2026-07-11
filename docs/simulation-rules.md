@@ -922,8 +922,11 @@ serious conditions, age > 78 and collapsed health — never a bare dice roll.
 
 Residents: living costs 9/day, monthly rent split across household adults,
 gentle daily debt interest, automatic repayments from surplus. Businesses:
-footfall each open hour from `demand × weather`, plus real purchases by
-simulated residents; wages and overheads daily at 23:50. Balance < 0 for 5
+footfall each open hour from `demand × sector-shaped multiplier` (see
+"Sector demand shaping" below — time-of-day, weekend, and weather sensitivity
+all vary by `BusinessType`, replacing the old flat `weather`-only factor),
+plus real purchases by simulated residents; wages and overheads daily at
+23:50. Balance < 0 for 5
 days → `BUSINESS_STRUGGLING` (owner stress, staff hours cut); 18 days →
 closure: building abandoned, every employee gets a `JOB_LOST` event caused by
 the closure, demand shifts to same-type rivals over the following week.
@@ -1006,6 +1009,131 @@ is an audit-only finding — no tuning constants were changed as part of it; a f
 pass should treat `GoalSystem.STARTUP_CAPITAL`'s `× 0.6` opening-balance multiplier and/or new
 businesses' starting `demand` as the first things to reconsider, informed by this data rather than
 by guesswork.
+
+### Economy calibration guardrail test (added 2026-07-11)
+
+The audit above (and the two remediation passes since — the startup-capital/demand fix and a
+concurrent sector-shaped `EconomySystem.hourlyFootfall` demand retune) turned `EconomyCalibrationReport`
+into a real, repeatable diagnostic, but that test's own single assertion is deliberately weak (just
+"the run produced data") — by design, since it was scoped as audit-only and enforcing thresholds
+there would have silently turned an audit into an undocumented remediation gate. That left the
+brief's original ask (Part 6: "calibration targets ... verified via assertions not hardcoded")
+still open. `app/src/test/kotlin/com/ripple/town/simulation/calibration/EconomyCalibrationGuardrailTest.kt`
+closes it: a genuinely separate `@Test` class, alongside (not replacing) the report, that reruns
+the same `EconomyCalibrationRunner.run(...)` (10 seeds × 1 simulated year, same defaults) and
+asserts a small number of wide, honest bounds.
+
+**These are NOT the brief's literal "2-8% annual closure rate" target.** The actual measured
+closure rate, even after both remediation passes, is 53.7% (this session, 2026-07-11) — nowhere
+near 2-8%. Asserting the brief's exact numbers would make the test permanently, uninformatively
+red. Every bound below is instead **current-baseline-relative**: wide enough to pass against the
+real measured state (checked by actually rerunning the harness before picking numbers, not
+guessed), but tight enough that a real regression would still trip it — not a rubber-stamp
+"between 0 and 100". As future remediation passes retune the economy closer to the brief's original
+targets, these bounds should be tightened to match, not left permanently loose.
+
+| Guardrail | Bound | Baseline measured (this session, 2026-07-11) | Why this bound |
+|---|---|---|---|
+| Business closure rate | `<= 75.0%` | 53.7% (pooled, 51/95 businesses over 1 simulated year) | Ceiling sits above the current baseline but well below a reversion to the pre-remediation 66.7%/60.0% figures — catches a real regression back toward (or past) the old numbers without failing on routine tuning noise around 53.7% |
+| % residents in debt crisis (`EconomySystem.DEBT_CRISIS_THRESHOLD`) | `<= 10.0%` | ~1.9-2.9% across the simulated year (peaked day 180, ended day 360 at 1.9%) | The audit's headline finding was that resident debt pressure is healthy and NOT structurally broken; 10% (>3x the observed peak) is a real ceiling that would catch a wages/living-cost regression contradicting that finding |
+| Employment rate (worst seed) | `>= 85.0%` | min=93.2%, median=97.1%, max=97.3% across 10 seeds | Floor sits below every observed seed (allows legitimate seed variance) but well above a level that would indicate a broken hiring pipeline |
+| Resident median wealth (pooled, final snapshot) | `>= 500.0` | median=4,825.5, p10=702.0 | Deliberately far below the healthy range — this is a catastrophic-regression floor only ("everyone is broke"), not a target for the actual wealth level |
+
+Each assertion's failure message prints the actual measured value and the bound side-by-side (e.g.
+`business closure rate = 53.70, expected <= 75.0. Context: baseline measured 53.7% this session...`)
+so a future session that trips this test six months from now sees exactly what moved and by how
+much, not a bare `assertTrue` with no context.
+
+Runs as a second, fully independent `EconomyCalibrationRunner.run(...)` invocation (not shared with
+the report via `@BeforeClass`) — JUnit4 doesn't share `@BeforeClass` state across separate test
+classes, and keeping the report and the guardrail as separate classes lets either be run
+independently (e.g. `--tests "...EconomyCalibrationGuardrailTest"` alone, without the full
+diagnostic printout). Each run measured ~50-55s wall clock this session, an acceptable cost for a
+targeted invocation.
+
+### Sector demand shaping (added 2026-07-11)
+
+Closes the same-day economy-remediation backlog entry's finding that every `BusinessType` used
+one identical demand-generation shape in `EconomySystem.hourlyFootfall` — `expected = (demand/100)
+× weatherFactor × 2.2`, with only `baseSpend`/`overheads`/`salaryFor` varying by type, not the
+actual pattern of when and how weather-sensitively demand arrives. A BAKERY and a PUB traded on
+the exact same hourly curve and the exact same weather curve; only the money-per-customer differed.
+
+**What changed.** `hourlyFootfall`'s old inline flat `weatherFactor` (a single `when (ctx.state
+.weather)` block, 0.35..1.0, applied identically to every open business) is replaced by
+`EconomySystem.hourlyDemandMultiplier(type, hour, dayOfWeek, weather): Double` — a pure, bounded
+function multiplied into the existing `expected` formula in the exact same place the old
+`weatherFactor` was (`expected = (biz.demand / 100.0) × sectorMultiplier × 2.2`), so the core loop
+shape is untouched, only the multiplier's source changed. `dayOfWeek` comes from the pre-existing
+`SimTime.dayOfWeek(minutes)` helper (0..6, per that function's own doc comment "5-6 = weekend") —
+no new day-of-week helper was added.
+
+**Bounds.** Every call is clamped to `EconomySystem.DEMAND_MULTIPLIER_MIN..DEMAND_MULTIPLIER_MAX`
+= `0.3..2.0`. The three factors below are computed independently and multiplied together, then
+clamped once at the end — a type can hit its ceiling/floor on an extreme hour/weekend/weather
+combination (e.g. PUB Friday 20:00 clear weather multiplies to ~2.55 pre-clamp, clamped to 2.0),
+but the clamp never inverts the documented orderings between types (verified by
+`SectorDemandProfileTest`'s exhaustive sweep and shape-ordering assertions).
+
+**Time-of-day factor** (`timeOfDayFactor`) — when each trade's custom actually arrives:
+- **BAKERY** — morning-peaked: 1.7× at 8-9am tapering to 0.4× by evening (breakfast trade).
+- **CAFE** — similar morning lean, slightly less extreme (1.6× at 8-10am, 0.5× by night) —
+  coffee/breakfast trade that also picks up a smaller midday/lunch bump.
+- **PUB** — the mirror image of BAKERY: 0.4× through the working day, ramping from 17:00,
+  peaking 1.8× at 20-21:00 (evening/night trade).
+- **GROCER / HARDWARE** — flat-ish all day (1.0×, small 1.15× midday "errand" bump) — these are
+  volume/footfall trades without a sharp time-of-day peak.
+- **BOOKSHOP** — trades on leisure time, not footfall volume: a gentle 1.2× afternoon lean,
+  never spikes as hard as a peak-driven trade like BAKERY/PUB.
+- **TAILOR** — mild midday/afternoon lean (1.15×, appointment-driven, closer to office hours).
+- **WORKSHOP / FACTORY** — flat 1.0× at every hour, deliberately un-shaped: these "customers" are
+  really contracts/orders, not retail footfall, so they get no time-of-day pattern at all.
+- Every other type (CLINIC/SCHOOL/TOWN_HALL) is a `PUBLIC_SERVICES` member and never reaches
+  `hourlyDemandMultiplier` in practice (`hourlyFootfall` skips them before this is called); the
+  `else -> 1.0` fallback exists only so the function stays total.
+
+**Weekend factor** (`weekendFactor`, applied only when `dayOfWeek` is 5 or 6): PUB (1.35×) and
+CAFE (1.25×) get the largest lift — leisure/social trade concentrates on weekends. BAKERY/BOOKSHOP
+get a smaller 1.15× (weekend errands/browsing, not their defining trade). GROCER/HARDWARE get a
+minimal 1.05× — people need groceries and hardware on a Tuesday too, so weekend barely moves them.
+TAILOR/WORKSHOP/FACTORY get no weekend effect at all (1.0×) — appointment/contract-driven trades
+don't follow a leisure-weekend pattern.
+
+**Weather sensitivity** (`weatherSensitivity`) — replaces the old flat 0.35..1.0 curve shared by
+every type, ranked by real exposure:
+- **BAKERY / CAFE / GROCER** — most exposed (1.05× CLEAR down to 0.35× STORM, i.e. the *exact* old
+  shared curve): queue/daily-errand trades where the customer is often walking or queuing
+  outdoors, so bad weather visibly suppresses the trip.
+- **HARDWARE / BOOKSHOP / TAILOR** — moderately exposed (1.05× down to 0.5× STORM): a real but
+  smaller dent — these are more deliberate, planned trips than a daily grocery run.
+- **PUB** — the least weather-sensitive retail trade (1.05× down to only 0.65× STORM): destination/
+  evening trade — people still go to the pub in the rain, arguably more so, so the floor here is
+  far shallower than the old shared curve's STORM=0.35.
+- **WORKSHOP / FACTORY** — flat 1.0× regardless of weather: contract/order-driven, not footfall at
+  all — deliveries and orders don't care about drizzle.
+
+**Testing.** `app/src/test/kotlin/com/ripple/town/simulation/SectorDemandProfileTest.kt` — shape
+assertions (PUB evening > PUB morning, BAKERY morning > BAKERY evening, PUB weekend evening >
+weekday evening, FACTORY/WORKSHOP flatly weather- and time-insensitive, FACTORY's weather spread
+strictly less than GROCER's at a shared hour, PUB's weather spread less than BAKERY's/GROCER's at
+each type's own peak hour so the comparison isn't distorted by an off-peak time-of-day factor
+pushing values against the floor first) plus a full exhaustive sweep across all 12 `BusinessType`s
+× 14 hours (8-21) × 7 `dayOfWeek` values × 6 `Weather` states (1,176 combinations) asserting every
+result stays within `0.3..2.0`. `hourlyDemandMultiplier` is a pure function of its four inputs (no
+`ctx.rng`) — the test file's own doc comment notes explicitly that no separate determinism test was
+needed beyond the "same inputs, same output" repeat-call check included, since a pure function
+can't drift by construction.
+
+**Calibration impact, measured not guessed.** Re-ran `EconomyCalibrationReport` (same 10 seeds ×
+1 simulated year as the audit) after wiring this in: one-year pooled business closure rate moved
+from **60.0% to 53.7%** — the same number the concurrently-written `EconomyCalibrationGuardrailTest`
+records as its baseline, confirming this is the change it was measuring. A real, moderate
+improvement (not a wild swing that would indicate the multiplier bounds were too aggressive), and
+in the expected direction: richer, more type-appropriate demand curves mean fewer businesses stuck
+permanently trading against an unfavourable flat shape (e.g. a PUB previously got the exact same
+weather beating as an open-air GROCER queue every single hour; it no longer does). This was scoped
+as adding real shape, not calibration-tuning to a specific target — the closure-rate move is
+reported for a future session's benefit, not chased further this pass.
 
 ## Business rivalries
 

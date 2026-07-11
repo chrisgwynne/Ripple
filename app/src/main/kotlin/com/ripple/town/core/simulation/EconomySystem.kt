@@ -36,18 +36,12 @@ object EconomySystem {
         if (SimTime.minuteOfDay(ctx.now) % 60 != 0) return
         val hour = SimTime.hourOfDay(ctx.now)
         if (hour < 8 || hour > 21) return
-        val weatherFactor = when (ctx.state.weather) {
-            Weather.CLEAR -> 1.0
-            Weather.CLOUDY -> 0.9
-            Weather.FOG -> 0.75
-            Weather.RAIN -> 0.65
-            Weather.SNOW -> 0.55
-            Weather.STORM -> 0.35
-        }
+        val dayOfWeek = SimTime.dayOfWeek(ctx.now)
         // Background residents produce abstract footfall.
         for (biz in ctx.state.businesses.values.sortedBy { it.id }) {
             if (!biz.open || biz.type in PUBLIC_SERVICES) continue
-            val expected = (biz.demand / 100.0) * weatherFactor * 2.2
+            val sectorMultiplier = hourlyDemandMultiplier(biz.type, hour, dayOfWeek, ctx.state.weather)
+            val expected = (biz.demand / 100.0) * sectorMultiplier * 2.2
             val customers = ctx.rng.nextGaussianLike(expected, 1.2, 0.0, 6.0).toInt()
             if (customers > 0) {
                 val spendEach = baseSpend(biz.type) * biz.priceLevel
@@ -55,6 +49,168 @@ object EconomySystem {
                 biz.revenueToday += customers * spendEach
                 biz.balance += customers * spendEach
             }
+        }
+    }
+
+    // ============================================================
+    // Sector demand shaping (2026-07-11) — see docs/simulation-rules.md
+    // "Sector demand shaping". Replaces the old flat, type-agnostic `weatherFactor` with a
+    // bounded per-BusinessType multiplier composed into `hourlyFootfall`'s existing `expected`
+    // formula as a straight multiplicative replacement of that old factor — this function now
+    // owns ALL of time-of-day shape, weekend effect, and weather sensitivity for a given type,
+    // so weather is intentionally NOT applied a second time anywhere else in this file.
+    // ============================================================
+
+    /** Overall bounds every [hourlyDemandMultiplier] result is guaranteed to fall within, across
+     *  the full 8..21 hour range, all 7 `SimTime.dayOfWeek` values, and all six [Weather] states.
+     *  Kept loose enough that each type's own time/weekend/weather shape has real room to move,
+     *  but tight enough that no type can ever swing to an absurd multiple of the old flat `2.2`
+     *  baseline (previously `weatherFactor` alone ranged just 0.35..1.0). */
+    const val DEMAND_MULTIPLIER_MIN = 0.3
+    const val DEMAND_MULTIPLIER_MAX = 2.0
+
+    /**
+     * Bounded (see [DEMAND_MULTIPLIER_MIN]/[DEMAND_MULTIPLIER_MAX]) per-[BusinessType] demand
+     * shape, composed of three independent factors multiplied together then clamped once at the
+     * end:
+     * - **Time-of-day** ([timeOfDayFactor]) — when this trade's custom actually arrives.
+     * - **Weekend** ([weekendFactor]) — Friday/Saturday (`dayOfWeek` 5-6, per `SimTime`'s own
+     *   "5-6 = weekend" comment) uplift or flattening.
+     * - **Weather** ([weatherSensitivity]) — how exposed this trade is to bad weather, replacing
+     *   the old one-size-fits-all `weatherFactor`; an indoor/destination trade like a PUB is far
+     *   less dented by rain than an open GROCER queue or a BAKERY's outdoor-ish morning rush.
+     *
+     * Pure function of its four inputs — no `ctx.rng`, no hidden state — so it needs no
+     * determinism test beyond the sweep in `SectorDemandProfileTest` (documented there too).
+     */
+    fun hourlyDemandMultiplier(type: BusinessType, hour: Int, dayOfWeek: Int, weather: Weather): Double {
+        val isWeekend = dayOfWeek == 5 || dayOfWeek == 6
+        val raw = timeOfDayFactor(type, hour) * weekendFactor(type, isWeekend) * weatherSensitivity(type, weather)
+        return raw.coerceIn(DEMAND_MULTIPLIER_MIN, DEMAND_MULTIPLIER_MAX)
+    }
+
+    /**
+     * Time-of-day shape per type, each centred so a "typical" hour lands near 1.0:
+     * - **BAKERY/CAFE** — morning-peaked (breakfast/coffee trade): strong 8-10, tapering through
+     *   the afternoon, quiet by evening.
+     * - **PUB** — the mirror image: quiet by day, ramping hard from 17:00, peaking 19-21
+     *   (evening/night trade).
+     * - **GROCER/HARDWARE** — flat-ish all day, the "errand" trades — a small midday bump, no
+     *   sharp peak either direction.
+     * - **BOOKSHOP** — trades on leisure time, not footfall volume: gentle afternoon lean (people
+     *   browsing on time off), never spikes as hard as a peak-driven trade.
+     * - **TAILOR** — closer to office hours, mild midday/afternoon lean (appointment-driven).
+     * - **FACTORY/WORKSHOP** — contract/order-driven, not retail footfall at all: flat 1.0
+     *   regardless of hour, deliberately un-shaped.
+     */
+    private fun timeOfDayFactor(type: BusinessType, hour: Int): Double = when (type) {
+        BusinessType.BAKERY -> when (hour) {
+            in 8..9 -> 1.7
+            in 10..11 -> 1.3
+            in 12..14 -> 0.9
+            in 15..17 -> 0.6
+            else -> 0.4
+        }
+        BusinessType.CAFE -> when (hour) {
+            in 8..10 -> 1.6
+            in 11..13 -> 1.2
+            in 14..16 -> 0.9
+            in 17..18 -> 0.8
+            else -> 0.5
+        }
+        BusinessType.PUB -> when (hour) {
+            in 8..15 -> 0.4
+            in 16..17 -> 0.7
+            in 18..19 -> 1.4
+            in 20..21 -> 1.8
+            else -> 0.5
+        }
+        BusinessType.GROCER, BusinessType.HARDWARE -> when (hour) {
+            in 12..14 -> 1.15
+            else -> 1.0
+        }
+        BusinessType.BOOKSHOP -> when (hour) {
+            in 13..17 -> 1.2
+            in 18..19 -> 1.05
+            else -> 0.85
+        }
+        BusinessType.TAILOR -> when (hour) {
+            in 10..16 -> 1.15
+            else -> 0.8
+        }
+        BusinessType.WORKSHOP, BusinessType.FACTORY -> 1.0
+        else -> 1.0
+    }
+
+    /**
+     * Weekend uplift/flattening per type (`isWeekend` = `SimTime.dayOfWeek` 5 or 6):
+     * - **PUB/CAFE** — up on weekends (leisure/social trade concentrates there).
+     * - **BAKERY/BOOKSHOP** — mild weekend uplift (weekend errands/browsing), smaller than
+     *   pub/cafe's since it's not their defining trade.
+     * - **GROCER/HARDWARE** — flatter: people still need groceries/hardware on a Tuesday, so the
+     *   weekend bump is small.
+     * - **TAILOR/FACTORY/WORKSHOP** — no weekend effect: appointment/contract-driven trades don't
+     *   follow a leisure weekend pattern.
+     */
+    private fun weekendFactor(type: BusinessType, isWeekend: Boolean): Double {
+        if (!isWeekend) return 1.0
+        return when (type) {
+            BusinessType.PUB -> 1.35
+            BusinessType.CAFE -> 1.25
+            BusinessType.BAKERY -> 1.15
+            BusinessType.BOOKSHOP -> 1.15
+            BusinessType.GROCER, BusinessType.HARDWARE -> 1.05
+            BusinessType.TAILOR, BusinessType.WORKSHOP, BusinessType.FACTORY -> 1.0
+            else -> 1.0
+        }
+    }
+
+    /**
+     * Weather sensitivity per type — replaces the old flat `weatherFactor` (which ranged
+     * 0.35..1.0 identically for every type). Ranked from most to least exposed:
+     * - **BAKERY/CAFE/GROCER** — most exposed: morning-rush/queue trades where customers are
+     *   often walking or queuing outdoors; bad weather visibly suppresses the trip.
+     * - **HARDWARE/BOOKSHOP/TAILOR** — moderately exposed: a real but smaller dent, these are
+     *   more deliberate trips than a daily bakery/grocer run.
+     * - **PUB** — the least weather-sensitive retail trade: destination/evening trade, people
+     *   still go to the pub in the rain (arguably more so), so the floor here is much shallower
+     *   than the shared old `weatherFactor`'s STORM=0.35.
+     * - **FACTORY/WORKSHOP** — contract/order-driven, not footfall at all: essentially weather-
+     *   insensitive (deliveries/orders don't care about drizzle), flat 1.0 across all weather.
+     */
+    private fun weatherSensitivity(type: BusinessType, weather: Weather): Double = when (type) {
+        BusinessType.BAKERY, BusinessType.CAFE, BusinessType.GROCER -> when (weather) {
+            Weather.CLEAR -> 1.05
+            Weather.CLOUDY -> 0.95
+            Weather.FOG -> 0.8
+            Weather.RAIN -> 0.65
+            Weather.SNOW -> 0.55
+            Weather.STORM -> 0.35
+        }
+        BusinessType.HARDWARE, BusinessType.BOOKSHOP, BusinessType.TAILOR -> when (weather) {
+            Weather.CLEAR -> 1.05
+            Weather.CLOUDY -> 1.0
+            Weather.FOG -> 0.9
+            Weather.RAIN -> 0.8
+            Weather.SNOW -> 0.7
+            Weather.STORM -> 0.5
+        }
+        BusinessType.PUB -> when (weather) {
+            Weather.CLEAR -> 1.05
+            Weather.CLOUDY -> 1.0
+            Weather.FOG -> 0.95
+            Weather.RAIN -> 0.9
+            Weather.SNOW -> 0.8
+            Weather.STORM -> 0.65
+        }
+        BusinessType.WORKSHOP, BusinessType.FACTORY -> 1.0
+        else -> when (weather) {
+            Weather.CLEAR -> 1.0
+            Weather.CLOUDY -> 0.9
+            Weather.FOG -> 0.75
+            Weather.RAIN -> 0.65
+            Weather.SNOW -> 0.55
+            Weather.STORM -> 0.35
         }
     }
 
