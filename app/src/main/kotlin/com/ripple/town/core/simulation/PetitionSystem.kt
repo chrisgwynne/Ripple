@@ -46,6 +46,11 @@ object PetitionSystem {
 
     const val DAILY_SIGN_CHANCE = 0.22
 
+    // Group-cohesion bloc amplification.
+    const val BLOC_MIN_SIZE = 3
+    const val BLOC_PRESSURE_PER_MEMBER = 0.15
+    const val MAX_BLOC_BONUS = 1.0
+
     // Policy effects on success.
     const val NOISE_REDUCTION_ON_SUCCESS = 18.0
     const val RENT_REDUCTION_ON_SUCCESS = 40.0
@@ -60,6 +65,7 @@ object PetitionSystem {
     fun updateDaily(ctx: TickContext) {
         resolveDue(ctx)
         gatherSignatures(ctx)
+        applyBlocAmplification(ctx)
         maybeStartPetition(ctx)
     }
 
@@ -192,6 +198,35 @@ object PetitionSystem {
         }
     }
 
+    /**
+     * After each day's signatures are gathered, recompute [Petition.pressure] as raw signature
+     * count + a group-cohesion bloc bonus. For every active [CommunityGroup] that has at least
+     * [BLOC_MIN_SIZE] members signed, those members move as a bloc and contribute
+     * [BLOC_PRESSURE_PER_MEMBER] × cohort size to the pressure. The total bonus across all groups
+     * is capped at [MAX_BLOC_BONUS].
+     *
+     * Records the name of any qualifying group so the resolution event can mention it.
+     */
+    private fun applyBlocAmplification(ctx: TickContext) {
+        val state = ctx.state
+        for (petition in state.petitions.filter { it.status == PetitionStatus.ACTIVE }.sortedBy { it.id }) {
+            val signatorySet = petition.signatureIds.toHashSet()
+            var blocBonus = 0.0
+            for (group in state.communityGroups.values.sortedBy { it.id }) {
+                if (!group.active) continue
+                val cohortSize = group.memberIds.count { it in signatorySet }
+                if (cohortSize >= BLOC_MIN_SIZE) {
+                    blocBonus += cohortSize * BLOC_PRESSURE_PER_MEMBER
+                    if (blocBonus >= MAX_BLOC_BONUS) {
+                        blocBonus = MAX_BLOC_BONUS
+                        break
+                    }
+                }
+            }
+            petition.pressure = petition.signatureCount.toDouble() + blocBonus
+        }
+    }
+
     /** Residents with above-average sympathy for the petition's subject. */
     private fun sympathisersFor(ctx: TickContext, petition: Petition): List<Resident> {
         val state = ctx.state
@@ -219,7 +254,9 @@ object PetitionSystem {
     private fun resolveDue(ctx: TickContext) {
         val state = ctx.state
         for (petition in state.petitions.filter { it.status == PetitionStatus.ACTIVE }.sortedBy { it.id }) {
-            val succeeded = petition.signatureCount >= petition.signatureThreshold
+            // Use pressure (signature count + bloc bonus) as the resolution criterion so that
+            // community groups signing as a bloc can tip a petition over the threshold.
+            val succeeded = petition.pressure >= petition.signatureThreshold
             val expired = ctx.now >= petition.deadlineAt
             if (!succeeded && !expired) continue
             if (succeeded) resolveSuccess(ctx, petition) else resolveFailure(ctx, petition)
@@ -235,6 +272,15 @@ object PetitionSystem {
         petition.status = PetitionStatus.SUCCEEDED
         val starter = state.resident(petition.starterId)
 
+        // Identify any community groups that signed as a bloc (≥ BLOC_MIN_SIZE members signed).
+        val signatorySet = petition.signatureIds.toHashSet()
+        val blocGroups = state.communityGroups.values
+            .filter { it.active && it.memberIds.count { id -> id in signatorySet } >= BLOC_MIN_SIZE }
+            .sortedBy { it.id }
+        val blocSuffix = if (blocGroups.isNotEmpty()) {
+            " " + blocGroups.joinToString("; ") { "The ${it.name} signed as a bloc." }
+        } else ""
+
         val description = when (petition.subject) {
             PetitionSubject.NOISE -> {
                 val target = petition.targetBuildingId?.let { state.building(it) }
@@ -243,12 +289,12 @@ object PetitionSystem {
                     target.visibleChanges += "${SimTime.formatDate(ctx.now)} — Noise abatement notice"
                     if (target.visibleChanges.size >= Building.MAX_VISIBLE_CHANGES) target.visibleChanges.removeAt(0)
                 }
-                "The town council has upheld the petition against ${target?.name ?: "a noisy premises"} — quieter hours are now in force."
+                "The town council has upheld the petition against ${target?.name ?: "a noisy premises"} — quieter hours are now in force.$blocSuffix"
             }
             PetitionSubject.RENT -> {
                 val hh = petition.targetHouseholdId?.let { state.household(it) }
                 if (hh != null) hh.monthlyRent = (hh.monthlyRent - RENT_REDUCTION_ON_SUCCESS).coerceAtLeast(0.0)
-                "The rent relief petition has succeeded — a modest reduction has been agreed."
+                "The rent relief petition has succeeded — a modest reduction has been agreed.$blocSuffix"
             }
         }
 

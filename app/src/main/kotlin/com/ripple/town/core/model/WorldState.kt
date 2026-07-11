@@ -102,7 +102,14 @@ data class Petition(
     val signatureThreshold: Int,
     val signatureIds: MutableList<Long> = mutableListOf(),
     var status: PetitionStatus = PetitionStatus.ACTIVE,
-    val startEventId: Long = 0L
+    val startEventId: Long = 0L,
+    /**
+     * Effective pressure = raw signature count + group-cohesion bloc bonus.
+     * Updated daily by [com.ripple.town.core.simulation.PetitionSystem.applyBlocAmplification]
+     * after signature gathering. Resolution uses this rather than bare signatureCount so that
+     * community groups signing as a bloc give a small, capped amplification effect.
+     */
+    var pressure: Double = 0.0
 ) {
     val signatureCount: Int get() = signatureIds.size
 }
