@@ -368,7 +368,14 @@ data class WorldState(
      * `ServiceType.name`. Recomputed monthly by [TownNeedsPlanner].
      */
     val servicePressures: MutableMap<String, ServicePressure> = mutableMapOf(),
-    var nextProjectId: Long = 1L
+    var nextProjectId: Long = 1L,
+    /**
+     * Town-wide event-cadence cooldowns keyed by [com.ripple.town.core.simulation.HumanScheduler]
+     * activity names. Records the sim-time each activity type last fired, so the scheduler can
+     * prevent clusters ("three weddings this week"). Written by
+     * [com.ripple.town.core.simulation.HumanScheduler.recordFired].
+     */
+    val activityCooldowns: MutableMap<String, Long> = mutableMapOf()
 ) {
     fun district(id: Long): District? = districts[id]
 

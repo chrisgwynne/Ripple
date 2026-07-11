@@ -235,6 +235,13 @@ data class Resident(
     var plannedActivityMinutes: Long = 0L,
     var plannedActivityReason: String = "",
     var leftTownAt: Long? = null,
+    /**
+     * Breathing space: sim-time before which this resident will not be given another
+     * major life goal (new business, move home, marriage search). Set after completing or
+     * abandoning a major goal so life events don't cascade unrealistically fast.
+     * Default 0 = no cooldown (existing saves are unaffected).
+     */
+    var majorEventCooldownUntil: Long = 0L,
 
     var occupation: String = "Unemployed",
     var employmentId: Long? = null,

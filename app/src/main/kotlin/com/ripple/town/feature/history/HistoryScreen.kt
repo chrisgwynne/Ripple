@@ -196,7 +196,7 @@ fun HistoryScreen(
                 val sample = dayEvents.first()
                 item(key = "day$year-$dayIdx") {
                     Text(
-                        "${SimTime.dayOfMonth(sample.time)} ${SimTime.MONTH_NAMES[SimTime.monthIndex(sample.time)]}",
+                        "${SimTime.dayOfMonth(sample.time)} ${SimTime.MONTH_SHORT[SimTime.monthIndex(sample.time)]}",
                         style = MaterialTheme.typography.labelLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(top = 10.dp, bottom = 2.dp)

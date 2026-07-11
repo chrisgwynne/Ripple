@@ -70,12 +70,15 @@ class TickContext(
         severity: Double = 0.3,
         visibility: EventVisibility = EventVisibility.PUBLIC,
         payload: Map<String, String> = emptyMap(),
-        causeIds: List<Long> = emptyList()
+        causeIds: List<Long> = emptyList(),
+        /** Override the event timestamp. Used so daily systems that fire at midnight can
+         *  give life events (births, business openings, etc.) a believable daytime hour. */
+        atTime: Long? = null
     ): WorldEvent {
         val depth = if (causeIds.isEmpty()) 0 else causeIds.maxOf { causeDepth(it) } + 1
         val event = WorldEvent(
             id = state.nextEventId++,
-            time = now,
+            time = atTime ?: now,
             type = type,
             sourceResidentId = sourceResidentId,
             targetResidentIds = targetResidentIds,

@@ -23,9 +23,15 @@ object SimTime {
     /** At 1x speed one real second is one in-game minute (1 real minute = 1 in-game hour). */
     const val GAME_MINUTES_PER_REAL_SECOND_AT_1X = 1.0
 
+    /** Full month names — January through December. */
     val MONTH_NAMES = listOf(
-        "Frostwane", "Thawmarch", "Seedfall", "Rainveil", "Brightmay", "Highsun",
-        "Goldcrest", "Emberwane", "Harvestide", "Mistfall", "Dimming", "Deepwinter"
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    )
+    /** Abbreviated month names for compact display. */
+    val MONTH_SHORT = listOf(
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
     )
 
     fun tickOf(minutes: Long): Long = minutes / MINUTES_PER_TICK
@@ -35,12 +41,17 @@ object SimTime {
     fun dayOfMonth(minutes: Long): Int = ((dayIndex(minutes) % DAYS_PER_MONTH) + 1).toInt()
     fun monthIndex(minutes: Long): Int = ((dayIndex(minutes) / DAYS_PER_MONTH) % MONTHS_PER_YEAR).toInt()
     fun year(minutes: Long): Int = (dayIndex(minutes) / DAYS_PER_YEAR).toInt() + 1
-    fun dayOfWeek(minutes: Long): Int = (dayIndex(minutes) % 7).toInt() // 0..6, 5-6 = weekend
+    fun dayOfWeek(minutes: Long): Int = (dayIndex(minutes) % 7).toInt() // 0=Mon..6=Sun; 5-6 = weekend
 
     fun ageYears(birthMinutes: Long, now: Long): Int =
         ((now - birthMinutes) / MINUTES_PER_YEAR).toInt().coerceAtLeast(0)
 
+    /** Compact date: "14 Jan • Year 3" */
     fun formatDate(minutes: Long): String =
+        "${dayOfMonth(minutes)} ${MONTH_SHORT[monthIndex(minutes)]} • Year ${year(minutes)}"
+
+    /** Long-form date: "14 January, Year 3" */
+    fun formatDateLong(minutes: Long): String =
         "${dayOfMonth(minutes)} ${MONTH_NAMES[monthIndex(minutes)]}, Year ${year(minutes)}"
 
     fun formatClock(minutes: Long): String {
