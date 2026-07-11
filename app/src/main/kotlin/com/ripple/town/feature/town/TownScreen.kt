@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,8 +19,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -384,6 +388,39 @@ fun TownScreen(
             }
             if (!speedExpanded) {
                 SpeedButton(speedPillLabel(speed), selected = true) { speedExpanded = true }
+            }
+        }
+
+        // ------- District navigation bar (bottom-right, only when districtNav available) -------
+        if (w.districtNav.isNotEmpty()) {
+            val (cw2, ch2) = canvasSize
+            LazyRow(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 8.dp, bottom = 10.dp)
+                    .widthIn(max = 220.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                contentPadding = PaddingValues(horizontal = 2.dp)
+            ) {
+                items(w.districtNav) { entry ->
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = RippleColors.Ink.copy(alpha = 0.72f),
+                        modifier = Modifier.clickable {
+                            camera.centreOn(entry.cx, entry.cy, cw2, ch2)
+                            camera.isFollowing = false
+                        }
+                    ) {
+                        Text(
+                            entry.name,
+                            color = RippleColors.Cream,
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
             }
         }
 

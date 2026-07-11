@@ -516,6 +516,11 @@ class WorldGenerator(private val seed: Long, private val townName: String = "Ash
             skills = mapOf(SkillType.TEACHING to 65.0, SkillType.SOCIAL to 55.0), wealth = 1_300.0
         ), hhLudlow.id, hhLudlow.homeBuildingId!!)
         makeResident(state, rng, Spec("Robin", "Ludlow", Gender.NONBINARY, 10, "Pupil", curiosity = 0.75), hhLudlow.id, hhLudlow.homeBuildingId!!)
+        // Seed all hand-authored residents into discoveredResidentIds so the People screen
+        // shows them from the first tick without waiting for ActivationSystem promotion.
+        state.residents.values
+            .filter { it.detailLevel == DetailLevel.DETAILED }
+            .forEach { if (it.id !in state.discoveredResidentIds) state.discoveredResidentIds += it.id }
     }
 
     // ------------------------------------------------------ businesses/jobs

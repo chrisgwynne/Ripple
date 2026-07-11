@@ -44,6 +44,9 @@ import com.ripple.town.data.EventUi
 import com.ripple.town.data.ResidentUi
 import com.ripple.town.data.WorldUi
 
+/** Below this zoom level resident sprites switch to crowd dots for performance. */
+private const val CROWD_ZOOM = 1.4f
+
 sealed class TownTap {
     data class OnResident(val id: Long) : TownTap()
     data class OnBuilding(val id: Long) : TownTap()
@@ -267,8 +270,23 @@ fun TownRenderer(
             }
 
             // Residents (eased towards their simulated positions) — culled to viewport.
+            // Below CROWD_ZOOM sprites are replaced by coloured dots so the renderer
+            // doesn't pay full sprite decode cost across a zoomed-out 320×200 map.
             val followId = world.followedResidentId
+            val crowdMode = camera.scale < CROWD_ZOOM
             for (r in world.residents.filter { it.visibleOnMap && it.x.toInt() in vpTileX0..vpTileX1 && it.y.toInt() in vpTileY0..vpTileY1 }.sortedBy { it.y }) {
+                if (crowdMode) {
+                    val cx = r.x * TILE_PX + TILE_PX / 2f
+                    val cy = r.y * TILE_PX + TILE_PX / 2f
+                    val dotR = if (r.id == followId) 3.5f else 2.0f
+                    val dotColor = when {
+                        r.id == followId -> RippleColors.Gold
+                        r.detailed -> RippleColors.WarmGreen
+                        else -> Color(0xFFAAAAAA)
+                    }
+                    canvas.drawCircle(Offset(cx, cy), dotR, Paint().apply { color = dotColor })
+                    continue
+                }
                 val target = Offset(r.x, r.y)
                 val prev = eased[r.id] ?: target
                 val next = Offset(

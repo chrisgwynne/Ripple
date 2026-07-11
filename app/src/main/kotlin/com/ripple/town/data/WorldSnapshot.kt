@@ -46,7 +46,9 @@ data class WorldUi(
     val residents: List<ResidentUi>,
     val buildings: List<BuildingUi>,
     val map: TownMap,
-    val emergenceRecords: List<EmergenceRecord> = emptyList()
+    val emergenceRecords: List<EmergenceRecord> = emptyList(),
+    /** Sorted list of district names + their approximate map centre. */
+    val districtNav: List<DistrictNavEntry> = emptyList()
 ) {
     val residentsById: Map<Long, ResidentUi> by lazy { residents.associateBy { it.id } }
     val buildingsById: Map<Long, BuildingUi> by lazy { buildings.associateBy { it.id } }
@@ -170,6 +172,10 @@ data class RelationUi(
     val familiarity: Double
 )
 
+/** A district entry for the map navigation bar — name + approximate tile centre. */
+@Immutable
+data class DistrictNavEntry(val name: String, val cx: Float, val cy: Float)
+
 @Immutable
 data class BuildingUi(
     val id: Long,
@@ -232,11 +238,23 @@ object SnapshotBuilder {
     fun build(state: WorldState): WorldUi {
         // Pre-index businesses by buildingId so buildingUi() is O(1) instead of O(businesses).
         val bizByBuilding = state.businesses.values.groupBy { it.buildingId }
-        val residents = state.residentsOrdered().map { r -> residentUi(state, r) }
+        val discoveredIds = state.discoveredResidentIds.toHashSet()
+        val residents = state.residentsOrdered().map { r -> residentUi(state, r, discoveredIds) }
         // Pre-sort by painter's order (y + height) so TownRenderer draws in the right order
         // without paying a per-frame sort across the full list.
         val buildings = state.buildings.values.sortedBy { it.origin.y + it.height }
             .map { b -> buildingUi(state, b, bizByBuilding) }
+        // District nav: average building centre per districtId, sorted by name.
+        val districtNav = state.buildings.values
+            .filter { it.districtId != null }
+            .groupBy { it.districtId!! }
+            .mapNotNull { (distId, bldgs) ->
+                val name = state.districts[distId]?.name ?: return@mapNotNull null
+                val cx = bldgs.map { it.centre().x.toFloat() }.average().toFloat()
+                val cy = bldgs.map { it.centre().y.toFloat() }.average().toFloat()
+                DistrictNavEntry(name, cx, cy)
+            }
+            .sortedBy { it.name }
         return WorldUi(
             worldSeed = state.seed,
             townName = state.townName,
@@ -258,12 +276,13 @@ object SnapshotBuilder {
             residents = residents,
             buildings = buildings,
             map = state.map,
+            districtNav = districtNav,
             emergenceRecords = state.plausibilityData.emergenceRecords
                 .sortedByDescending { it.surpriseScore }.take(10)
         )
     }
 
-    private fun residentUi(state: WorldState, r: com.ripple.town.core.model.Resident): ResidentUi {
+    private fun residentUi(state: WorldState, r: com.ripple.town.core.model.Resident, discoveredIds: Set<Long> = emptySet()): ResidentUi {
         val (x, y, visible) = positionOf(state, r)
         val employment = state.employmentOf(r)
         val employer = employment?.let { state.businesses[it.businessId]?.name }
@@ -298,7 +317,7 @@ object SnapshotBuilder {
             inTown = r.inTown,
             diedAt = r.diedAt,
             causeOfDeath = r.causeOfDeath,
-            detailed = r.detailLevel == DetailLevel.DETAILED,
+            detailed = r.id in discoveredIds,
             occupation = r.occupation,
             employerName = employer,
             activity = r.activity,
