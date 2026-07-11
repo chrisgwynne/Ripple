@@ -406,7 +406,11 @@ data class WorldState(
     val transportRoutes: MutableMap<Long, TransportRoute> = mutableMapOf(),
     var nextRouteId: Long = 1L,
     var townEnvironment: TownEnvironment = TownEnvironment(),
-    var techLevel: TechLevel = TechLevel()
+    var techLevel: TechLevel = TechLevel(),
+    // --- Narrative Plausibility Engine (2026-07-11) ---
+    var narrativeTuning: NarrativeTuning = NarrativeTuning(),
+    val plausibilityData: NarrativePlausibilityData = NarrativePlausibilityData(),
+    var lastNarrativeReport: NarrativePlausibilityReport? = null
 ) {
     fun district(id: Long): District? = districts[id]
 

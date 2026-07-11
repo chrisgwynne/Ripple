@@ -187,6 +187,9 @@ class SimulationCoordinator(
             if (dayIndex % TechnologySystem.UPDATE_INTERVAL_DAYS == 0L) {
                 TechnologySystem.updateMonthly(ctx)
             }
+            if (dayIndex % NarrativePlausibilityEngine.UPDATE_INTERVAL_DAYS == 0L) {
+                NarrativePlausibilityEngine.updateMonthly(ctx)
+            }
             // Consistency check: run after all daily systems to catch impossible states created
             // this tick (e.g. a caregiver dying with no replacement assigned yet).
             // Violations are collected; in debug builds replace with WorldConsistencyValidator.assertValid(ctx.state).
@@ -195,6 +198,7 @@ class SimulationCoordinator(
         }
         // 12b. Per-tick life-event dispatch: society systems react to every new event this tick.
         for (event in ctx.newEvents) {
+            NarrativePlausibilityEngine.onEvent(state, event)
             for (id in event.involvedResidentIds()) {
                 val r = state.resident(id) ?: continue
                 if (!r.inTown) continue

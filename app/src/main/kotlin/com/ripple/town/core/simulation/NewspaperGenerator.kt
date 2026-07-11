@@ -128,6 +128,18 @@ object NewspaperGenerator {
                 "The character of ${state.townName}",
                 "${state.townName} has long been ${state.townCulture.describe()}.")
         }
+        // Emergence: feature a surprising life arc if one was discovered this cycle
+        val report = state.lastNarrativeReport
+        if (report != null && rng.nextBoolean(0.55) && report.newEmergences.isNotEmpty()) {
+            val emergence = report.newEmergences.maxByOrNull { it.surpriseScore }
+            if (emergence != null) {
+                add(StoryCategory.HUMAN_INTEREST, "A remarkable story", emergence.description)
+            }
+        }
+        // Plausibility diagnostic — rare, interesting when it fires
+        if (report != null && rng.nextBoolean(0.08) && report.mostSurprisingStory != null) {
+            add(StoryCategory.HUMAN_INTEREST, "Only in ${state.townName}", report.mostSurprisingStory!!)
+        }
 
         state.lastNewspaperAt = state.time
         return issue
