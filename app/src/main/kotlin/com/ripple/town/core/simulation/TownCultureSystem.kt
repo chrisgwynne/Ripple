@@ -1,6 +1,7 @@
 package com.ripple.town.core.simulation
 
 import com.ripple.town.core.model.BusinessType
+import com.ripple.town.core.model.CommunityGroupType
 import com.ripple.town.core.model.CulturalDimension
 import com.ripple.town.core.model.IdentityLabel
 import com.ripple.town.core.model.SkillType
@@ -63,6 +64,28 @@ object TownCultureSystem {
             safety < 35.0 -> culture.dimensions += CulturalDimension.TROUBLED
             safety > 70.0 -> culture.dimensions += CulturalDimension.SAFE
         }
+
+        // Community-group activity nudges cultural identity (CE1).
+        // Active groups with ≥5 members and reputation ≥60 push the town toward the
+        // dimension most associated with their type.  Each qualifying group contributes
+        // a +0.5 / +0.3 point to a running tally; once the tally clears the threshold
+        // the dimension is added even if the base metrics didn't reach it on their own.
+        var tightKnitBonus = 0.0
+        var safeBonus = 0.0
+        for (group in state.communityGroups.values) {
+            if (!group.active) continue
+            if (group.memberIds.size < 5) continue
+            if (group.reputation < 60.0) continue
+            when (group.type) {
+                CommunityGroupType.SPORTS_CLUB  -> tightKnitBonus += 0.5
+                CommunityGroupType.FAITH_GROUP  -> tightKnitBonus += 0.5
+                CommunityGroupType.CHARITY      -> safeBonus      += 0.3
+                else                            -> Unit
+            }
+        }
+        // A single qualifying group (bonus ≥ threshold) is enough to add the dimension.
+        if (tightKnitBonus >= 0.5) culture.dimensions += CulturalDimension.TIGHT_KNIT
+        if (safeBonus      >= 0.3) culture.dimensions += CulturalDimension.SAFE
 
         // Append a snapshot to the persistent trajectory so the town accumulates an
         // identity over decades. Cap at 120 entries (~10 sim years) to bound memory.
