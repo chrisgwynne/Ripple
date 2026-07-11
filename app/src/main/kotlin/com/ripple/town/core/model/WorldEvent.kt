@@ -51,6 +51,8 @@ enum class EventType(val label: String) {
     FINANCIAL_RELIEF("Financial relief"),
     WEATHER_DAMAGE("Weather damage"),
     COMMUNITY_EVENT("Community event"),
+    COMMUNITY_FORMED("Community group founded"),
+    COMMUNITY_DISBANDED("Community group disbanded"),
     INTERVENTION_APPLIED("A quiet nudge"),
     MEETING("Chance meeting"),
     SECRET_REVEALED("Secret revealed"),
@@ -155,7 +157,18 @@ enum class EventType(val label: String) {
     /** A council member or mayor is found to have engaged in corrupt conduct. */
     POLITICAL_SCANDAL("Political scandal"),
     /** Government approval has moved significantly — fell sharply or climbed back. */
-    APPROVAL_SHIFTED("Approval shifted")
+    APPROVAL_SHIFTED("Approval shifted"),
+
+    /** A resident has actively mended a damaged relationship — warmth and commitment restored.
+     *  Emitted by [com.ripple.town.core.simulation.GoalSystem] when a REPAIR_RELATIONSHIP goal
+     *  completes. `sourceResidentId` = the one who did the repairing; `targetResidentIds` = the
+     *  other party. Always `PRIVATE` — personal reconciliation, not town news. */
+    RELATIONSHIP_REPAIRED("Relationship repaired"),
+
+    /** A resident has retired in good circumstances — employment ended voluntarily, wellbeing
+     *  sound.  Emitted by [com.ripple.town.core.simulation.GoalSystem] when a RETIRE_WELL goal
+     *  completes.  `sourceResidentId` = the retiree.  Always `PRIVATE`. */
+    RESIDENT_RETIRED("Retired")
 }
 
 enum class EventVisibility {
@@ -194,6 +207,13 @@ data class WorldEvent(
     fun involvedResidentIds(): List<Long> =
         (listOfNotNull(sourceResidentId) + targetResidentIds).distinct()
 }
+
+// Typed accessors for common WorldEvent payload keys — prefer these over payload["key"] raw access.
+val WorldEvent.payloadResidentId: Long? get() = payload["residentId"]?.toLongOrNull()
+val WorldEvent.payloadBuildingId: Long? get() = payload["buildingId"]?.toLongOrNull()
+val WorldEvent.payloadAmount: Double? get() = payload["amount"]?.toDoubleOrNull()
+val WorldEvent.payloadReason: String? get() = payload["reason"]
+val WorldEvent.payloadTargetResidentId: Long? get() = payload["targetResidentId"]?.toLongOrNull()
 
 enum class DelayedEffectType {
     /** Target resident's resentment towards payload resident grows. */

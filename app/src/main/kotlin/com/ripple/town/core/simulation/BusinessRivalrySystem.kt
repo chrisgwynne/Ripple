@@ -47,7 +47,7 @@ object BusinessRivalrySystem {
             .groupBy { it.type }
 
         var pairsProcessed = 0
-        for ((_, group) in byType.entries.sortedBy { it.key.ordinal }) {
+        for ((_, group) in ctx.rng.shuffled(byType.entries.toList())) {
             if (pairsProcessed >= MAX_PAIRS_PER_DAY) break
             val sorted = ctx.rng.shuffled(group)
             for (i in sorted.indices) {

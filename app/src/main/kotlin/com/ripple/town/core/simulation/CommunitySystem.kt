@@ -52,7 +52,7 @@ object CommunitySystem {
         )
         state.communityGroups[id] = group
         ctx.emit(
-            EventType.COMMUNITY_EVENT,
+            EventType.COMMUNITY_FORMED,
             "${group.name} has been founded by ${founder.firstName} ${founder.surname}.",
             sourceResidentId = founder.id,
             buildingId = meetingBuilding,
@@ -90,7 +90,7 @@ object CommunitySystem {
             if (group.memberIds.size < 2 && ageYears > 1) {
                 group.active = false
                 ctx.emit(
-                    EventType.COMMUNITY_EVENT,
+                    EventType.COMMUNITY_DISBANDED,
                     "${group.name} has quietly dissolved — not enough members left to carry on.",
                     buildingId = group.meetingBuildingId,
                     severity = 0.2
