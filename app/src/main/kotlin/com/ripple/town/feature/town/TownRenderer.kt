@@ -175,6 +175,14 @@ fun TownRenderer(
         val s = camera.scale
         val px = TILE_PX * s
 
+        // Viewport culling: compute visible tile bounds with a 4-tile margin so sprites
+        // that extend above/beside their footprint are never clipped prematurely.
+        val vpMargin = 4
+        val vpTileX0 = (-camera.offsetX / px - vpMargin).toInt()
+        val vpTileY0 = (-camera.offsetY / px - vpMargin).toInt()
+        val vpTileX1 = ((size.width - camera.offsetX) / px + vpMargin).toInt()
+        val vpTileY1 = ((size.height - camera.offsetY) / px + vpMargin).toInt()
+
         drawIntoCanvas { canvas ->
             val paint = Paint().apply { filterQuality = FilterQuality.None }
             // Ground
@@ -190,8 +198,10 @@ fun TownRenderer(
                 paint = paint
             )
 
-            // Buildings, painter's order by bottom edge.
-            for (b in world.buildings.sortedBy { it.y + it.h }) {
+            // Buildings, painter's order (pre-sorted at snapshot time) — culled to viewport.
+            for (b in world.buildings.filter {
+                it.x < vpTileX1 && it.x + it.w > vpTileX0 && it.y < vpTileY1 && it.y + it.h > vpTileY0
+            }) {
                 val bmp = sprites.building(b.type, b.upgradeLevel, b.abandoned, b.id, b.condition)
                 val topY = b.y * TILE_PX - (bmp.height - b.h * TILE_PX)
                 canvas.drawImageRect(
@@ -255,9 +265,9 @@ fun TownRenderer(
                 }
             }
 
-            // Residents (eased towards their simulated positions).
+            // Residents (eased towards their simulated positions) — culled to viewport.
             val followId = world.followedResidentId
-            for (r in world.residents.filter { it.visibleOnMap }.sortedBy { it.y }) {
+            for (r in world.residents.filter { it.visibleOnMap && it.x.toInt() in vpTileX0..vpTileX1 && it.y.toInt() in vpTileY0..vpTileY1 }.sortedBy { it.y }) {
                 val target = Offset(r.x, r.y)
                 val prev = eased[r.id] ?: target
                 val next = Offset(

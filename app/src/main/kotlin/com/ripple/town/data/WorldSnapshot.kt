@@ -212,8 +212,13 @@ data class CatchUpProgress(
 object SnapshotBuilder {
 
     fun build(state: WorldState): WorldUi {
+        // Pre-index businesses by buildingId so buildingUi() is O(1) instead of O(businesses).
+        val bizByBuilding = state.businesses.values.groupBy { it.buildingId }
         val residents = state.residentsOrdered().map { r -> residentUi(state, r) }
-        val buildings = state.buildings.values.sortedBy { it.id }.map { b -> buildingUi(state, b) }
+        // Pre-sort by painter's order (y + height) so TownRenderer draws in the right order
+        // without paying a per-frame sort across the full list.
+        val buildings = state.buildings.values.sortedBy { it.origin.y + it.height }
+            .map { b -> buildingUi(state, b, bizByBuilding) }
         return WorldUi(
             worldSeed = state.seed,
             townName = state.townName,
@@ -240,7 +245,10 @@ object SnapshotBuilder {
         val (x, y, visible) = positionOf(state, r)
         val employment = state.employmentOf(r)
         val employer = employment?.let { state.businesses[it.businessId]?.name }
-        val relationships = state.relationshipsOf(r.id)
+        // Background residents never accumulate relationships/memories/conditions/skills —
+        // skip the expensive collection traversals entirely for them.
+        val isBackground = r.detailLevel == DetailLevel.BACKGROUND
+        val relationships = if (isBackground) emptyList() else state.relationshipsOf(r.id)
             .filter { it.familiarity > 5 }
             .sortedByDescending { it.warmth() }
             .take(12)
@@ -296,13 +304,13 @@ object SnapshotBuilder {
             comfort = r.needs.comfort,
             safety = r.needs.safety,
             financialSecurity = r.needs.financialSecurity,
-            skills = r.skills.entries.associate { (k, v) -> k.label to v },
+            skills = if (isBackground) emptyMap() else r.skills.entries.associate { (k, v) -> k.label to v },
             personality = r.personality,
-            activeGoalLabels = r.goals
+            activeGoalLabels = if (isBackground) emptyList() else r.goals
                 .filter { it.status == com.ripple.town.core.model.GoalStatus.ACTIVE }
                 .map { "${it.type.label} — ${it.motivation}" },
-            conditionLabels = r.activeConditions().filter { !it.hidden }.map { it.type.label },
-            memories = r.memories.sortedByDescending { it.importance }.take(10).map {
+            conditionLabels = if (isBackground) emptyList() else r.activeConditions().filter { !it.hidden }.map { it.type.label },
+            memories = if (isBackground) emptyList() else r.memories.sortedByDescending { it.importance }.take(10).map {
                 MemoryUi(it.description, it.emotionalIntensity, it.createdAt, it.type.label)
             },
             relationships = relationships
@@ -350,8 +358,8 @@ object SnapshotBuilder {
         return Triple(0f, 0f, false)
     }
 
-    private fun buildingUi(state: WorldState, b: Building): BuildingUi {
-        val biz = state.businesses.values.firstOrNull { it.buildingId == b.id }
+    private fun buildingUi(state: WorldState, b: Building, bizByBuilding: Map<Long, List<com.ripple.town.core.model.Business>>): BuildingUi {
+        val biz = bizByBuilding[b.id]?.firstOrNull()
         val occupants = state.residentsIn(b.id).map { it.id }
         return BuildingUi(
             id = b.id, name = b.name, type = b.type, typeLabel = b.type.label,
