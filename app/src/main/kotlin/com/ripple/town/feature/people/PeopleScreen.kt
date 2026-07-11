@@ -310,6 +310,22 @@ private fun PersonRow(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            if (r.alive && r.inTown) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "♥ ${healthLabel(r.health)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (r.health < 50) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        wealthLabel(r.wealth, r.debt),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (r.debt > 0) MaterialTheme.colorScheme.error
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
             if (updateBadge != null) {
                 Text(
                     updateBadge,
@@ -324,6 +340,20 @@ private fun PersonRow(
             Text("★", color = MaterialTheme.colorScheme.secondary)
         }
     }
+}
+
+private fun healthLabel(h: Double): String = when {
+    h < 25 -> "Critical"
+    h < 50 -> "Poor"
+    h < 70 -> "Unwell"
+    h < 85 -> "Good"
+    else -> "Healthy"
+}
+
+private fun wealthLabel(wealth: Double, debt: Double): String = when {
+    debt > 0 -> "Debt £${debt.toInt()}"
+    wealth >= 1000 -> "£${"%.1f".format(wealth / 1000)}k"
+    else -> "£${wealth.toInt()}"
 }
 
 /** Short emoji/glyph mood indicator alongside the existing text label. */
