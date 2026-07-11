@@ -331,7 +331,7 @@ object GoalSystem {
         var chosenType: BusinessType? = null
         for (building in vacants) {
             for (type in FORMATION_CANDIDATE_TYPES) {
-                val viability = EconomySystem.estimateFormationViability(ctx, building, type, STARTUP_CAPITAL)
+                val viability = EconomySystem.estimateFormationViability(ctx, building, type, STARTUP_CAPITAL, founderSurname = r.surname)
                 if (viability.viable) {
                     chosenBuilding = building
                     chosenType = type

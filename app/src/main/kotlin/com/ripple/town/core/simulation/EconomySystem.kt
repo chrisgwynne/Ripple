@@ -1321,6 +1321,16 @@ object EconomySystem {
      *  this pass), but enough that the gap is closeable, not structurally impossible. */
     const val FORMATION_VIABILITY_FRACTION = 0.55
 
+    /** Formation viability fraction reduction for a BUSINESS_EMPIRE founder with enough living
+     *  family members — inherited trade networks and family capital lower the hurdle a dynasty
+     *  entrepreneur needs to clear to be considered viable. Applied as a subtraction from
+     *  [FORMATION_VIABILITY_FRACTION] before the required-customers gate is computed. */
+    const val BUSINESS_EMPIRE_FORMATION_BONUS = 0.05
+
+    /** Minimum living family members for a business empire legacy to confer the formation bonus —
+     *  a sole survivor doesn't bring the same network with them. */
+    const val BUSINESS_EMPIRE_LEGACY_MIN_MEMBERS = 2
+
     /** How many same-type open businesses within the projected catchment radius is considered
      *  "acceptable local competition" per the brief — beyond this, the gate treats the sector as
      *  saturated for this specific location even if the raw demand number alone looks marginal. */
@@ -1363,7 +1373,7 @@ object EconomySystem {
      * driven, not catchment-gated; a hard reject here would be gating them on a signal that was
      * never meant to describe them).
      */
-    fun estimateFormationViability(ctx: TickContext, building: Building, type: BusinessType, startupCapital: Double): FormationViability {
+    fun estimateFormationViability(ctx: TickContext, building: Building, type: BusinessType, startupCapital: Double, founderSurname: String? = null): FormationViability {
         if (startupCapital <= 0.0) {
             return FormationViability(false, 0.0, 0, 0, 0, "no real startup capital")
         }
@@ -1406,7 +1416,8 @@ object EconomySystem {
         // for every type per `SectorDemandProfileTest`'s own sweep).
         val achievable = ((projectedDemand / 100.0) * 2.2 * 13.0).toInt()
 
-        val required = (breakEven * FORMATION_VIABILITY_FRACTION).toInt().coerceAtLeast(1)
+        val dynastyBonus = businessEmpireFormationBonus(ctx, founderSurname)
+        val required = (breakEven * (FORMATION_VIABILITY_FRACTION - dynastyBonus)).toInt().coerceAtLeast(1)
         val viable = achievable >= required
         val reason = if (viable) {
             "projected demand ($projectedDemand, ~$achievable customers/day) clears $FORMATION_VIABILITY_FRACTION" +
@@ -1416,6 +1427,16 @@ object EconomySystem {
                 "x lean break-even ($breakEven, needs $required)"
         }
         return FormationViability(viable, projectedDemand, breakEven, achievable, localCompetitors, reason)
+    }
+
+    /** [BUSINESS_EMPIRE_FORMATION_BONUS] when the founder's family is a BUSINESS_EMPIRE legacy with
+     *  enough living members to bring real trade networks to a new venture, 0.0 otherwise. */
+    private fun businessEmpireFormationBonus(ctx: TickContext, founderSurname: String?): Double {
+        if (founderSurname == null) return 0.0
+        val legacy = ctx.state.familyLegacies[founderSurname] ?: return 0.0
+        if (legacy.reputationType != com.ripple.town.core.model.FamilyReputationType.BUSINESS_EMPIRE.name) return 0.0
+        if (legacy.livingMembers < BUSINESS_EMPIRE_LEGACY_MIN_MEMBERS) return 0.0
+        return BUSINESS_EMPIRE_FORMATION_BONUS
     }
 
     /** [standingMultiplier] generalised to raw reputation/priceLevel inputs, for a not-yet-open

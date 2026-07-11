@@ -3,6 +3,7 @@ package com.ripple.town.core.simulation
 import com.ripple.town.core.model.BuildingType
 import com.ripple.town.core.model.Candidacy
 import com.ripple.town.core.model.EventType
+import com.ripple.town.core.model.FamilyReputationType
 import com.ripple.town.core.model.LifeStage
 import com.ripple.town.core.model.MemoryType
 import com.ripple.town.core.model.Resident
@@ -53,6 +54,15 @@ object ElectionSystem {
 
     /** Bounded town-wide policy effect while a mayor holds office: repairs get funded a little more readily. */
     const val MAYORAL_REPAIR_CHANCE_BONUS = 0.04
+
+    /** Campaign boost added to a candidate's support gain when they belong to a POLITICAL_DYNASTY
+     *  family with at least two living members — name recognition and machine organisation translate
+     *  into a real, bounded edge on the campaign trail. */
+    const val DYNASTY_CAMPAIGN_BOOST = 5.0
+
+    /** Minimum living family members for a dynasty legacy to confer the campaign boost — a lone
+     *  surviving member doesn't bring the same machine with them. */
+    const val DYNASTY_LEGACY_MIN_MEMBERS = 2
 
     fun updateDaily(ctx: TickContext) {
         callElection(ctx)
@@ -122,7 +132,8 @@ object ElectionSystem {
             val familiarity = averageFamiliarity(state, candidate.id) / FAMILIARITY_SUPPORT_DIVISOR
             val traits = ctx.state.leadershipTraits[candidate.id]
             val traitBonus = (traits?.charisma ?: 0.5) * 2.0 + (traits?.communication ?: 0.5) * 1.5
-            val gain = CAMPAIGN_SUPPORT_GAIN_BASE + trackRecord + familiarity + traitBonus + ctx.rng.nextDouble(-1.0, 2.0)
+            val dynastyBoost = dynastyCampaignBoost(ctx, candidate.surname)
+            val gain = CAMPAIGN_SUPPORT_GAIN_BASE + trackRecord + familiarity + traitBonus + dynastyBoost + ctx.rng.nextDouble(-1.0, 2.0)
             candidacy.support = (candidacy.support + gain).coerceAtLeast(0.0)
             candidacy.actionsTaken++
 
@@ -137,6 +148,15 @@ object ElectionSystem {
                 ctx.sendTo(candidate, townHall.id, com.ripple.town.core.model.Activity.COMMUNITY, 90L, "Campaigning at the town hall")
             }
         }
+    }
+
+    /** [DYNASTY_CAMPAIGN_BOOST] when the candidate's family is a POLITICAL_DYNASTY with enough
+     *  living members to bring real organisational weight to a campaign, 0.0 otherwise. */
+    private fun dynastyCampaignBoost(ctx: TickContext, surname: String): Double {
+        val legacy = ctx.state.familyLegacies[surname] ?: return 0.0
+        if (legacy.reputationType != FamilyReputationType.POLITICAL_DYNASTY.name) return 0.0
+        if (legacy.livingMembers < DYNASTY_LEGACY_MIN_MEMBERS) return 0.0
+        return DYNASTY_CAMPAIGN_BOOST
     }
 
     /** Resolved petitions this resident started and won — genuine local-politics standing, not personality. */

@@ -14,6 +14,18 @@ object PoliticsSystem {
 
     const val UPDATE_INTERVAL_DAYS = 30L
 
+    /** Base alignment score a resident must exceed before a party will recruit them. */
+    private const val RECRUIT_ALIGNMENT_THRESHOLD = 58.0
+
+    /** Penalty added to the recruitment alignment threshold for a resident whose family carries a
+     *  CRIMINAL legacy with enough living members — party recruiters are wary of known criminal
+     *  families and hold them to a higher standard of alignment before enrolling them. */
+    const val CRIMINAL_DYNASTY_RECRUITMENT_PENALTY = 10.0
+
+    /** Minimum living family members for a criminal legacy to trigger the recruitment penalty —
+     *  a single surviving member doesn't carry the full family stigma in recruiters' eyes. */
+    const val CRIMINAL_LEGACY_MIN_MEMBERS = 2
+
     // ─────────────────────────────────────────────────────────────────
     // Party archetypes — seeds for procedural generation.
     // Each is a centroid in policy-space; actual parties receive up to
@@ -179,6 +191,15 @@ object PoliticsSystem {
         return if (n == 0) 50.0 else total / n
     }
 
+    /** [CRIMINAL_DYNASTY_RECRUITMENT_PENALTY] when the resident's family is a CRIMINAL legacy with
+     *  enough living members for recruiters to be genuinely wary, 0.0 otherwise. */
+    private fun criminalDynastyRecruitmentPenalty(state: WorldState, surname: String): Double {
+        val legacy = state.familyLegacies[surname] ?: return 0.0
+        if (legacy.reputationType != FamilyReputationType.CRIMINAL.name) return 0.0
+        if (legacy.livingMembers < CRIMINAL_LEGACY_MIN_MEMBERS) return 0.0
+        return CRIMINAL_DYNASTY_RECRUITMENT_PENALTY
+    }
+
     // ─────────────────────────────────────────────────────────────────
     // Leader assignment
     // ─────────────────────────────────────────────────────────────────
@@ -232,7 +253,8 @@ object PoliticsSystem {
                 && r.politicalInterest > 0.35 && r.partyId == null }
             .forEach { r ->
                 val best = active.maxByOrNull { alignmentScore(r, it, state) } ?: return@forEach
-                if (alignmentScore(r, best, state) > 58.0) enroll(r, best)
+                val recruitThreshold = RECRUIT_ALIGNMENT_THRESHOLD + criminalDynastyRecruitmentPenalty(state, r.surname)
+                if (alignmentScore(r, best, state) > recruitThreshold) enroll(r, best)
             }
     }
 
