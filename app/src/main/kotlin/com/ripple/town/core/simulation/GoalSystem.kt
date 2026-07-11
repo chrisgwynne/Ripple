@@ -73,7 +73,8 @@ object GoalSystem {
         val findJobThreshold = 45.0 * MemoryRecallSystem.childhoodInfluenceModifier(
             r, MemoryRecallSystem.ChildhoodSituation.FINANCIAL_HARDSHIP
         )
-        if (state.employmentOf(r) == null && stage == LifeStage.ADULT && r.ageAt(ctx.now) < 66 &&
+        val isRetired = r.awareness.any { it.startsWith(RETIRED_FLAG) }
+        if (!isRetired && state.employmentOf(r) == null && stage == LifeStage.ADULT && r.ageAt(ctx.now) < 66 &&
             n.financialSecurity < findJobThreshold
         ) {
             seedGoal(ctx, r, GoalType.FIND_JOB, "Money is tight and there's no wage coming in.")
@@ -135,8 +136,8 @@ object GoalSystem {
             }
         }
 
-        // Approaching old age -> retire gracefully
-        if (r.ageAt(ctx.now) >= 65 && stage == LifeStage.ADULT && state.employmentOf(r) != null) {
+        // Approaching old age -> retire gracefully (not if already retired)
+        if (!isRetired && r.ageAt(ctx.now) >= 65 && stage == LifeStage.ADULT && state.employmentOf(r) != null) {
             seedGoal(ctx, r, GoalType.RETIRE_WELL, "There's less road left than there was.")
         }
 
@@ -239,10 +240,22 @@ object GoalSystem {
                         goal.progress = (worstRel.affection / 60.0).coerceIn(0.0, 1.0)
                         if (goal.progress >= 1.0) {
                             r.needs.social = (r.needs.social + 5.0).coerceAtMost(100.0)
+                            // Boost warmth and trust on the repaired relationship.
+                            worstRel.affection = (worstRel.affection + 15.0).coerceAtMost(100.0)
+                            worstRel.trust = (worstRel.trust + 10.0).coerceAtMost(100.0)
+                            val otherId = worstRel.other(r.id)
                             ctx.addMemory(r, MemoryType.KINDNESS_GIVEN,
                                 "Made things right with someone I'd hurt.",
-                                intensity = 35.0, associated = listOf(worstRel.other(r.id)))
+                                intensity = 35.0, associated = listOf(otherId))
                             complete(ctx, r, goal, "The air between us cleared")
+                            ctx.emit(
+                                com.ripple.town.core.model.EventType.RELATIONSHIP_REPAIRED,
+                                "${r.fullName} made peace with an old wound.",
+                                sourceResidentId = r.id,
+                                targetResidentIds = listOf(otherId),
+                                severity = 0.2,
+                                visibility = com.ripple.town.core.model.EventVisibility.PRIVATE
+                            )
                         }
                     }
                 }
@@ -253,10 +266,21 @@ object GoalSystem {
                     if (notWorking && comfortable) {
                         r.needs.comfort = (r.needs.comfort + 8.0).coerceAtMost(100.0)
                         r.needs.purpose = (r.needs.purpose + 5.0).coerceAtMost(100.0)
+                        // Mark the resident as retired so employment-seeking goals don't respawn.
+                        if (!r.awareness.any { it.startsWith(RETIRED_FLAG) }) {
+                            r.awareness += RETIRED_FLAG
+                        }
                         ctx.addMemory(r, MemoryType.ACHIEVEMENT,
                             "Found peace in the later years.",
                             intensity = 45.0)
                         complete(ctx, r, goal, "Settled into a quieter life")
+                        ctx.emit(
+                            com.ripple.town.core.model.EventType.RESIDENT_RETIRED,
+                            "${r.fullName} has settled into a quieter life.",
+                            sourceResidentId = r.id,
+                            severity = 0.2,
+                            visibility = com.ripple.town.core.model.EventVisibility.PRIVATE
+                        )
                     }
                 }
                 GoalType.LEAVE_TOWN -> {
@@ -536,4 +560,8 @@ object GoalSystem {
     }
 
     const val STARTUP_CAPITAL = 400.0
+
+    /** Awareness flag set when a RETIRE_WELL goal completes. Prevents FIND_JOB and
+     *  RETIRE_WELL goals from respawning once a resident has retired. */
+    const val RETIRED_FLAG = "retired"
 }

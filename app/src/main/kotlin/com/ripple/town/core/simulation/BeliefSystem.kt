@@ -275,6 +275,21 @@ object BeliefSystem {
         markCooldown(ctx, r, reasonKey)
     }
 
+    // ------------------------------------------------------------ public write helpers (narrow)
+
+    /**
+     * Called by [com.ripple.town.core.simulation.LegendSystem] when a widely-believed legend
+     * subtly reinforces a believer's [BeliefTopic.COMMUNITY_LOYALTY].  Delegates to [applyDrift]
+     * so the same resistance/confidence/event-emit pipeline applies — not a back-door write.
+     * [legendId] is threaded through as a synthetic cause event id (negative, to avoid clashing
+     * with real event ids) so the cause chain stays traceable.
+     */
+    fun applyLegendBelief(ctx: TickContext, r: Resident, topic: BeliefTopic, delta: Double, legendId: Long) {
+        applyDrift(ctx, r, topic, delta, "legend:$legendId",
+            "A story everyone around here believes has quietly shaped how they see this place.",
+            emptyList())
+    }
+
     // ------------------------------------------------------------ public read helpers
 
     /** [Belief.position] for [topic], or the neutral `0.0` default if this resident has no

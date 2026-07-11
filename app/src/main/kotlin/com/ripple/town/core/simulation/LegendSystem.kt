@@ -1,5 +1,6 @@
 package com.ripple.town.core.simulation
 
+import com.ripple.town.core.model.BeliefTopic
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.EventVisibility
 import com.ripple.town.core.model.LegendSubject
@@ -38,6 +39,10 @@ object LegendSystem {
     private const val REINFORCE_BOOST = 15.0
     private const val LONGEVITY_YEARS = 30L
     private const val MAX_ACTIVE_LEGENDS = 20
+    /** Fraction of detailed residents who must believe a legend before it colours their worldview. */
+    private const val WIDE_BELIEF_THRESHOLD = 0.30
+    /** Annual community-loyalty drift for believers of a widely-held legend (on the -1..1 scale). */
+    private const val LEGEND_BELIEF_BOOST = 0.02
 
     // ---- Spawn ---------------------------------------------------------------------------------
 
@@ -118,6 +123,8 @@ object LegendSystem {
             return
         }
 
+        // The first "believer" is whoever witnessed the event that spawned the legend.
+        // We don't have that resident here, so the set starts empty and fills on first spread.
         val legend = LocalLegend(
             id = state.nextLegendId++,
             subject = subject, subjectId = subjectId, subjectName = subjectName,
@@ -157,6 +164,28 @@ object LegendSystem {
                 spreadLegend(ctx, legend, residents)
             }
 
+            // When a legend reaches wide believership (>30% of detailed residents), it subtly
+            // reinforces the community-loyalty belief of each believer — the legend has become
+            // shared folk-identity, not just gossip.  Small drift applied at most once per year
+            // per believer (gated by the same awareness-flag cooldown BeliefSystem uses).
+            val detailedCount = residents.size
+            if (detailedCount > 0 && legend.believers.size.toDouble() / detailedCount > WIDE_BELIEF_THRESHOLD) {
+                for (believerId in legend.believers) {
+                    val believer = state.resident(believerId) ?: continue
+                    if (!believer.inTown) continue
+                    val cooldownKey = "legend_belief:${legend.id}"
+                    val alreadyCooling = believer.awareness.any { it.startsWith("$cooldownKey@") }
+                    if (alreadyCooling) {
+                        val ts = believer.awareness.firstOrNull { it.startsWith("$cooldownKey@") }
+                            ?.substringAfterLast('@')?.toLongOrNull()
+                        if (ts != null && ctx.now - ts < SimTime.MINUTES_PER_YEAR) continue
+                        believer.awareness.removeAll { it.startsWith("$cooldownKey@") }
+                    }
+                    BeliefSystem.applyLegendBelief(ctx, believer, BeliefTopic.COMMUNITY_LOYALTY, LEGEND_BELIEF_BOOST, legend.id)
+                    believer.awareness += "$cooldownKey@${ctx.now}"
+                }
+            }
+
             if (legend.strength < DEATH_THRESHOLD) {
                 legend.decayedAt = ctx.now
             }
@@ -180,6 +209,7 @@ object LegendSystem {
         // Each successful spread ticks up believer count and records belief on the listener
         if (ctx.rng.nextBoolean(0.4) && legend.id !in listener.knownLegendIds) {
             legend.believerCount++
+            legend.believers += listener.id
             legend.strength = (legend.strength + 0.5).coerceAtMost(100.0)
             legend.lastSpreadAt = ctx.now
             listener.knownLegendIds += legend.id

@@ -37,5 +37,9 @@ data class LocalLegend(
     /** Rough count of current believers — used to scale spread probability. */
     var believerCount: Int = 0,
     /** Set when strength drops below the death threshold; used to skip this legend in updates. */
-    var decayedAt: Long? = null
+    var decayedAt: Long? = null,
+    /** IDs of residents who currently believe this legend. Populated by [com.ripple.town.core.simulation.LegendSystem]
+     *  alongside [believerCount]; allows per-resident belief lookups and threshold checks without
+     *  scanning all residents. Safe default (empty set) so existing checkpoints deserialize unchanged. */
+    val believers: MutableSet<Long> = mutableSetOf()
 )
