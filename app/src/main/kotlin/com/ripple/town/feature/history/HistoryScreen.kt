@@ -1,5 +1,6 @@
 package com.ripple.town.feature.history
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -32,6 +33,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
@@ -154,6 +160,11 @@ fun HistoryScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        if (stats.size >= 3) {
+                            Spacer(Modifier.height(10.dp))
+                            val ordered = stats.reversed()
+                            TownSparklines(ordered)
+                        }
                     }
                 }
             }
@@ -301,4 +312,78 @@ private fun importanceColour(importance: Double) = when {
     importance >= 60 -> RippleColors.BrickRed
     importance >= 45 -> RippleColors.Gold
     else -> RippleColors.WarmGreen
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Trend sparklines
+// ─────────────────────────────────────────────────────────────────
+
+/** Three side-by-side sparklines: wellbeing, population, employment rate. */
+@Composable
+private fun TownSparklines(stats: List<TownStatisticEntity>) {
+    if (stats.isEmpty()) return
+    val wellbeing = stats.map { it.averageWellbeing }
+    val population = stats.map { it.population.toDouble() }
+    val employment = stats.map { s -> if (s.adultCount > 0) s.employedAdults.toDouble() / s.adultCount * 100.0 else 0.0 }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        SparklineCard("Spirits", wellbeing, 0.0, 100.0, RippleColors.WarmGreen, Modifier.weight(1f))
+        SparklineCard("Population", population, null, null, RippleColors.DeepGreen, Modifier.weight(1f))
+        SparklineCard("Employment", employment, 0.0, 100.0, RippleColors.Gold, Modifier.weight(1f))
+    }
+}
+
+@Composable
+private fun SparklineCard(
+    label: String,
+    values: List<Double>,
+    fixedMin: Double?,
+    fixedMax: Double?,
+    lineColor: Color,
+    modifier: Modifier = Modifier
+) {
+    val latest = values.lastOrNull() ?: return
+    Column(modifier) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Sparkline(values, fixedMin, fixedMax, lineColor, Modifier.fillMaxWidth().height(36.dp))
+        Text(
+            when {
+                fixedMax == 100.0 -> "${latest.toInt()}%"
+                else -> latest.toInt().toString()
+            },
+            style = MaterialTheme.typography.labelSmall
+        )
+    }
+}
+
+/** Canvas-drawn polyline sparkline. Normalises values to the available height. */
+@Composable
+private fun Sparkline(
+    values: List<Double>,
+    fixedMin: Double?,
+    fixedMax: Double?,
+    lineColor: Color,
+    modifier: Modifier = Modifier
+) {
+    if (values.size < 2) return
+    Canvas(modifier) {
+        val minVal = fixedMin ?: values.min()
+        val maxVal = fixedMax ?: values.max()
+        val range = (maxVal - minVal).let { if (it < 1.0) 1.0 else it }
+        val path = Path()
+        values.forEachIndexed { i, v ->
+            val x = i.toFloat() / (values.size - 1).toFloat() * size.width
+            val y = size.height - ((v - minVal) / range).toFloat() * size.height
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        drawPath(path, color = lineColor.copy(alpha = 0.3f), style = Stroke(width = 2f, cap = StrokeCap.Round))
+        drawPath(path, color = lineColor, style = Stroke(width = 2f, cap = StrokeCap.Round))
+        // Endpoint dot
+        val lastX = size.width
+        val lastY = size.height - ((values.last() - minVal) / range).toFloat() * size.height
+        drawCircle(lineColor, radius = 3f, center = Offset(lastX, lastY))
+    }
 }
