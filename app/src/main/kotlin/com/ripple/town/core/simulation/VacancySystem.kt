@@ -2,6 +2,7 @@ package com.ripple.town.core.simulation
 
 import com.ripple.town.core.model.BuildingState
 import com.ripple.town.core.model.BuildingType
+import com.ripple.town.core.model.CIVIC_BUILDING_TYPES
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.EventVisibility
 import com.ripple.town.core.model.SimTime
@@ -25,12 +26,9 @@ object VacancySystem {
     /** Days vacant before a DERELICT building becomes CONDEMNED. */
     const val DAYS_TO_CONDEMNED = 120L
 
-    private val CIVIC_TYPES = setOf(
-        BuildingType.FIRE_STATION, BuildingType.POLICE_STATION,
-        BuildingType.SPORTS_HALL, BuildingType.COMMUNITY_CENTRE,
-        BuildingType.SCHOOL, BuildingType.CLINIC, BuildingType.TOWN_HALL,
-        BuildingType.PARK, BuildingType.CEMETERY
-    )
+    // Core 7 civic types imported from CIVIC_BUILDING_TYPES; PARK/CEMETERY added here because
+    // they have no associated Business and shouldn't decay either.
+    private val CIVIC_TYPES = CIVIC_BUILDING_TYPES + setOf(BuildingType.PARK, BuildingType.CEMETERY)
 
     fun updateDaily(ctx: TickContext) {
         val state = ctx.state

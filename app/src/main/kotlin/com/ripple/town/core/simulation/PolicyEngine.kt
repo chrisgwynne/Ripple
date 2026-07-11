@@ -27,11 +27,11 @@ object PolicyEngine {
         // Repeal same-area policies from a previous administration
         state.activePolicies.values
             .filter { rec ->
-                rec.status == PolicyStatus.PASSED.name &&
-                PolicyType.values().firstOrNull { it.name == rec.policyType }?.area in areasReplaced
+                rec.status == PolicyStatus.PASSED &&
+                rec.policyType.area in areasReplaced
             }
             .forEach { rec ->
-                rec.status = PolicyStatus.REPEALED.name
+                rec.status = PolicyStatus.REPEALED
                 rec.repealedAt = state.time
             }
         // Tally real council votes for this party's manifesto using councillor party alignment.
@@ -46,12 +46,12 @@ object PolicyEngine {
             val activates = if (type.delayDays > 0) dayIndex + type.delayDays else null
             state.activePolicies[id] = PolicyRecord(
                 id = id,
-                policyType = type.name,
+                policyType = type,
                 title = type.label,
                 proposedByPartyId = party.id,
                 proposedByResidentId = party.leaderId,
                 proposedAt = state.time,
-                status = if (votesFor > votesAgainst) PolicyStatus.PASSED.name else PolicyStatus.REJECTED.name,
+                status = if (votesFor > votesAgainst) PolicyStatus.PASSED else PolicyStatus.REJECTED,
                 passedAt = if (votesFor > votesAgainst) state.time else null,
                 votesFor = votesFor, votesAgainst = votesAgainst,
                 annualCost = type.annualCost,
@@ -65,7 +65,7 @@ object PolicyEngine {
         recomputeModifiers(state)
         val passed = priorityTypes.size
         val rejected = state.activePolicies.values.count {
-            it.status == PolicyStatus.REJECTED.name && it.proposedByPartyId == party.id &&
+            it.status == PolicyStatus.REJECTED && it.proposedByPartyId == party.id &&
             it.proposedAt == state.time
         }
         if (passed > 0 || rejected > 0) {
@@ -121,12 +121,11 @@ object PolicyEngine {
         val dayIndex = SimTime.dayIndex(state.time)
         state.activePolicies.values
             .filter { rec ->
-                rec.status == PolicyStatus.PASSED.name &&
+                rec.status == PolicyStatus.PASSED &&
                 (rec.activatesAtDay == null || dayIndex >= rec.activatesAtDay!!)
             }
             .forEach { rec ->
-                PolicyType.values().firstOrNull { it.name == rec.policyType }
-                    ?.let { applyEffect(it, mods) }
+                applyEffect(rec.policyType, mods)
             }
         state.policyModifiers = mods
     }
@@ -171,25 +170,22 @@ object PolicyEngine {
         var recompute = false
         state.activePolicies.values
             .filter { rec ->
-                rec.status == PolicyStatus.PASSED.name &&
+                rec.status == PolicyStatus.PASSED &&
                 rec.activatesAtDay != null && dayIndex == rec.activatesAtDay
             }
             .forEach { rec ->
                 recompute = true
-                val type = PolicyType.values().firstOrNull { it.name == rec.policyType }
-                if (type != null) {
-                    ctx.emit(
-                        EventType.TOWN_MILESTONE,
-                        "The effects of '${rec.title}' are now being felt across ${state.townName}",
-                        severity = 0.4
-                    )
-                }
+                ctx.emit(
+                    EventType.TOWN_MILESTONE,
+                    "The effects of '${rec.title}' are now being felt across ${state.townName}",
+                    severity = 0.4
+                )
             }
         if (recompute) recomputeModifiers(state)
         // Deduct daily share of annual policy costs from municipal budget
         val dailyCost = state.activePolicies.values
-            .filter { it.status == PolicyStatus.PASSED.name }
-            .sumOf { rec -> PolicyType.values().firstOrNull { it.name == rec.policyType }?.annualCost ?: 0.0 } / 360.0
+            .filter { it.status == PolicyStatus.PASSED }
+            .sumOf { rec -> rec.policyType.annualCost } / 360.0
         if (dailyCost != 0.0) {
             state.municipalBudget.balance -= dailyCost
             if (dailyCost > 0) state.municipalBudget.serviceExpensesThisYear += dailyCost
@@ -202,6 +198,7 @@ object PolicyEngine {
                 .forEach { r ->
                     r.wealth += welfare
                     state.municipalBudget.balance -= welfare
+                    state.municipalBudget.welfareExpensesThisYear += welfare
                 }
         }
     }

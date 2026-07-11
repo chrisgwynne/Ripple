@@ -18,10 +18,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Before
 import org.junit.Test
@@ -60,11 +64,12 @@ class TownViewModelTest {
         Dispatchers.resetMain()
     }
 
-    /** Awaits work dispatched onto the repository's engine dispatcher. */
+    /** Awaits work dispatched onto the repository's engine dispatcher using coroutine delay. */
     private fun waitFor(timeoutMs: Long = 5_000, condition: () -> Boolean) {
-        val deadline = System.currentTimeMillis() + timeoutMs
-        while (!condition() && System.currentTimeMillis() < deadline) {
-            Thread.sleep(20)
+        runBlocking {
+            withTimeout(timeoutMs) {
+                while (!condition()) delay(20)
+            }
         }
         assertThat(condition()).isTrue()
     }

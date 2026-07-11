@@ -435,7 +435,7 @@ object NewspaperGenerator {
     ): Pair<String, String> {
         // Recent major policy
         val recentPolicy = state.activePolicies.values
-            .filter { it.status == PolicyStatus.PASSED.name }
+            .filter { it.status == PolicyStatus.PASSED }
             .maxByOrNull { it.passedAt ?: 0L }
         // Corruption on the current government
         val hasCorruption = govRec.corruption

@@ -55,6 +55,7 @@ object BusinessSuccessionSystem {
     private fun readyHeir(ctx: TickContext, owner: com.ripple.town.core.model.Resident, businessId: Long) =
         owner.childIds.mapNotNull { ctx.state.resident(it) }
             .filter { it.alive && it.inTown && it.lifeStageAt(ctx.now) == LifeStage.ADULT }
+            .sortedBy { it.id }
             .firstOrNull { child -> ctx.state.employmentOf(child)?.businessId == businessId }
 
     private fun handOver(ctx: TickContext, businessId: Long, ownerId: Long, heirId: Long) {

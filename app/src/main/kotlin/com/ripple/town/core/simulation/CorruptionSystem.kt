@@ -38,7 +38,7 @@ object CorruptionSystem {
         val state = ctx.state
         // Check if already running an ongoing incident
         val ongoing = state.corruptionIncidents.firstOrNull {
-            it.perpetratorId == r.id && it.status == CorruptionStatus.ONGOING.name
+            it.perpetratorId == r.id && it.status == CorruptionStatus.ONGOING
         }
         if (ongoing != null) {
             checkDiscovery(ctx, ongoing, r, oversightStrength)
@@ -62,7 +62,7 @@ object CorruptionSystem {
         val money = severity * 4_000.0 * (if (r.id == state.mayorId) 2.0 else 1.0)
         state.corruptionIncidents += CorruptionIncident(
             id = state.nextCorruptionId++,
-            type = type.name,
+            type = type,
             perpetratorId = r.id,
             startedAt = state.time,
             severity = severity,
@@ -83,12 +83,12 @@ object CorruptionSystem {
         // Strong oversight = higher discovery chance; weak oversight = lower
         val discoveryChance = incident.severity * 0.035 * (0.5 + oversightStrength)
         if (!ctx.rng.nextBoolean(discoveryChance)) return
-        incident.status = CorruptionStatus.INVESTIGATED.name
+        incident.status = CorruptionStatus.INVESTIGATED
         incident.discoveredAt = state.time
         ctx.emit(
             EventType.POLITICAL_SCANDAL,
             "${perpetrator.fullName} is under investigation for " +
-                CorruptionType.values().first { it.name == incident.type }.label.lowercase(),
+                incident.type.label.lowercase(),
             sourceResidentId = perpetrator.id,
             severity = incident.severity * 0.8 + 0.2
         )
@@ -112,17 +112,17 @@ object CorruptionSystem {
         // Severe cases become public scandals; milder ones get covered up
         val goesPublic = incident.severity > 0.55 && ctx.rng.nextBoolean(0.55 + oversightStrength * 0.2)
         if (goesPublic) {
-            incident.status = CorruptionStatus.EXPOSED.name
+            incident.status = CorruptionStatus.EXPOSED
             incident.resolvedAt = state.time
             ctx.emit(
                 EventType.POLITICAL_SCANDAL,
                 "${perpetrator.fullName}'s corruption has been exposed — " +
-                    "${CorruptionType.values().first { it.name == incident.type }.label.lowercase()} confirmed",
+                    "${incident.type.label.lowercase()} confirmed",
                 sourceResidentId = perpetrator.id,
                 severity = 0.85
             )
         } else {
-            incident.status = CorruptionStatus.COVERED_UP.name
+            incident.status = CorruptionStatus.COVERED_UP
             incident.resolvedAt = state.time
         }
     }

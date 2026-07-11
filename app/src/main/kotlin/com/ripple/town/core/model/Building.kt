@@ -48,6 +48,22 @@ enum class BuildingType(val label: String) {
     VACANT("Vacant building"),
 }
 
+/** Core 7 civic BuildingTypes that receive public funding and don't decay via VacancySystem.
+ *  Must stay in sync with [CIVIC_BUSINESS_TYPES]. */
+val CIVIC_BUILDING_TYPES: Set<BuildingType> = setOf(
+    BuildingType.FIRE_STATION, BuildingType.POLICE_STATION,
+    BuildingType.SPORTS_HALL, BuildingType.COMMUNITY_CENTRE,
+    BuildingType.SCHOOL, BuildingType.CLINIC, BuildingType.TOWN_HALL
+)
+
+/** Core 7 civic BusinessTypes subject to the municipal service-running-cost levy in BudgetSystem.
+ *  Must stay in sync with [CIVIC_BUILDING_TYPES]. */
+val CIVIC_BUSINESS_TYPES: Set<BusinessType> = setOf(
+    BusinessType.FIRE_STATION, BusinessType.POLICE_STATION,
+    BusinessType.SPORTS_HALL, BusinessType.COMMUNITY_CENTRE,
+    BusinessType.SCHOOL, BusinessType.CLINIC, BusinessType.TOWN_HALL
+)
+
 val BuildingType.isHome: Boolean
     get() = this == BuildingType.HOUSE || this == BuildingType.COTTAGE ||
             this == BuildingType.TERRACE || this == BuildingType.FLAT

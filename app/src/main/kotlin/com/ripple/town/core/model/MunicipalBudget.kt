@@ -20,6 +20,10 @@ data class MunicipalBudget(
     var constructionExpensesThisYear: Double = 0.0,
     /** Outstanding municipal loan taken to fund approved projects when cash-poor. */
     var debt: Double = 0.0,
+    /** Interest paid on municipal debt this financial year (own bucket, not part of serviceExpenses). */
+    var debtInterestThisYear: Double = 0.0,
+    /** Welfare payments made to unemployed adults this financial year. */
+    var welfareExpensesThisYear: Double = 0.0,
     /** Sim-minute timestamp when the current financial year started. */
     var yearStartedAt: Long = 0L
 )

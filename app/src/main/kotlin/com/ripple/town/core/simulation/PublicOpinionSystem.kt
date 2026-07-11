@@ -22,13 +22,16 @@ object PublicOpinionSystem {
         val mods = state.policyModifiers
         val mayorPartyId = state.residents[state.mayorId]?.partyId
         val activeCorruption = state.corruptionIncidents.any { inc ->
-            inc.status == CorruptionStatus.INVESTIGATED.name ||
-            inc.status == CorruptionStatus.EXPOSED.name
+            inc.status == CorruptionStatus.INVESTIGATED ||
+            inc.status == CorruptionStatus.EXPOSED
+        }
+        val highSpend = state.activePolicies.values.count { rec ->
+            rec.status == PolicyStatus.PASSED && rec.policyType.annualCost > 4_000
         }
         val previousApproval = data.approvalRating
         detailed.forEach { r ->
             val current = data.residentSatisfaction.getOrDefault(r.id, 50.0)
-            val delta = computeDelta(r, state, mods, mayorPartyId, activeCorruption)
+            val delta = computeDelta(r, state, mods, mayorPartyId, activeCorruption, highSpend)
             data.residentSatisfaction[r.id] = (current + delta).coerceIn(0.0, 100.0)
         }
         // Remove satisfaction entries for residents who have left or died
@@ -67,7 +70,8 @@ object PublicOpinionSystem {
         state: WorldState,
         mods: PolicyModifiers,
         mayorPartyId: Long?,
-        activeCorruption: Boolean
+        activeCorruption: Boolean,
+        highSpend: Int
     ): Double {
         var delta = 0.0
         val beliefs = resident.beliefs
@@ -77,10 +81,6 @@ object PublicOpinionSystem {
         if (mods.crimeMultiplier > 1.05) delta += policeTrust * -0.6
         // Spending policies: collectivists approve high spending; individualists disapprove
         val collectivism = -(beliefs[BeliefTopic.INDIVIDUALISM_VS_COLLECTIVISM]?.position ?: 0.0)
-        val highSpend = state.activePolicies.values.count { rec ->
-            rec.status == PolicyStatus.PASSED.name &&
-            PolicyType.values().firstOrNull { it.name == rec.policyType }?.annualCost?.let { c -> c > 4_000 } == true
-        }
         delta += collectivism * highSpend * 0.15
         // Environmental policy approval from environmentally-concerned residents
         val envConcern = beliefs[BeliefTopic.ENVIRONMENTAL_CONCERN]?.position ?: 0.0

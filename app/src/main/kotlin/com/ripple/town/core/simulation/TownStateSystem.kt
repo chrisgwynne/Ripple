@@ -2,6 +2,7 @@ package com.ripple.town.core.simulation
 
 import com.ripple.town.core.model.BeliefTopic
 import com.ripple.town.core.model.CivilisationSnapshot
+import com.ripple.town.core.model.CorruptionStatus
 import com.ripple.town.core.model.SimTime
 import com.ripple.town.core.model.SkillType
 
@@ -85,7 +86,7 @@ object TownStateSystem {
         ts.institutionalTrust = if (trustPositions.isEmpty()) 50.0 else
             ((trustPositions.average() + 1.0) * 50.0).coerceIn(0.0, 100.0)
 
-        val activeCorruption = state.corruptionIncidents.count { it.status == "ONGOING" || it.status == "INVESTIGATED" }
+        val activeCorruption = state.corruptionIncidents.count { it.status == CorruptionStatus.ONGOING || it.status == CorruptionStatus.INVESTIGATED }
         ts.corruptionLevel = (activeCorruption * 12.0).coerceIn(0.0, 100.0)
 
         // ─── Environment & infrastructure ───────────────────────────────────

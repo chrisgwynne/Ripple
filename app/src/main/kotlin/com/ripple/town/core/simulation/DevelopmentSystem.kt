@@ -274,7 +274,10 @@ object DevelopmentSystem {
         BuildingType.PARK            -> Footprint(type, 5, 4)
         BuildingType.WORKSHOP        -> Footprint(type, 4, 3)
         BuildingType.GROCER          -> Footprint(type, 3, 2)
-        else                         -> Footprint(type, 3, 3)
+        else                         -> {
+            android.util.Log.w("DevelopmentSystem", "footprintFor: no explicit size for $type, using default 3×3")
+            Footprint(type, 3, 3)
+        }
     }
 
     /**

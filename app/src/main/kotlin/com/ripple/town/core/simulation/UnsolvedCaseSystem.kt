@@ -102,7 +102,7 @@ object UnsolvedCaseSystem {
                 case.isHopeless = true
                 val snippet = case.description.take(55).trimEnd { it == ' ' || it == ',' }
                 ctx.emit(
-                    EventType.RUMOUR_SPREAD,
+                    EventType.COLD_CASE_ARCHIVED,
                     "The last trace of evidence in the matter of \"$snippet...\" has been lost. The witnesses are gone. Whatever happened, it may never be known.",
                     severity = 0.2, visibility = EventVisibility.PUBLIC,
                     causeIds = listOf(case.originalEventId)

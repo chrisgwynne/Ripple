@@ -31,6 +31,7 @@ object CommunitySystem {
         // Need a sociable, adult resident with a relevant hobby
         val founders = state.detailedResidents()
             .filter { it.inTown && it.lifeStageAt(ctx.now) == LifeStage.ADULT && it.hobbies.isNotEmpty() }
+            .sortedBy { it.id }
         if (founders.isEmpty()) return
         val founder = ctx.rng.pick(founders)
         val hobby = ctx.rng.pick(founder.hobbies)

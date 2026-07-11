@@ -1,6 +1,7 @@
 package com.ripple.town.core.simulation
 
 import com.ripple.town.core.model.BusinessType
+import com.ripple.town.core.model.CIVIC_BUSINESS_TYPES
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.EventVisibility
 import com.ripple.town.core.model.LifeStage
@@ -33,11 +34,7 @@ object BudgetSystem {
     private const val SHORTFALL_THRESHOLD = -10_000.0
     private const val SHORTFALL_COOLDOWN_DAYS = 30L
 
-    private val CIVIC_BUSINESS_TYPES = setOf(
-        BusinessType.FIRE_STATION, BusinessType.POLICE_STATION,
-        BusinessType.SPORTS_HALL, BusinessType.COMMUNITY_CENTRE,
-        BusinessType.SCHOOL, BusinessType.CLINIC, BusinessType.TOWN_HALL
-    )
+    // CIVIC_BUSINESS_TYPES imported from com.ripple.town.core.model — keeps in sync with VacancySystem
 
     fun updateDaily(ctx: TickContext) {
         val state = ctx.state
@@ -51,6 +48,8 @@ object BudgetSystem {
             budget.businessRateRevenueThisYear = 0.0
             budget.serviceExpensesThisYear = 0.0
             budget.constructionExpensesThisYear = 0.0
+            budget.debtInterestThisYear = 0.0
+            budget.welfareExpensesThisYear = 0.0
             budget.yearStartedAt = state.time
         }
 
@@ -90,7 +89,7 @@ object BudgetSystem {
         if (budget.debt > 0.0) {
             val dailyInterest = budget.debt * DEBT_INTEREST_RATE / SimTime.DAYS_PER_YEAR.toDouble()
             budget.balance -= dailyInterest
-            budget.serviceExpensesThisYear += dailyInterest
+            budget.debtInterestThisYear += dailyInterest
         }
 
         // Emit shortfall event if balance dipped below threshold (with cooldown).

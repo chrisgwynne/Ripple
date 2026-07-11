@@ -55,6 +55,7 @@ enum class EventType(val label: String) {
     MEETING("Chance meeting"),
     SECRET_REVEALED("Secret revealed"),
     RUMOUR_SPREAD("Rumour"),
+    COLD_CASE_ARCHIVED("Cold case"),
     TOWN_MILESTONE("Town milestone"),
     PETITION_STARTED("Petition started"),
     PETITION_RESOLVED("Petition resolved"),

@@ -131,8 +131,8 @@ object CivilisationHistorySystem {
 
     private fun detectPoliticalScandal(ctx: TickContext, year: Int) {
         val recentExposed = ctx.state.corruptionIncidents.count { inc ->
-            inc.status == CorruptionStatus.EXPOSED.name || inc.status == CorruptionStatus.PROSECUTED.name
-                && inc.discoveredAt != null && ctx.now - inc.discoveredAt!! < SimTime.MINUTES_PER_YEAR
+            (inc.status == CorruptionStatus.EXPOSED || inc.status == CorruptionStatus.PROSECUTED) &&
+                inc.discoveredAt != null && ctx.now - inc.discoveredAt!! < SimTime.MINUTES_PER_YEAR
         }
         if (recentExposed >= 2) {
             val mayor = ctx.state.governmentRecords.lastOrNull()

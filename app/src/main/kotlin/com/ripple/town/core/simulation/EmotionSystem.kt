@@ -207,8 +207,4 @@ object EmotionSystem {
         return modifier.coerceIn(0.5, 1.5)
     }
 
-    /** In-world days worth of decay a given number of ticks represents — unused by the engine
-     *  itself (decay is driven purely by `updateDaily`'s once-per-day call), kept only as a
-     *  documented conversion for tests that want to reason in ticks. */
-    fun daysOf(minutes: Long): Double = minutes.toDouble() / SimTime.MINUTES_PER_DAY
 }

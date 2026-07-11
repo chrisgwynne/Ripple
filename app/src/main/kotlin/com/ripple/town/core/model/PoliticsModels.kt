@@ -141,12 +141,12 @@ enum class PolicyStatus { PROPOSED, PASSED, REJECTED, REPEALED }
 @Serializable
 data class PolicyRecord(
     val id: Long,
-    val policyType: String,             // PolicyType.name
+    val policyType: PolicyType,
     val title: String,
     val proposedByPartyId: Long?,
     val proposedByResidentId: Long?,
     val proposedAt: Long,
-    var status: String = PolicyStatus.PROPOSED.name,
+    var status: PolicyStatus = PolicyStatus.PROPOSED,
     var passedAt: Long? = null,
     var repealedAt: Long? = null,
     var votesFor: Int = 0,
@@ -201,11 +201,11 @@ enum class CorruptionStatus { ONGOING, INVESTIGATED, EXPOSED, PROSECUTED, COVERE
 @Serializable
 data class CorruptionIncident(
     val id: Long,
-    val type: String,               // CorruptionType.name
+    val type: CorruptionType,
     val perpetratorId: Long,
     val beneficiaryId: Long? = null,
     val startedAt: Long,
-    var status: String = CorruptionStatus.ONGOING.name,
+    var status: CorruptionStatus = CorruptionStatus.ONGOING,
     var discoveredAt: Long? = null,
     var resolvedAt: Long? = null,
     val severity: Double,           // 0..1

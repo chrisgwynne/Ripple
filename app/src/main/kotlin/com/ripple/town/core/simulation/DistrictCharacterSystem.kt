@@ -22,12 +22,13 @@ object DistrictCharacterSystem {
 
     fun updateWeekly(ctx: TickContext) {
         val state = ctx.state
+        val townAvgWealth = state.livingResidents().filter { it.inTown }.map { it.wealth }.average0()
         for (district in state.districts.values) {
-            updateDistrict(ctx, district)
+            updateDistrict(ctx, district, townAvgWealth)
         }
     }
 
-    private fun updateDistrict(ctx: TickContext, district: District) {
+    private fun updateDistrict(ctx: TickContext, district: District, townAvgWealth: Double) {
         val state = ctx.state
 
         // Residents who live in this district.
@@ -58,9 +59,7 @@ object DistrictCharacterSystem {
         val pop = districtResidents.size
         district.population = pop
 
-        // Wealth: average resident wealth relative to town average.
-        val townAvgWealth = state.livingResidents().filter { it.inTown }
-            .map { it.wealth }.average0()
+        // Wealth: average resident wealth relative to town average (townAvgWealth hoisted to caller).
         val districtAvgWealth = districtResidents.map { it.wealth }.average0()
         district.wealthIndex = if (townAvgWealth > 0) districtAvgWealth / townAvgWealth else 1.0
 
@@ -104,10 +103,13 @@ object DistrictCharacterSystem {
         if (crimeRate > 0.75) return DistrictCharacter.HIGH_CRIME
         if (wealthIndex > 1.3 && vacancyRate < 0.05 && crimeRate < 0.4)
             return DistrictCharacter.PROSPEROUS
-        if (vacancyRate < 0.05 && wealthIndex > 0.9 && employmentRate > 0.75)
-            return DistrictCharacter.STABLE
+        // GENTRIFYING before STABLE: rising wealth (1.15–1.3) + moderate vacancy (0.05–0.15) is
+        // gentrification in progress; the old STABLE ordering would shadow this entirely when
+        // employment is high, making GENTRIFYING unreachable in the most common real-world case.
         if (wealthIndex > 1.15 && vacancyRate < 0.15)
             return DistrictCharacter.GENTRIFYING
+        if (vacancyRate < 0.05 && wealthIndex > 0.9 && employmentRate > 0.75)
+            return DistrictCharacter.STABLE
         if (pop > 0 && vacancyRate < 0.1 && employmentRate < 0.5)
             return DistrictCharacter.OVERCROWDED
         if (vacancyRate < 0.1 && wealthIndex < 0.85 && wealthIndex > 0.6)
