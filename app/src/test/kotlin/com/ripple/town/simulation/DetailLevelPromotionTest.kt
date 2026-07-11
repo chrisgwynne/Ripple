@@ -12,6 +12,7 @@ import com.ripple.town.core.model.Tile
 import com.ripple.town.core.model.TileType
 import com.ripple.town.core.model.TownMap
 import com.ripple.town.core.model.WorldState
+import com.ripple.town.core.simulation.ActivationSystem
 import com.ripple.town.core.simulation.InMemoryEventIndex
 import com.ripple.town.core.simulation.LifecycleSystem
 import com.ripple.town.core.simulation.SimRandom
@@ -19,8 +20,13 @@ import com.ripple.town.core.simulation.TickContext
 import org.junit.Test
 
 /**
- * Tests for DetailLevel promotion: a BACKGROUND resident discovered during play
- * should become DETAILED, be added to discoveredResidentIds, and get a home if homeless.
+ * Tests for the two-step DetailLevel promotion ladder:
+ *   BACKGROUND → CONNECTED (first call to promoteIfNeeded)
+ *   CONNECTED   → DETAILED  (second call — assigns home + adds to discoveredResidentIds)
+ *
+ * promoteIfNeeded() is deliberately single-step so ActivationSystem can rate-gate
+ * CONNECTED→DETAILED.  Callers that need a resident fully DETAILED immediately
+ * (e.g. a new business owner) call it twice.
  */
 class DetailLevelPromotionTest {
 
@@ -59,73 +65,138 @@ class DetailLevelPromotionTest {
         return b
     }
 
-    // --------------------------------------------------------- tests
+    // --------------------------------------------------------- ladder tests
 
-    @Test fun `BACKGROUND resident is promoted to DETAILED`() {
+    @Test fun `first promoteIfNeeded call advances BACKGROUND to CONNECTED`() {
         val state = emptyState()
         val r = addBackground(state, 1L)
 
         LifecycleSystem.promoteIfNeeded(ctx(state), r, "interacted with player")
 
+        assertThat(r.detailLevel).isEqualTo(DetailLevel.CONNECTED)
+    }
+
+    @Test fun `second promoteIfNeeded call advances CONNECTED to DETAILED`() {
+        val state = emptyState()
+        val r = addBackground(state, 2L)
+
+        LifecycleSystem.promoteIfNeeded(ctx(state), r, "step 1")
+        LifecycleSystem.promoteIfNeeded(ctx(state), r, "step 2")
+
         assertThat(r.detailLevel).isEqualTo(DetailLevel.DETAILED)
     }
 
-    @Test fun `promoted resident is added to discoveredResidentIds`() {
+    @Test fun `CONNECTED step does not add to discoveredResidentIds`() {
         val state = emptyState()
-        val r = addBackground(state, 2L)
-        assertThat(state.discoveredResidentIds).doesNotContain(2L)
+        val r = addBackground(state, 3L)
 
-        LifecycleSystem.promoteIfNeeded(ctx(state), r, "test discovery")
+        LifecycleSystem.promoteIfNeeded(ctx(state), r, "step 1")
 
-        assertThat(state.discoveredResidentIds).contains(2L)
+        assertThat(state.discoveredResidentIds).doesNotContain(3L)
+        assertThat(r.detailLevel).isEqualTo(DetailLevel.CONNECTED)
+    }
+
+    @Test fun `DETAILED step adds to discoveredResidentIds`() {
+        val state = emptyState()
+        val r = addBackground(state, 3L)
+
+        LifecycleSystem.promoteIfNeeded(ctx(state), r, "step 1")
+        LifecycleSystem.promoteIfNeeded(ctx(state), r, "step 2")
+
+        assertThat(state.discoveredResidentIds).contains(3L)
     }
 
     @Test fun `already-DETAILED resident is unchanged by promoteIfNeeded`() {
         val state = emptyState()
-        val r = addBackground(state, 3L).also { it.detailLevel = DetailLevel.DETAILED }
+        val r = addBackground(state, 4L).also {
+            it.detailLevel = DetailLevel.DETAILED
+            state.discoveredResidentIds += it.id
+        }
         val discoveredBefore = state.discoveredResidentIds.toList()
 
         LifecycleSystem.promoteIfNeeded(ctx(state), r, "should be no-op")
 
         assertThat(r.detailLevel).isEqualTo(DetailLevel.DETAILED)
-        // discoveredResidentIds should not change for an already-detailed resident
         assertThat(state.discoveredResidentIds).containsExactlyElementsIn(discoveredBefore)
     }
 
-    @Test fun `homeless resident gets a home assigned on promotion`() {
+    @Test fun `home is assigned on DETAILED promotion, not CONNECTED`() {
         val state = emptyState()
         addHome(state, 100L)
-        val r = addBackground(state, 4L)
+        val r = addBackground(state, 5L)
         assertThat(r.homeBuildingId).isNull()
 
-        LifecycleSystem.promoteIfNeeded(ctx(state), r, "moved in")
+        // First call (CONNECTED): no home assigned yet.
+        LifecycleSystem.promoteIfNeeded(ctx(state), r, "step 1")
+        assertThat(r.detailLevel).isEqualTo(DetailLevel.CONNECTED)
+        assertThat(r.homeBuildingId).isNull()
 
-        assertThat(r.homeBuildingId).isNotNull()
+        // Second call (DETAILED): home assigned here.
+        LifecycleSystem.promoteIfNeeded(ctx(state), r, "step 2")
+        assertThat(r.detailLevel).isEqualTo(DetailLevel.DETAILED)
         assertThat(r.homeBuildingId).isEqualTo(100L)
         assertThat(r.householdId).isNotNull()
         assertThat(r.currentBuildingId).isEqualTo(100L)
     }
 
-    @Test fun `resident who already has a home keeps it on promotion`() {
+    @Test fun `resident who already has a home keeps it on DETAILED promotion`() {
         val state = emptyState()
         addHome(state, 200L)
-        val r = addBackground(state, 5L).also {
+        val r = addBackground(state, 6L).also {
             it.homeBuildingId = 200L
             it.currentBuildingId = 200L
+            it.detailLevel = DetailLevel.CONNECTED
         }
 
-        LifecycleSystem.promoteIfNeeded(ctx(state), r, "has home already")
+        LifecycleSystem.promoteIfNeeded(ctx(state), r, "already has home")
 
         assertThat(r.homeBuildingId).isEqualTo(200L)
+        assertThat(r.detailLevel).isEqualTo(DetailLevel.DETAILED)
     }
 
-    @Test fun `promotion is idempotent — calling twice does not double-add to discoveredResidentIds`() {
+    @Test fun `discoveredResidentIds has no duplicate entries after repeated calls`() {
         val state = emptyState()
-        val r = addBackground(state, 6L)
+        val r = addBackground(state, 7L)
 
-        LifecycleSystem.promoteIfNeeded(ctx(state), r, "first call")
-        LifecycleSystem.promoteIfNeeded(ctx(state), r, "second call — no-op")
+        LifecycleSystem.promoteIfNeeded(ctx(state), r, "step 1")
+        LifecycleSystem.promoteIfNeeded(ctx(state), r, "step 2")
+        LifecycleSystem.promoteIfNeeded(ctx(state), r, "no-op third call")
 
-        assertThat(state.discoveredResidentIds.count { it == 6L }).isEqualTo(1)
+        assertThat(state.discoveredResidentIds.count { it == 7L }).isEqualTo(1)
+    }
+
+    // --------------------------------------------------------- ActivationSystem caps
+
+    @Test fun `ActivationSystem does not exceed DETAIL_CAP`() {
+        val state = emptyState()
+        addHome(state, 999L)
+        // Pre-fill DETAIL_CAP DETAILED residents.
+        repeat(ActivationSystem.DETAIL_CAP) { i ->
+            val r = Resident(
+                id = (i + 100).toLong(), firstName = "D$i", surname = "Cap",
+                gender = Gender.NONBINARY,
+                bornAt = state.time - 25 * SimTime.MINUTES_PER_YEAR,
+                homeBuildingId = null, householdId = null,
+                detailLevel = DetailLevel.DETAILED
+            )
+            state.residents[r.id] = r
+        }
+        // Add a CONNECTED candidate that is the followed resident (maximises its score).
+        val candidate = Resident(
+            id = 9999L, firstName = "Hopeful", surname = "Cap",
+            gender = Gender.NONBINARY,
+            bornAt = state.time - 25 * SimTime.MINUTES_PER_YEAR,
+            homeBuildingId = null, householdId = null,
+            detailLevel = DetailLevel.CONNECTED
+        )
+        state.residents[candidate.id] = candidate
+        state.followedResidentId = candidate.id
+
+        ActivationSystem.updateTick(ctx(state))
+
+        // Cap enforced — candidate must stay CONNECTED, not be promoted to DETAILED.
+        assertThat(candidate.detailLevel).isEqualTo(DetailLevel.CONNECTED)
+        val detailedCount = state.residents.values.count { it.detailLevel == DetailLevel.DETAILED }
+        assertThat(detailedCount).isAtMost(ActivationSystem.DETAIL_CAP)
     }
 }
