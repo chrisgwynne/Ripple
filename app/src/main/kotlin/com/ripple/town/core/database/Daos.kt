@@ -111,6 +111,9 @@ interface InterventionDao {
 
     @Query("SELECT * FROM interventions ORDER BY appliedAt DESC")
     fun all(): Flow<List<InterventionEntity>>
+
+    @Query("SELECT * FROM interventions WHERE targetResidentId = :residentId ORDER BY appliedAt DESC LIMIT 10")
+    fun forResident(residentId: Long): Flow<List<InterventionEntity>>
 }
 
 @Dao

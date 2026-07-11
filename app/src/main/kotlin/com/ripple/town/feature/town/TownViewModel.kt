@@ -2,6 +2,7 @@ package com.ripple.town.feature.town
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.ripple.town.core.database.InterventionEntity
 import com.ripple.town.core.model.InterventionVerb
 import com.ripple.town.core.model.SimSpeed
 import com.ripple.town.core.simulation.InterventionResult
@@ -72,6 +73,9 @@ class TownViewModel @Inject constructor(
     private val _interventionMessage = MutableStateFlow<String?>(null)
     val interventionMessage: StateFlow<String?> = _interventionMessage.asStateFlow()
 
+    private val _residentInterventions = MutableStateFlow<List<InterventionEntity>>(emptyList())
+    val residentInterventions: StateFlow<List<InterventionEntity>> = _residentInterventions.asStateFlow()
+
     /** Camera jump requests (tile coords), consumed by the screen. */
     private val _jumpTo = MutableStateFlow<Pair<Float, Float>?>(null)
     val jumpTo: StateFlow<Pair<Float, Float>?> = _jumpTo.asStateFlow()
@@ -110,6 +114,9 @@ class TownViewModel @Inject constructor(
     fun openIntervention(residentId: Long) {
         _sheet.value = TownSheet.InterventionSheet(residentId)
         _interventionMessage.value = null
+        viewModelScope.launch {
+            repository.interventionsFor(residentId).collect { _residentInterventions.value = it }
+        }
     }
 
     fun openTownOverview() {

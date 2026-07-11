@@ -49,7 +49,9 @@ import com.ripple.town.core.ui.RippleColors
 import com.ripple.town.core.ui.SectionTitle
 import com.ripple.town.core.ui.SpriteProvider
 import com.ripple.town.core.ui.StatBar
+import com.ripple.town.core.database.InterventionEntity
 import com.ripple.town.core.model.InterventionVerb
+import com.ripple.town.core.simulation.InterventionEngine
 import com.ripple.town.data.DeathSummary
 import com.ripple.town.data.EventUi
 import com.ripple.town.data.TownStatsUi
@@ -731,7 +733,20 @@ private fun priorMemoryEcho(world: WorldUi, event: EventUi, resident: com.ripple
 fun InterventionSheetContent(world: WorldUi, residentId: Long, viewModel: TownViewModel) {
     val r = world.resident(residentId) ?: return
     val message by viewModel.interventionMessage.collectAsState()
+    val history by viewModel.residentInterventions.collectAsState()
     var pendingIntroduce by remember { mutableIntStateOf(0) }
+
+    // Cooldown: residentId had an intervention within 24h sim time
+    val cooldownMinutes = InterventionEngine.PER_PERSON_COOLDOWN_HOURS * SimTime.MINUTES_PER_HOUR
+    val lastAt = world.lastInterventionAt[residentId]
+    val cooldownRemaining = if (lastAt != null) (cooldownMinutes - (world.time - lastAt)).coerceAtLeast(0L) else 0L
+    val onCooldown = cooldownRemaining > 0L
+
+    // Nudge recharge: how many sim hours until next nudge regenerates
+    val regenMinutes = InterventionEngine.REGEN_HOURS * SimTime.MINUTES_PER_HOUR
+    val rechargeRemaining = if (world.nudges < world.maxNudges)
+        (regenMinutes - world.nudgeRegenProgressMinutes).coerceAtLeast(0L) else 0L
+
     Column(
         Modifier
             .padding(horizontal = 20.dp)
@@ -740,11 +755,35 @@ fun InterventionSheetContent(world: WorldUi, residentId: Long, viewModel: TownVi
             .verticalScroll(rememberScrollState())
     ) {
         Text("A quiet nudge", style = MaterialTheme.typography.headlineSmall)
-        Text(
-            "Influence remaining: ${world.nudges}/${world.maxNudges} · ${r.name}",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "Influence remaining: ${world.nudges}/${world.maxNudges} · ${r.name}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (rechargeRemaining > 0L) {
+                val h = (rechargeRemaining / SimTime.MINUTES_PER_HOUR).toInt()
+                val m = ((rechargeRemaining % SimTime.MINUTES_PER_HOUR) / 10L).toInt() * 10
+                Text(
+                    "⟳ ${h}h ${m}m",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        if (onCooldown) {
+            val h = (cooldownRemaining / SimTime.MINUTES_PER_HOUR).toInt()
+            Text(
+                "On cooldown — ${r.firstName} can be nudged again in ~${h}h",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(bottom = 2.dp)
+            )
+        }
         Text(
             "You never control anyone. You only tilt circumstances — the town decides what follows, and you may not learn the consequences for a long time.",
             style = MaterialTheme.typography.bodySmall,
@@ -797,6 +836,39 @@ fun InterventionSheetContent(world: WorldUi, residentId: Long, viewModel: TownVi
                 }
             TextButton(onClick = { pendingIntroduce = 0 }) { Text("Back") }
         }
+        if (history.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
+            SectionTitle("Past nudges")
+            history.forEach { entry -> InterventionHistoryRow(entry) }
+        }
+    }
+}
+
+@Composable
+private fun InterventionHistoryRow(entry: InterventionEntity) {
+    val verb = runCatching { InterventionVerb.valueOf(entry.verb) }.getOrNull()
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            verb?.label ?: entry.verb,
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.width(72.dp)
+        )
+        Text(
+            entry.note,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            SimTime.formatDate(entry.appliedAt),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

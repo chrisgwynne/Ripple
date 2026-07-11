@@ -484,6 +484,9 @@ class WorldRepository @Inject constructor(
 
     fun interventions(): Flow<List<com.ripple.town.core.database.InterventionEntity>> = db.interventionDao().all()
 
+    fun interventionsFor(residentId: Long): Flow<List<com.ripple.town.core.database.InterventionEntity>> =
+        db.interventionDao().forResident(residentId)
+
     fun statistics(limit: Int = 60): Flow<List<com.ripple.town.core.database.TownStatisticEntity>> =
         db.statisticsDao().latest(limit)
 
