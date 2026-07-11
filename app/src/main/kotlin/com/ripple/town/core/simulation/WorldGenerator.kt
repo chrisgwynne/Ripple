@@ -625,7 +625,9 @@ class WorldGenerator(private val seed: Long, private val townName: String = "Ash
             r.sharedHistory = 40.0
             r.block()
             r.clampAll()
-            state.relationships[Relationship.keyOf(a.id, b.id)] = r
+            val rKey = Relationship.keyOf(a.id, b.id)
+            state.relationships[rKey] = r
+            state.indexRelationship(rKey, r)
         }
 
         fun marry(a: Resident, b: Resident, strain: Double = 0.0) {
@@ -718,7 +720,9 @@ class WorldGenerator(private val seed: Long, private val townName: String = "Ash
                 r.familiarity = rng.nextDouble(10.0, 35.0)
                 r.trust = rng.nextDouble(30.0, 50.0)
                 r.affection = rng.nextDouble(15.0, 40.0)
-                state.relationships[Relationship.keyOf(a.id, b.id)] = r
+                val rKey = Relationship.keyOf(a.id, b.id)
+                state.relationships[rKey] = r
+                state.indexRelationship(rKey, r)
             }
         }
     }

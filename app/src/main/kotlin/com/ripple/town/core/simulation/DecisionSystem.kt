@@ -622,7 +622,7 @@ object DecisionSystem {
     private fun spend(ctx: TickContext, r: Resident, buildingId: Long?, amount: Double) {
         if (r.wealth < amount) return
         r.wealth -= amount
-        val biz = ctx.state.businesses.values.firstOrNull { it.buildingId == buildingId && it.open }
+        val biz = buildingId?.let { ctx.state.businessAt(it)?.takeIf { b -> b.open } }
         if (biz != null) {
             biz.customersToday += 1
             biz.revenueToday += amount

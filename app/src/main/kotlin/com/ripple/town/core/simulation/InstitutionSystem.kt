@@ -48,11 +48,7 @@ object InstitutionSystem {
 
         for (rec in state.institutionRecords.values) {
             val bld = state.building(rec.buildingId) ?: continue
-            // Direct keyed lookup first; fall back to scan only for institutions whose business
-            // key may differ from the building id (e.g. clinics whose business was created separately).
-            val biz = state.businesses[rec.buildingId]
-                ?: state.businesses.values.firstOrNull { it.buildingId == rec.buildingId }
-                ?: continue
+            val biz = state.businessAt(rec.buildingId) ?: continue
 
             // ─── Staff count ────────────────────────────────────────────────
             rec.staffCount = state.employeesOf(biz.id).size
@@ -145,7 +141,7 @@ object InstitutionSystem {
             val instType = INSTITUTION_BUILDING_MAP[bld.type] ?: continue
             if (bld.id in alreadyTracked) continue
             // Only create a record if there is an operating business in this building
-            val biz = state.businesses.values.firstOrNull { it.buildingId == bld.id } ?: continue
+            val biz = state.businessAt(bld.id) ?: continue
             state.institutionRecords[state.nextInstitutionId] = InstitutionRecord(
                 id = state.nextInstitutionId++,
                 type = instType,

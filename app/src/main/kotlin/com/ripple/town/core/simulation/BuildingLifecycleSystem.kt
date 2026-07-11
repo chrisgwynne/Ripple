@@ -68,7 +68,7 @@ object BuildingLifecycleSystem {
     /** Whoever has a stake in the building and could plausibly pay for repairs; null if nobody can. */
     private fun payerFor(ctx: TickContext, building: Building): Payer? {
         val state = ctx.state
-        val biz = state.businesses.values.firstOrNull { it.buildingId == building.id && it.open }
+        val biz = state.businessAt(building.id)?.takeIf { it.open }
         if (biz != null) {
             return Payer(biz.balance, reputationResident = null) { cost -> biz.balance -= cost }
         }

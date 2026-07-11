@@ -49,7 +49,7 @@ object VacancySystem {
                     hh.homeBuildingId == building.id && hh.memberIds.isNotEmpty()
                 }
             } else {
-                val biz = state.businesses.values.firstOrNull { it.buildingId == building.id }
+                val biz = state.businessAt(building.id)
                 biz != null && biz.open
             }
 

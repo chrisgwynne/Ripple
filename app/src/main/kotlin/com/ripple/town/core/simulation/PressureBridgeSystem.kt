@@ -214,7 +214,7 @@ object PressureBridgeSystem {
      */
     fun onBuildingWeatherDamaged(ctx: TickContext, damageEvent: WorldEvent) {
         val buildingId = damageEvent.buildingId ?: return
-        val biz = ctx.state.businesses.values.firstOrNull { it.open && it.buildingId == buildingId } ?: return
+        val biz = ctx.state.businessAt(buildingId)?.takeIf { it.open } ?: return
         val dip = ctx.rng.nextDouble(FLOOD_DEMAND_DIP_MIN, FLOOD_DEMAND_DIP_MAX)
         val recoverDays = ctx.rng.nextDouble(FLOOD_RECOVERY_DAYS_MIN, FLOOD_RECOVERY_DAYS_MAX)
         applyTemporaryDemandPenalty(ctx, biz, dip, recoverDays, damageEvent, priceBump = FLOOD_PRICE_BUMP)
