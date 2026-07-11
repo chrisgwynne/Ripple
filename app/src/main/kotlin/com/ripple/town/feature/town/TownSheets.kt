@@ -113,12 +113,6 @@ fun BuildingSheetContent(world: WorldUi, buildingId: Long, viewModel: TownViewMo
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        Text(
-            "No record of previous tenants is kept yet — this building's history before its current use isn't tracked.",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-
         if (b.abandoned) {
             SectionTitle("What could happen here")
             if (b.type == BuildingType.VACANT) {
@@ -370,14 +364,14 @@ private data class TimelineEntry(val timeLabel: String, val description: String,
  * Combines building-level cosmetic history (`visibleChanges`) with real timestamped building
  * events into one chronological list. visibleChanges entries embed a date prefix of the form
  * "d Mon • Year N — description"; entries from saves before this format have no separator and
- * are shown as "Earlier".
+ * are shown as "Earlier". RESIDENT_ARRIVED / RESIDENT_MOVED provide the tenant history.
  */
 private fun buildTimeline(b: com.ripple.town.data.BuildingUi, events: List<EventUi>): List<TimelineEntry> {
     val relevantTypes = setOf(
         EventType.BUILDING_CONSTRUCTED, EventType.BUILDING_DAMAGED, EventType.BUILDING_REPAIRED,
         EventType.BUILDING_EXPANDED, EventType.BUILDING_ABANDONED, EventType.BUSINESS_OPENED,
         EventType.BUSINESS_CLOSED, EventType.BUSINESS_EXPANDED, EventType.BUSINESS_SUCCESSION,
-        EventType.HOME_PURCHASED
+        EventType.HOME_PURCHASED, EventType.RESIDENT_ARRIVED, EventType.RESIDENT_MOVED
     )
     val eventEntries = events
         .filter { it.type in relevantTypes }
