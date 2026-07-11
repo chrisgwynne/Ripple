@@ -1,4 +1,4 @@
-package com.ripple.town.core.simulation
+﻿package com.ripple.town.core.simulation
 
 import com.ripple.town.core.model.Building
 import com.ripple.town.core.model.BuildingState
@@ -19,14 +19,14 @@ import kotlin.math.absoluteValue
 /**
  * Advances development projects through the pipeline one stage per day:
  *
- * PROPOSED  -(5 days, 85% chance)→  APPROVED | REJECTED
- * APPROVED  -(budget check)→         FUNDED
- * FUNDED    -(tile placement)→        CONSTRUCTION  (creates Building entity in PLANNED state)
- * CONSTRUCTION -(days based on cost)→ COMPLETE      (sets Building to OCCUPIED, creates Business)
+ * PROPOSED  -(5 days, 85% chance)â†’  APPROVED | REJECTED
+ * APPROVED  -(budget check)â†’         FUNDED
+ * FUNDED    -(tile placement)â†’        CONSTRUCTION  (creates Building entity in PLANNED state)
+ * CONSTRUCTION -(days based on cost)â†’ COMPLETE      (sets Building to OCCUPIED, creates Business)
  *
  * Budget: FUNDED deducts the full cost from [MunicipalBudget.balance]; if the balance would go
- * below −£20,000 the project is deferred (not rejected) until funds improve. Projects can
- * also take on debt — if the balance is negative but debt headroom exists, the shortfall
+ * below âˆ’Â£20,000 the project is deferred (not rejected) until funds improve. Projects can
+ * also take on debt â€” if the balance is negative but debt headroom exists, the shortfall
  * is recorded as municipal debt.
  */
 object DevelopmentSystem {
@@ -39,12 +39,12 @@ object DevelopmentSystem {
     const val APPROVAL_MAX = 0.95
     /** Minimum balance before a project can be funded (allows some deficit). */
     const val FUNDING_BALANCE_FLOOR = -20_000.0
-    /** Days per £10,000 of construction cost (£40k = 4 days, £80k = 8 days). */
+    /** Days per Â£10,000 of construction cost (Â£40k = 4 days, Â£80k = 8 days). */
     const val DAYS_PER_10K = 1.0
     /** Maximum municipal debt load before new projects are deferred. */
     const val MAX_DEBT = 150_000.0
     /** Daily probability that a condemned low-value site triggers opportunistic renovation.
-     *  ~0.8% per day ≈ expected wait ~125 days before a derelict parcel attracts a developer. */
+     *  ~0.8% per day â‰ˆ expected wait ~125 days before a derelict parcel attracts a developer. */
     const val REGENERATION_DAILY_PROBABILITY = 0.008
     /** Land value ceiling below which opportunistic regeneration can fire. */
     const val REGENERATION_MAX_VALUE = 15_000.0
@@ -70,7 +70,7 @@ object DevelopmentSystem {
      * normal need-planner route. The original condemned building is left in place until
      * construction completes, at which point VacancySystem detects it as occupied.
      *
-     * This closes the decline loop: derelict → condemned → cheap land → renovation → regeneration.
+     * This closes the decline loop: derelict â†’ condemned â†’ cheap land â†’ renovation â†’ regeneration.
      */
     private fun checkRegenerationOpportunities(ctx: TickContext) {
         val state = ctx.state
@@ -102,7 +102,7 @@ object DevelopmentSystem {
                 note = "Opportunistic renovation of condemned site"
             )
             state.developmentProjects[proj.id] = proj
-            building.visibleChanges += "${SimTime.formatDate(ctx.now)} — Renovation interest"
+            building.visibleChanges += "${SimTime.formatDate(ctx.now)} â€” Renovation interest"
         }
     }
 
@@ -129,14 +129,14 @@ object DevelopmentSystem {
      *
      * Three signals feed the decision:
      *
-     * 1. **Town sentiment trust** (0..100) — public faith in institutions; scaled to a ±0.18 swing
+     * 1. **Town sentiment trust** (0..100) â€” public faith in institutions; scaled to a Â±0.18 swing
      *    around [APPROVAL_BASE]. High trust = planning process seen as legitimate = committees vote
      *    yes more readily. Low trust = NIMBY opposition and obstruction.
      *
-     * 2. **Mayor's ambition** (0..1) — an ambitious mayor champions growth and pushes projects
+     * 2. **Mayor's ambition** (0..1) â€” an ambitious mayor champions growth and pushes projects
      *    through; a cautious incumbent lets things stall. Adds up to +0.10.
      *
-     * 3. **Development type** — parks, housing (when housing is short), and civic buildings enjoy
+     * 3. **Development type** â€” parks, housing (when housing is short), and civic buildings enjoy
      *    community goodwill; industrial and commercial face more opposition unless the town is
      *    economically optimistic.
      *
@@ -146,7 +146,7 @@ object DevelopmentSystem {
     private fun politicalApprovalChance(ctx: TickContext, proj: DevelopmentProject): Double {
         val sentiment = ctx.state.townSentiment
 
-        // 1. Trust signal: ±0.18 around base
+        // 1. Trust signal: Â±0.18 around base
         val trustNorm = sentiment.trust / 100.0   // 0..1
         val trustDelta = (trustNorm - 0.5) * 0.36 // -0.18..+0.18
 
@@ -202,12 +202,43 @@ object DevelopmentSystem {
         proj.stageChangedAt = ctx.now
     }
 
+    private fun findReusableBuilding(
+        state: WorldState,
+        buildingType: BuildingType
+    ): Building? {
+        return state.buildings.values
+            .filter { b ->
+                b.buildingState == BuildingState.VACANT &&
+                b.type == buildingType &&
+                b.condition >= 30.0 &&
+                !b.abandoned
+            }
+            .maxByOrNull { it.condition }
+    }
+
     private fun startConstruction(ctx: TickContext, proj: DevelopmentProject) {
         val state = ctx.state
-        val (bType, w, h) = footprintFor(proj.buildingType)
-        val slot = findBuildingSlot(state, proj.districtId, w, h) ?: return
         val constructionDays = (proj.estimatedCost / 10_000.0 * DAYS_PER_10K).toLong().coerceAtLeast(1L)
         val completesAt = ctx.now + constructionDays * SimTime.MINUTES_PER_DAY
+
+        // Vacant-first: reuse an existing vacant building of the same type if possible.
+        val reusable = findReusableBuilding(state, proj.buildingType)
+        if (reusable != null) {
+            proj.buildingId = reusable.id
+            reusable.buildingState = BuildingState.UNDER_CONSTRUCTION
+            reusable.constructionCompletesAt = completesAt
+            reusable.developmentProjectId = proj.id
+            if (reusable.visibleChanges.size >= Building.MAX_VISIBLE_CHANGES) reusable.visibleChanges.removeAt(0)
+            reusable.visibleChanges += "Renovated for new use"
+            proj.tileX = reusable.origin.x
+            proj.tileY = reusable.origin.y
+            proj.stage = DevelopmentStage.CONSTRUCTION
+            proj.stageChangedAt = ctx.now
+            return
+        }
+
+        val (bType, w, h) = footprintFor(proj.buildingType)
+        val slot = findBuildingSlot(state, proj.districtId, w, h) ?: return
         val building = Building(
             id = state.nextBuildingId++,
             name = "New ${bType.label}",
@@ -238,6 +269,25 @@ object DevelopmentSystem {
 
         building.buildingState = BuildingState.OCCUPIED
         building.constructionCompletesAt = null
+
+        // If this was a conversion, update the building type and close any old business.
+        if (proj.note.startsWith("Conversion")) {
+            building.type = proj.buildingType
+            state.businesses.values
+                .filter { it.buildingId == building.id && it.open }
+                .forEach { biz ->
+                    biz.open = false
+                    biz.closedAt = ctx.now
+                }
+            if (building.visibleChanges.size >= Building.MAX_VISIBLE_CHANGES) building.visibleChanges.removeAt(0)
+            building.visibleChanges += "Converted to ${proj.buildingType.label}"
+            ctx.emit(
+                EventType.BUILDING_CONVERTED,
+                "A vacant ${building.name} has been converted to a ${proj.buildingType.label.lowercase()}.",
+                buildingId = building.id, severity = 0.5, visibility = EventVisibility.PUBLIC,
+                payload = mapOf("newUse" to proj.buildingType.name)
+            )
+        }
         building.name = defaultName(proj.buildingType, ctx)
 
         // Wire a Business entity for non-residential buildings.
@@ -281,7 +331,7 @@ object DevelopmentSystem {
         BuildingType.WORKSHOP        -> Footprint(type, 4, 3)
         BuildingType.GROCER          -> Footprint(type, 3, 2)
         else                         -> {
-            android.util.Log.w("DevelopmentSystem", "footprintFor: no explicit size for $type, using default 3×3")
+            android.util.Log.w("DevelopmentSystem", "footprintFor: no explicit size for $type, using default 3Ã—3")
             Footprint(type, 3, 3)
         }
     }
