@@ -245,7 +245,9 @@ data class BuildingUi(
     val businessClosedAt: Long? = null,
     val districtName: String? = null,
     val districtCharacter: String? = null,
-    val constructedAt: Long? = null
+    val constructedAt: Long? = null,
+    /** Ids of residents who previously lived/worked here and have since departed. */
+    val tenantHistory: List<Long> = emptyList()
 )
 
 /** Simulation status shown while catching up after reopening the app. */
@@ -495,7 +497,8 @@ object SnapshotBuilder {
             businessClosedAt = biz?.closedAt,
             districtName = b.districtId?.let { state.district(it)?.name },
             districtCharacter = b.districtId?.let { state.district(it)?.character?.label },
-            constructedAt = if (b.constructedAt > 0L) b.constructedAt else null
+            constructedAt = if (b.constructedAt > 0L) b.constructedAt else null,
+            tenantHistory = b.tenantHistory.toList()
         )
     }
 }

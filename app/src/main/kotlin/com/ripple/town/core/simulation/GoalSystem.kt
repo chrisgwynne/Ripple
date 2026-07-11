@@ -455,12 +455,21 @@ object GoalSystem {
 
     private fun leaveForGood(ctx: TickContext, r: Resident, goal: Goal) {
         val state = ctx.state
-        // Vacate home slot.
+        // Vacate home slot — record the departing resident in the building's tenant history.
         val hh = r.householdId?.let { state.households[it] }
+        val oldHomeId = r.homeBuildingId
         hh?.memberIds?.remove(r.id)
         if (hh != null && hh.memberIds.isEmpty()) state.households.remove(hh.id)
         r.householdId = null
         r.homeBuildingId = null
+        if (oldHomeId != null) {
+            val oldHome = state.building(oldHomeId)
+            if (oldHome != null && r.id !in oldHome.tenantHistory) {
+                oldHome.tenantHistory += r.id
+                if (oldHome.tenantHistory.size > com.ripple.town.core.model.Building.MAX_TENANT_HISTORY)
+                    oldHome.tenantHistory.removeAt(0)
+            }
+        }
         // End employment.
         state.employmentOf(r)?.let { emp ->
             emp.endedAt = ctx.now
@@ -490,7 +499,17 @@ object GoalSystem {
     private fun moveHome(ctx: TickContext, r: Resident, newHomeId: Long, goal: Goal) {
         val state = ctx.state
         val old = r.householdId?.let { state.households[it] }
+        // Record the departing resident in the old building's tenant history before removing them.
+        val oldHomeId = r.homeBuildingId
         old?.memberIds?.remove(r.id)
+        if (oldHomeId != null && oldHomeId != newHomeId) {
+            val oldHome = state.building(oldHomeId)
+            if (oldHome != null && r.id !in oldHome.tenantHistory) {
+                oldHome.tenantHistory += r.id
+                if (oldHome.tenantHistory.size > com.ripple.town.core.model.Building.MAX_TENANT_HISTORY)
+                    oldHome.tenantHistory.removeAt(0)
+            }
+        }
         val hh = com.ripple.town.core.model.Household(
             id = state.nextHouseholdId++,
             name = "${r.surname} household",

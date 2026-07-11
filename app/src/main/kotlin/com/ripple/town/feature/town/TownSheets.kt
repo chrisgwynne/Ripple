@@ -110,11 +110,32 @@ fun BuildingSheetContent(world: WorldUi, buildingId: Long, viewModel: TownViewMo
             )
         }
         if (b.constructedAt != null) {
+            val builtYear = SimTime.year(b.constructedAt)
             Text(
-                "Built ${SimTime.formatDateLong(b.constructedAt)}",
+                "Built in Year $builtYear (${SimTime.formatDateLong(b.constructedAt)})",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+        if (b.tenantHistory.isNotEmpty()) {
+            val prevCount = b.tenantHistory.size
+            val prevNames = b.tenantHistory.takeLast(5).mapNotNull { world.resident(it)?.name }
+            SectionTitle("Previous occupants")
+            Text(
+                "$prevCount previous occupant${if (prevCount == 1) "" else "s"} recorded",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (prevNames.isNotEmpty()) {
+                prevNames.forEach { name ->
+                    Text(
+                        "• $name",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 4.dp, top = 1.dp)
+                    )
+                }
+            }
         }
         if (b.abandoned) {
             SectionTitle("What could happen here")

@@ -166,6 +166,8 @@ fun HistoryScreen(
                         if (stats.size >= 3) {
                             Spacer(Modifier.height(10.dp))
                             val ordered = stats.reversed()
+                            WellbeingSparkline(ordered)
+                            Spacer(Modifier.height(6.dp))
                             TownSparklines(ordered)
                         }
                     }
@@ -323,6 +325,56 @@ private fun importanceColour(importance: Double) = when {
     importance >= 60 -> RippleColors.BrickRed
     importance >= 45 -> RippleColors.Gold
     else -> RippleColors.WarmGreen
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Wellbeing sparkline — compact, trend-coloured, above the timeline
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * A compact ~80dp-tall polyline chart of town wellbeing over the most recent [stats] records,
+ * positioned above the event timeline so the player can read mood trend at a glance.
+ * Line colour: [RippleColors.DeepGreen] when the trend is flat or rising, [RippleColors.DeepBrick]
+ * when wellbeing is falling (last value below the first value in the window).
+ */
+@Composable
+fun WellbeingSparkline(stats: List<TownStatisticEntity>) {
+    if (stats.size < 2) return
+    val values = stats.map { it.averageWellbeing }
+    val latest = values.last()
+    val earliest = values.first()
+    val trend = latest - earliest
+    val lineColor = if (trend >= 0.0) RippleColors.DeepGreen else RippleColors.DeepBrick
+    val trendLabel = when {
+        trend > 5.0  -> "↑ improving"
+        trend < -5.0 -> "↓ declining"
+        else         -> "→ steady"
+    }
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier.fillMaxWidth().padding(bottom = 2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom
+        ) {
+            Text(
+                "Town wellbeing",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                "${latest.toInt()}/100  $trendLabel",
+                style = MaterialTheme.typography.labelSmall,
+                color = lineColor
+            )
+        }
+        Sparkline(
+            values = values,
+            fixedMin = 0.0,
+            fixedMax = 100.0,
+            lineColor = lineColor,
+            modifier = Modifier.fillMaxWidth().height(80.dp)
+        )
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────

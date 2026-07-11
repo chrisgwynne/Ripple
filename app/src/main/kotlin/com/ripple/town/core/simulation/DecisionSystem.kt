@@ -12,6 +12,7 @@ import com.ripple.town.core.model.SimTime
 import com.ripple.town.core.model.SkillType
 import com.ripple.town.core.model.WorldState
 import com.ripple.town.core.model.isPublicSpace
+import com.ripple.town.core.simulation.MemoryRecallSystem.ChildhoodSituation
 
 /**
  * One concrete thing a resident could do next, with the utility terms that
@@ -399,6 +400,12 @@ object DecisionSystem {
             if (friend != null) {
                 val friendHome = friend.homeBuildingId
                 if (friendHome != null) {
+                    // Audit #47: childhood-influence modifier — a resident who lost a parent in
+                    // childhood seeks connection a little more readily as an adult (PARENTAL_LOSS
+                    // returns 1.1 if matched, 1.0 otherwise — bounded, never a hard block).
+                    val visitFriendConfidence = 0.9 *
+                        MemoryRecallSystem.childhoodInfluenceModifier(r, ChildhoodSituation.PARENTAL_LOSS)
+                            .coerceIn(0.9, 1.1)
                     out += ScoredAction(
                         ActionKind.VISIT_FRIEND, friendHome, friend.id, Activity.VISITING, 90L,
                         "Calling on ${friend.firstName}",
@@ -407,7 +414,7 @@ object DecisionSystem {
                             EmotionSystem.behaviourModifier(r, EmotionSystem.ActionCategory.SOCIAL) *
                             townFearSocialMultiplier(state),
                         expectedReward = 0.8 + (state.relationship(r.id, friend.id)?.warmth() ?: 0.0) / 100.0,
-                        confidence = 0.9, socialInfluence = 1.1, opportunity = 1.0,
+                        confidence = visitFriendConfidence, socialInfluence = 1.1, opportunity = 1.0,
                         risk = 0.02, cost = 0.02, effort = 0.15, moralResistance = 0.0
                     )
                 }

@@ -3,6 +3,7 @@
 import com.ripple.town.core.model.Building
 import com.ripple.town.core.model.Activity
 import com.ripple.town.core.model.BuildingType
+import com.ripple.town.core.model.EmotionType
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.EventVisibility
 import com.ripple.town.core.model.LifeStage
@@ -60,17 +61,41 @@ object IncidentSystem {
         updateWorkplaceAccident(ctx)
     }
 
-    /** Daily stress/safety drain for close family while a resident remains missing. */
+    /** Daily stress/safety/social drain and ANXIETY for close family while a resident remains missing.
+     *  Audit #44: expanded from a simple stress tick to a fuller worry accumulation — each day
+     *  a family member notices the absence more acutely: social need decays (they can't enjoy
+     *  company normally), happiness-proxy `purpose` also drains slightly, and a small ANXIETY
+     *  emotion is spawned. RNG variation keeps the per-family-member effect slightly different
+     *  each day so it doesn't feel like a metronome. */
     private fun accumulateMissingPersonWorry(ctx: TickContext) {
         val state = ctx.state
         for (id in state.missingResidentIds) {
             val r = state.resident(id) ?: continue
+            // Also include adult children still in town as worried family members.
             val worriers = listOfNotNull(r.partnerId?.let { state.resident(it) }) +
-                listOfNotNull(r.motherId?.let { state.resident(it) }, r.fatherId?.let { state.resident(it) })
+                listOfNotNull(r.motherId?.let { state.resident(it) }, r.fatherId?.let { state.resident(it) }) +
+                r.childIds.mapNotNull { state.resident(it) }.filter { it.inTown }
+            val causeEventId = state.missingPersonEventId[id]
             for (w in worriers) {
                 if (!w.inTown) continue
+                // Stress and safety — pre-existing; kept as-is.
                 w.needs.stress = (w.needs.stress + 0.8).coerceAtMost(100.0)
                 w.needs.safety = (w.needs.safety - 0.3).coerceAtLeast(0.0)
+                // Audit #44 additions: social and purpose decay, plus ANXIETY spawn.
+                // Small RNG variation so individual family members differ slightly day-to-day.
+                val variation = ctx.rng.nextDouble(0.05, 0.15)   // 0.05..0.15
+                w.needs.social = (w.needs.social - (0.25 + variation)).coerceAtLeast(0.0)
+                w.needs.purpose = (w.needs.purpose - 0.15).coerceAtLeast(0.0)
+                // Spawn a low-intensity ANXIETY emotion — does not fire if the worrier already
+                // has an active ANXIETY (EmotionSystem de-duplicates by type so the existing
+                // one is simply refreshed, not doubled up).
+                val anxietyIntensity = (20.0 + variation * 60.0).coerceIn(20.0, 35.0)
+                EmotionSystem.spawnEmotion(
+                    ctx, w, EmotionType.ANXIETY,
+                    intensity = anxietyIntensity,
+                    sourceEventId = causeEventId,
+                    relatedResidentId = r.id
+                )
             }
         }
     }

@@ -149,11 +149,19 @@ data class Building(
     /** DevelopmentProject that created this building, if any. */
     var developmentProjectId: Long? = null,
     /** Short strings describing visible changes over time ("Extension added", "Sign repainted"). */
-    val visibleChanges: MutableList<String> = mutableListOf()
+    val visibleChanges: MutableList<String> = mutableListOf(),
+    /**
+     * Ids of residents who have previously lived or worked here and have since departed.
+     * Populated by [GoalSystem] when a resident moves out or leaves town.
+     * Capped at [MAX_TENANT_HISTORY] — older entries evicted first.
+     */
+    val tenantHistory: MutableList<Long> = mutableListOf()
 ) {
     companion object {
         /** Maximum number of entries kept in [visibleChanges]. Older entries are evicted first. */
         const val MAX_VISIBLE_CHANGES = 6
+        /** Maximum number of previous-tenant ids kept in [tenantHistory]. */
+        const val MAX_TENANT_HISTORY = 20
     }
 
     fun containsTile(t: Tile): Boolean =

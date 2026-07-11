@@ -8,6 +8,7 @@ import com.ripple.town.core.model.LifeStage
 import com.ripple.town.core.model.MemoryType
 import com.ripple.town.core.model.Resident
 import com.ripple.town.core.model.SimTime
+import com.ripple.town.core.simulation.MemoryRecallSystem.ChildhoodSituation
 
 /**
  * Bounded daily pass forming and drifting each detailed resident's [Belief]s — same overall shape
@@ -189,11 +190,16 @@ object BeliefSystem {
         if (onCooldown(ctx, r, reasonKey)) return
 
         val causeIds = listOfNotNull(jobLostEvent?.id)
-        applyDrift(ctx, r, BeliefTopic.ECONOMIC_OPTIMISM, -DRIFT_MAX, reasonKey,
+        // Audit #47: childhood-influence modifier — a resident who grew up around real financial
+        // hardship reads unemployment more acutely as an adult (FINANCIAL_HARDSHIP returns 1.1 if
+        // matched, 1.0 otherwise — small, bounded ±0.1, never zeroes the drift out).
+        val hardshipMod = MemoryRecallSystem.childhoodInfluenceModifier(r, ChildhoodSituation.FINANCIAL_HARDSHIP)
+            .coerceIn(0.9, 1.1)
+        applyDrift(ctx, r, BeliefTopic.ECONOMIC_OPTIMISM, -DRIFT_MAX * hardshipMod, reasonKey,
             "Being out of work has worn down their sense that things are looking up.", causeIds)
-        applyDrift(ctx, r, BeliefTopic.TRUST_IN_GOVERNMENT, -DRIFT_MIN, reasonKey,
+        applyDrift(ctx, r, BeliefTopic.TRUST_IN_GOVERNMENT, -DRIFT_MIN * hardshipMod, reasonKey,
             "Being out of work has worn down their sense that things are looking up.", causeIds)
-        applyDrift(ctx, r, BeliefTopic.INSTITUTIONAL_TRUST, -DRIFT_MIN, reasonKey,
+        applyDrift(ctx, r, BeliefTopic.INSTITUTIONAL_TRUST, -DRIFT_MIN * hardshipMod, reasonKey,
             "Being out of work has worn down their sense that things are looking up.", causeIds)
         markCooldown(ctx, r, reasonKey)
     }
