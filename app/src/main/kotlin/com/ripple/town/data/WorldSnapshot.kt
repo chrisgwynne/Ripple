@@ -18,6 +18,7 @@ import com.ripple.town.core.model.SpriteConfig
 import com.ripple.town.core.model.TimeOfDay
 import com.ripple.town.core.model.TownMap
 import com.ripple.town.core.model.Weather
+import com.ripple.town.core.model.RelationshipKind
 import com.ripple.town.core.model.WorldState
 
 /**
@@ -66,7 +67,14 @@ data class WorldUi(
      * newest first — used by [TownSheets] to render a "Town character" trajectory block.
      * Empty until [TownCultureSystem] has run at least once. Safe default (empty list).
      */
-    val townCharacterHistory: List<String> = emptyList()
+    val townCharacterHistory: List<String> = emptyList(),
+    /**
+     * Top families by reputation score, filtered to those with at least one living member.
+     * Capped at 8 entries. Empty until [FamilyLegacySystem] has run at least once.
+     */
+    val families: List<FamilyLegacyUi> = emptyList(),
+    /** Active community groups, sorted by member count descending, capped at 6. */
+    val communityGroups: List<CommunityGroupUi> = emptyList()
 ) {
     val residentsById: Map<Long, ResidentUi> by lazy { residents.associateBy { it.id } }
     val buildingsById: Map<Long, BuildingUi> by lazy { buildings.associateBy { it.id } }
@@ -92,6 +100,17 @@ data class WorldUi(
 }
 
 private fun List<Double>.average0(): Double = if (isEmpty()) 0.0 else average()
+
+// ── Community group UI model ──────────────────────────────────────────────────
+
+@Immutable
+data class CommunityGroupUi(
+    val name: String,
+    val type: String,
+    val memberCount: Int,
+    val reputation: Int,
+    val leaderName: String
+)
 
 // ── Politics UI models ────────────────────────────────────────────────────────
 
@@ -239,6 +258,21 @@ data class DistrictSummaryUi(
     val vacancyRate: Double
 )
 
+/** UI-facing summary of a single family dynasty for the Town Overview "Families" section. */
+@Immutable
+data class FamilyLegacyUi(
+    val surname: String,
+    /** [FamilyReputationType] name, e.g. "POLITICAL_DYNASTY". */
+    val reputationType: String,
+    val generations: Int,
+    val livingMembers: Int,
+    val mayorships: Int,
+    val businesses: Int,
+    val reputationScore: Int,
+    /** True if this family stands out — non-ORDINARY type, any mayorship, or 3+ businesses. */
+    val isNoteworthy: Boolean
+)
+
 @Immutable
 data class BuildingUi(
     val id: Long,
@@ -286,7 +320,9 @@ data class BuildingUi(
     val districtCharacter: String? = null,
     val constructedAt: Long? = null,
     /** Ids of residents who previously lived/worked here and have since departed. */
-    val tenantHistory: List<Long> = emptyList()
+    val tenantHistory: List<Long> = emptyList(),
+    /** Name of the rival business (same type, owner has RIVAL relationship with this business's owner), if any. */
+    val businessRivalName: String? = null
 )
 
 /** Simulation status shown while catching up after reopening the app. */
@@ -368,7 +404,39 @@ object SnapshotBuilder {
                 .asReversed()
                 .distinctBy { it.description }
                 .take(3)
-                .map { it.description }
+                .map { it.description },
+            families = state.familyLegacies.values
+                .filter { it.livingMembers > 0 }
+                .sortedByDescending { it.reputation }
+                .take(8)
+                .map { f ->
+                    FamilyLegacyUi(
+                        surname = f.surname,
+                        reputationType = f.reputationType,
+                        generations = f.generations,
+                        livingMembers = f.livingMembers,
+                        mayorships = f.mayorships,
+                        businesses = f.businessesOwned,
+                        reputationScore = f.reputation.toInt(),
+                        isNoteworthy = f.reputationType != com.ripple.town.core.model.FamilyReputationType.ORDINARY.name
+                            || f.mayorships > 0
+                            || f.businessesOwned > 2
+                    )
+                },
+            communityGroups = state.communityGroups.values
+                .filter { it.active && it.memberIds.size >= 2 }
+                .sortedByDescending { it.memberIds.size }
+                .take(6)
+                .map { g ->
+                    val leader = state.resident(g.founderResidentId)
+                    CommunityGroupUi(
+                        name = g.name,
+                        type = g.type.label,
+                        memberCount = g.memberIds.size,
+                        reputation = g.reputation.toInt(),
+                        leaderName = leader?.fullName ?: "Unknown"
+                    )
+                }
         )
     }
 

@@ -55,12 +55,80 @@ import com.ripple.town.core.simulation.InterventionEngine
 import com.ripple.town.data.DeathSummary
 import com.ripple.town.data.DistrictSummaryUi
 import com.ripple.town.data.EventUi
+import com.ripple.town.data.FamilyLegacyUi
 import com.ripple.town.data.PartyStandingUi
 import com.ripple.town.data.PoliticsSummaryUi
 import com.ripple.town.data.TownStatsUi
 import com.ripple.town.data.WorldUi
 
 // ResidentSheetContent moved to ResidentProfileScreen.kt (hero header + tabs redesign).
+
+// ----------------------------------------------------------- families panel
+
+/**
+ * Compact family dynasty panel shown inside [TownOverviewSheetContent]'s "At a glance" tab,
+ * after the Districts section. Shows up to 5 of the top 8 notable families from
+ * [WorldUi.families] (itself capped at 8, filtered to living members, sorted by reputation).
+ */
+@Composable
+private fun FamiliesPanelContent(world: WorldUi) {
+    SectionTitle("Families")
+    world.families.take(5).forEach { family ->
+        FamilyRow(family)
+    }
+}
+
+@Composable
+private fun FamilyRow(f: FamilyLegacyUi) {
+    // Map reputationType name to a human-readable label using the same enum.
+    val repLabel = runCatching {
+        com.ripple.town.core.model.FamilyReputationType.valueOf(f.reputationType).label
+    }.getOrDefault(f.reputationType.lowercase().replaceFirstChar { it.uppercase() })
+
+    val nameColor = when (f.reputationType) {
+        com.ripple.town.core.model.FamilyReputationType.POLITICAL_DYNASTY.name,
+        com.ripple.town.core.model.FamilyReputationType.BUSINESS_EMPIRE.name,
+        com.ripple.town.core.model.FamilyReputationType.FOUNDING_FAMILY.name,
+        com.ripple.town.core.model.FamilyReputationType.PHILANTHROPIC.name -> RippleColors.DeepGreen
+        com.ripple.town.core.model.FamilyReputationType.CRIMINAL.name,
+        com.ripple.town.core.model.FamilyReputationType.NOTORIOUS.name -> RippleColors.DeepBrick
+        com.ripple.town.core.model.FamilyReputationType.FALLEN.name -> RippleColors.SoftInk
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+
+    // Pick the most interesting non-zero stat for the right-side badge.
+    val statLabel = when {
+        f.mayorships > 0 -> "Mayor ×${f.mayorships}"
+        f.businesses > 0 -> "Businesses: ${f.businesses}"
+        else -> "${f.livingMembers} living"
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                f.surname,
+                style = MaterialTheme.typography.titleSmall,
+                color = nameColor
+            )
+            Text(
+                "${f.surname} · $repLabel",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Text(
+            statLabel,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
 
 // ------------------------------------------------------------ building sheet
 
@@ -979,6 +1047,9 @@ fun TownOverviewSheetContent(world: WorldUi, viewModel: TownViewModel? = null) {
             }
             if (world.districts.isNotEmpty()) {
                 DistrictsPanelContent(world)
+            }
+            if (world.families.isNotEmpty()) {
+                FamiliesPanelContent(world)
             }
             world.plausibilityScore?.let { score ->
                 SectionTitle("Simulation health")
