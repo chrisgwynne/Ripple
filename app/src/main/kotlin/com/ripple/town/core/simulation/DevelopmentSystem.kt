@@ -14,6 +14,7 @@ import com.ripple.town.core.model.TileType
 import com.ripple.town.core.model.WorldState
 import com.ripple.town.core.model.isHome
 import com.ripple.town.core.model.toBusinessType
+import kotlin.math.absoluteValue
 
 /**
  * Advances development projects through the pipeline one stage per day:
@@ -31,7 +32,11 @@ import com.ripple.town.core.model.toBusinessType
 object DevelopmentSystem {
 
     const val APPROVAL_DELAY_DAYS = 5L
-    const val APPROVAL_CHANCE = 0.85
+    /** Base approval chance when trust = 50 and no mayor bonus. */
+    const val APPROVAL_BASE = 0.72
+    /** Minimum and maximum politically-modulated approval probability. */
+    const val APPROVAL_MIN = 0.45
+    const val APPROVAL_MAX = 0.95
     /** Minimum balance before a project can be funded (allows some deficit). */
     const val FUNDING_BALANCE_FLOOR = -20_000.0
     /** Days per £10,000 of construction cost (£40k = 4 days, £80k = 8 days). */
@@ -99,8 +104,8 @@ object DevelopmentSystem {
     private fun advanceProposed(ctx: TickContext, proj: DevelopmentProject) {
         val daysInStage = SimTime.dayIndex(ctx.now) - SimTime.dayIndex(proj.stageChangedAt)
         if (daysInStage < APPROVAL_DELAY_DAYS) return
-        val approved = ctx.rng.nextBoolean(APPROVAL_CHANCE)
-        if (approved) {
+        val chance = politicalApprovalChance(ctx, proj)
+        if (ctx.rng.nextBoolean(chance)) {
             proj.stage = DevelopmentStage.APPROVED
             proj.stageChangedAt = ctx.now
             ctx.emit(
@@ -112,6 +117,64 @@ object DevelopmentSystem {
             proj.stage = DevelopmentStage.REJECTED
             proj.stageChangedAt = ctx.now
         }
+    }
+
+    /**
+     * Computes the probability that a proposed [DevelopmentProject] is approved.
+     *
+     * Three signals feed the decision:
+     *
+     * 1. **Town sentiment trust** (0..100) — public faith in institutions; scaled to a ±0.18 swing
+     *    around [APPROVAL_BASE]. High trust = planning process seen as legitimate = committees vote
+     *    yes more readily. Low trust = NIMBY opposition and obstruction.
+     *
+     * 2. **Mayor's ambition** (0..1) — an ambitious mayor champions growth and pushes projects
+     *    through; a cautious incumbent lets things stall. Adds up to +0.10.
+     *
+     * 3. **Development type** — parks, housing (when housing is short), and civic buildings enjoy
+     *    community goodwill; industrial and commercial face more opposition unless the town is
+     *    economically optimistic.
+     *
+     * Result is clamped to [[APPROVAL_MIN]..[APPROVAL_MAX]] so no political condition can produce
+     * a certainty of approval or an outright ban on development.
+     */
+    private fun politicalApprovalChance(ctx: TickContext, proj: DevelopmentProject): Double {
+        val sentiment = ctx.state.townSentiment
+
+        // 1. Trust signal: ±0.18 around base
+        val trustNorm = sentiment.trust / 100.0   // 0..1
+        val trustDelta = (trustNorm - 0.5) * 0.36 // -0.18..+0.18
+
+        // 2. Mayor ambition: +0.10 for maximally ambitious mayor
+        val mayorBonus = ctx.state.mayorId
+            ?.let { ctx.state.residents[it] }
+            ?.effectivePersonality()
+            ?.ambition
+            ?.times(0.10)
+            ?: 0.0
+
+        // 3. Development type affinity (public goodwill vs community pushback)
+        val typeBonus = when (proj.type) {
+            DevelopmentType.PARK,
+            DevelopmentType.SCHOOL,
+            DevelopmentType.HEALTHCARE_CLINIC   -> +0.08
+            DevelopmentType.HOUSING_RESIDENTIAL,
+            DevelopmentType.HOUSING_FLATS       -> if (housingShortfall(ctx)) +0.06 else 0.0
+            DevelopmentType.POLICE_STATION,
+            DevelopmentType.FIRE_STATION        -> if (sentiment.safety < 40.0) +0.05 else 0.0
+            DevelopmentType.INDUSTRIAL,
+            DevelopmentType.COMMERCIAL_RETAIL   -> if (sentiment.optimism > 60.0) 0.0 else -0.06
+            else                                -> 0.0
+        }
+
+        return (APPROVAL_BASE + trustDelta + mayorBonus + typeBonus)
+            .coerceIn(APPROVAL_MIN, APPROVAL_MAX)
+    }
+
+    private fun housingShortfall(ctx: TickContext): Boolean {
+        val state = ctx.state
+        val press = state.servicePressures["HOUSING"]
+        return press != null && press.satisfactionScore < 0.8
     }
 
     private fun advanceFunding(ctx: TickContext, proj: DevelopmentProject) {
