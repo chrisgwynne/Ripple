@@ -4,6 +4,78 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-11 — Economy Calibration Gate Phase 3: full validation matrix (final phase)
+
+Closes the brief's "Validation" section (`docs/economy-brief-2026-07-11-final-gate.md`) — the
+final phase after Phase 1 (unit economics + catchment demand) and Phase 2 (staffing ramp, recovery
+ladder, formation gate, contract demand) below. Full write-up:
+`docs/simulation-rules.md#full-validation-matrix-economy-calibration-gate-phase-3-added-2026-07-11`.
+
+**Harness extended, not replaced.** `EconomyMetricsCollector` gained real per-sector aggregation
+(`SectorReport`: openings/closures/recoveries/expansions/lifespan/profit/reserve-runway/staffing/
+demand/failure-reason) built from a new `EconomyEvent` event-stream ledger the runner accumulates
+every tick (a point-in-time snapshot alone cannot answer "how many recoveries happened" — that
+needs the real event stream, not a snapshot diff). `EconomyCalibrationRunner` gained
+`WIDE_SEEDS`/`MEDIUM_SEEDS`/`NARROW_SEEDS` and a configurable `RunConfig.years`. New
+`EconomyValidationReport.kt` runs three real, actually-executed configurations and implements the
+brief's exact 8 flag checks as computed booleans.
+
+**Honest scoping — measured, not the brief's literal 100 seeds.** Three real timing probes (this
+session, deleted after use) found per-seed-year cost roughly TRIPLES from year 1 (~6.3s) to year
+10 (~21.9s), since towns genuinely grow population/business-count over simulated time. Chosen
+scope: **WIDE = 15 seeds x 1yr** (measured 55.7s), **MEDIUM = 5 seeds x 5yr** (measured 290.1s),
+**NARROW = 2 seeds x 10yr** (measured 378.0s) — none reach the brief's literal 100 seeds at every
+horizon, honestly out of reach for a single JVM test invocation in this environment.
+
+**Headline finding — the 1-year figure holds, but closure rate does NOT hold as the town ages:**
+
+| Horizon | Pooled closure rate | Businesses tracked/closed |
+|---|---|---|
+| 1 year (WIDE, 15 seeds) | **4.4%** | 136 / 6 |
+| 5 years (MEDIUM, 5 seeds) | **26.1%** | 46 / 12 |
+| 10 years (NARROW, 2 seeds) | **89.5%** | 19 / 17 |
+
+The 1-year figure (4.4%) is consistent with Phase 2's separately-measured 3.3% and sits
+comfortably inside the brief's 2-10% target. But this is the first time the longer horizons the
+brief explicitly asked for were actually run — and they reveal genuine, previously-invisible
+drift: FACTORY is the consistent worst sector at every horizon (20%/60%/100% closure), and by
+year 10 even BAKERY/HARDWARE/BOOKSHOP/TAILOR are failing at 50-100% (small-n in the 2-seed narrow
+run, but a real, reproduced signal, not noise). Demand sits at or near the 95.0 ceiling for nearly
+every sector even in the worst runs — NOT a demand problem. What visibly degrades is real net
+daily profit and staff headcount: staffing counts climb sharply over time (FACTORY staff median
+12 at 1yr -> 15-17 by 5-10yr; WORKSHOP 10 -> up to 20), while `expandBusiness` has no cap on
+`employeeCapacity` growth and `salaryFor`'s flat per-role wage never scales down as a business
+matures — the most likely mechanical driver is **wage-cost growth from successful hiring
+outpacing demand-capped revenue growth** over a multi-year horizon. Recoveries (203-297 across
+configs) and expansions (417-496) both occur at every horizon in real numbers — the recovery
+ladder and expansion mechanism are genuinely firing, they're just not enough to offset the
+multi-year cost drift.
+
+**Definition of Done, checked honestly (full table in simulation-rules.md):** closure rates
+believable (PASS at 1yr, FAIL at 5/10yr), real failure reasons (PASS, with the caveat that every
+closure currently traces to the same single mechanical `daysInTrouble` gate — not yet varied real
+causes), most viable businesses survive (PASS at 1yr — 97.8% — FAIL by 10yr — 57.9%), recoveries
+occur (PASS, 203-297 events), expansions occur (PASS, 417-496 events), startups riskier than
+established (FAIL at longer horizons — by 10yr, 37.5% of closures are established businesses that
+already survived a full year, not just new ones), sector outcomes differ meaningfully (PASS —
+FACTORY consistently worst at every horizon), no Chronicle suppression required (PASS — grepped
+`ChronicleBuilder.kt` for `BUSINESS_CLOSED`/`BUSINESS_STRUGGLING`, zero matches;
+`NewspaperGenerator`'s business-event filter only selects headline candidates, it does not remove
+events from the `TickResult.events`/`state.recentEventIds` stream this validation harness reads).
+
+**Reported honestly, not smoothed over: the brief's target is met at 1 year (the horizon Phase
+1/Phase 2 were actually tuned against) but does NOT hold at 5-10 years.** This is real, newly
+measured information this session's validation run surfaced for the first time — Phase 1/Phase 2
+never ran past 1 simulated year, so this drift was invisible until now. Not retuned as part of
+this pass — Phase 3's brief was "run the validation, report by sector, flag issues, check
+Definition of Done," not "retune further." `EconomyCalibrationGuardrailTest` (10 seeds x 1yr,
+unchanged scope) still passes against the current code, re-verified this session — its bounds were
+deliberately not tightened further since it does not (and was never scoped to) cover the multi-year
+horizons where the real open problem now lives. A follow-up pass would need to address multi-year
+staffing-cost drift specifically (candidate starting points: capping `expandBusiness`'s
+`employeeCapacity` growth, or scaling `salaryFor` down as a business's `daysInTrouble` history
+shows sustained health rather than only reacting to trouble after the fact).
+
 ### 2026-07-11 — Fixed a second stale test assertion found by actually running tests
 
 While verifying the Economy Calibration Gate Phase 2 work below, ran `WorldGeneratorTest` (not

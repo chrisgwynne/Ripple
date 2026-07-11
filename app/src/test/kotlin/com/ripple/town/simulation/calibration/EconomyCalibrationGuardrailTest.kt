@@ -144,6 +144,36 @@ class EconomyCalibrationGuardrailTest {
                 "healthy-range target — it exists only to catch 'everyone is broke', not to " +
                 "certify the actual wealth level as correct"
         )
+
+        // --- NEW (2026-07-11, Economy Calibration Gate Phase 3): recoveries/expansions genuinely
+        //     occur at all, not zero. Phase 3's validation matrix (`EconomyValidationReport`, see
+        //     docs/simulation-rules.md "Full validation matrix") found this holds robustly across
+        //     every one of three real, independently-run configurations (15 seeds x 1yr: 203
+        //     recoveries / 417 expansions; 5 seeds x 5yr: 250 recoveries / 496 expansions; 2 seeds
+        //     x 10yr: 297 recoveries / 433 expansions) — recoveries/expansions were NEVER zero in
+        //     any of those three runs, unlike the closure rate, which drifted dramatically across
+        //     horizons (4.4% at 1yr up to 89.5% at 10yr — see that doc section). This guardrail is
+        //     narrow and cheap to satisfy on purpose: it only catches the specific regression where
+        //     `BUSINESS_RECOVERED`/`BUSINESS_EXPANDED` stop firing ENTIRELY (e.g. a bug in
+        //     `maybeAttemptRecovery`'s health-state gate, or `expandBusiness`'s `EXPANSION_BALANCE`
+        //     threshold becoming unreachable) — it is not a target-rate check, since this same
+        //     10-seed x 1-year default config is too small a sample to pin an exact expected count.
+        val totalRecoveries = runs.sumOf { run -> run.events.count { it.type == com.ripple.town.core.model.EventType.BUSINESS_RECOVERED } }
+        val totalExpansions = runs.sumOf { run -> run.events.count { it.type == com.ripple.town.core.model.EventType.BUSINESS_EXPANDED } }
+        org.junit.Assert.assertTrue(
+            "REGRESSION GUARDRAIL FAILED: zero BUSINESS_RECOVERED events across ${runs.size} seeds x " +
+                "1 simulated year — the brief's 'genuine recoveries must occur' definition-of-done " +
+                "item should never read zero; Phase 3's validation matrix measured 203-297 recoveries " +
+                "across three independent configurations, never zero",
+            totalRecoveries > 0
+        )
+        org.junit.Assert.assertTrue(
+            "REGRESSION GUARDRAIL FAILED: zero BUSINESS_EXPANDED events across ${runs.size} seeds x " +
+                "1 simulated year — the brief's 'some businesses must expand' definition-of-done item " +
+                "should never read zero; Phase 3's validation matrix measured 417-496 expansions " +
+                "across three independent configurations, never zero",
+            totalExpansions > 0
+        )
     }
 
     private fun assertLessThanOrEqual(actual: Double, bound: Double, label: String, context: String) {
