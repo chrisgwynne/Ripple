@@ -154,6 +154,25 @@ class SimulationCoordinator(
             if (dayIndex % AnomalyDetector.CHECK_INTERVAL_DAYS == 0L) {
                 AnomalyDetector.updateMonthly(ctx)
             }
+            // Human society evolution: aspirations form/inherit, identities solidify, life satisfaction drifts,
+            // legacies fade, town culture assessed monthly.
+            AspirationSystem.updateDaily(ctx)
+            IdentitySystem.updateDaily(ctx)
+            LifeSatisfactionSystem.updateDaily(ctx)
+            LegacySystem.updateDaily(ctx)
+            if (dayIndex % TownCultureSystem.UPDATE_INTERVAL_DAYS == 0L) {
+                TownCultureSystem.updateMonthly(ctx)
+            }
+        }
+        // 12b. Per-tick life-event dispatch: society systems react to every new event this tick.
+        for (event in ctx.newEvents) {
+            for (id in event.involvedResidentIds()) {
+                val r = state.resident(id) ?: continue
+                if (!r.inTown) continue
+                AspirationSystem.onLifeEvent(ctx, r, event)
+                IdentitySystem.onLifeEvent(ctx, r, event)
+                LifeSatisfactionSystem.onLifeEvent(ctx, r, event)
+            }
         }
         // 13. Intervention influence regenerates through observation.
         InterventionEngine.regenerate(state, SimTime.MINUTES_PER_TICK)

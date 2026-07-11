@@ -114,6 +114,20 @@ object NewspaperGenerator {
                 "$years year$s on:",
                 "It has now been $years year$s since $snippet. The case remains unsolved.")
         }
+        // Legacy anniversaries
+        val legacy = if (rng.nextBoolean(0.35)) LegacySystem.anniversaryLegacy(state) else null
+        if (legacy != null) {
+            val years = SimTime.ageYears(legacy.createdAt, state.time)
+            add(StoryCategory.HUMAN_INTEREST,
+                "We remember",
+                "This year marks $years years since ${legacy.description}")
+        }
+        // Town character — run occasionally so the paper reflects the town's identity
+        if (rng.nextBoolean(0.12) && state.townCulture.dimensions.isNotEmpty()) {
+            add(StoryCategory.TOWN_NEWS,
+                "The character of ${state.townName}",
+                "${state.townName} has long been ${state.townCulture.describe()}.")
+        }
 
         state.lastNewspaperAt = state.time
         return issue

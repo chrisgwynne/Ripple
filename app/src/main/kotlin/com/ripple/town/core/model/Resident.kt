@@ -302,7 +302,12 @@ data class Resident(
      *  this map directly. Not to be confused with [Memory.beliefFormed] (a short quoted-saying
      *  string passed down at death, see `LifecycleSystem.passDownBeliefs`) — a different, older,
      *  unrelated concept despite the similar name. */
-    val beliefs: MutableMap<BeliefTopic, Belief> = mutableMapOf()
+    val beliefs: MutableMap<BeliefTopic, Belief> = mutableMapOf(),
+
+    // --- Human society evolution (2026-07-11) ---
+    val aspirations: MutableList<Aspiration> = mutableListOf(),
+    val identityFacets: MutableList<IdentityFacet> = mutableListOf(),
+    var lifeSatisfaction: LifeSatisfaction = LifeSatisfaction()
 ) {
     val fullName: String get() = "$firstName $surname"
 

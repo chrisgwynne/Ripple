@@ -276,6 +276,7 @@ object LifecycleSystem {
 
         ConsequenceEngine.onEvent(ctx, death)
         LegendSystem.considerSpawn(ctx, death)
+        LegacySystem.onDeath(ctx, r, death)
     }
 
     /** How important a memory's formed belief must be to survive as a family story. */
