@@ -22,13 +22,18 @@ object NewspaperGenerator {
     const val ISSUE_PERIOD_DAYS = 7L
 
     fun isDue(state: WorldState): Boolean {
+        val eightAmToday = (state.time / SimTime.MINUTES_PER_DAY) * SimTime.MINUTES_PER_DAY +
+            8L * SimTime.MINUTES_PER_HOUR
         if (state.lastNewspaperAt < 0) {
-            // First issue a day after the world starts.
-            return state.time - (state.time % SimTime.MINUTES_PER_DAY) > 0 &&
-                SimTime.hourOfDay(state.time) == 8 && state.issuesPublished == 0
+            // First issue: fire on the first tick at or past 8am on the second day.
+            return SimTime.dayIndex(state.time) > 0 && state.time >= eightAmToday &&
+                state.issuesPublished == 0
         }
-        return state.time - state.lastNewspaperAt >= ISSUE_PERIOD_DAYS * SimTime.MINUTES_PER_DAY &&
-            SimTime.hourOfDay(state.time) == 8
+        // Subsequent issues: fire on the first tick at or past 8am of the due day.
+        val nextDueDay = (state.lastNewspaperAt + ISSUE_PERIOD_DAYS * SimTime.MINUTES_PER_DAY) /
+            SimTime.MINUTES_PER_DAY
+        val nextDue8am = nextDueDay * SimTime.MINUTES_PER_DAY + 8L * SimTime.MINUTES_PER_HOUR
+        return state.time >= nextDue8am
     }
 
     fun generate(state: WorldState, periodEvents: List<WorldEvent>, rng: SimRandom): NewspaperIssue {
