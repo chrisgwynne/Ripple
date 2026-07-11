@@ -385,12 +385,20 @@ private fun LivingSummaryCard(r: ResidentUi, dialogueLine: String?) {
                 )
             }
 
-            r.activeGoalLabels.firstOrNull()?.let { topGoal ->
+            if (r.activeGoalLabels.isNotEmpty()) {
                 Text(
-                    "Working towards: $topGoal",
-                    style = MaterialTheme.typography.bodySmall,
+                    if (r.activeGoalLabels.size == 1) "Working towards:" else "Goals (${r.activeGoalLabels.size}):",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp)
                 )
+                r.activeGoalLabels.forEach { goal ->
+                    Text(
+                        "· $goal",
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(start = 8.dp, top = 2.dp)
+                    )
+                }
             }
 
             if (r.alive) {

@@ -330,7 +330,11 @@ object SnapshotBuilder {
             personality = r.personality,
             activeGoalLabels = if (isBackground) emptyList() else r.goals
                 .filter { it.status == com.ripple.town.core.model.GoalStatus.ACTIVE }
-                .map { "${it.type.label} — ${it.motivation}" },
+                .sortedByDescending { it.progress }
+                .map { g ->
+                    val pct = (g.progress * 100).toInt()
+                    "${g.type.label} (${pct}%) — ${g.motivation}"
+                },
             conditionLabels = if (isBackground) emptyList() else r.activeConditions().filter { !it.hidden }.map { it.type.label },
             memories = if (isBackground) emptyList() else r.memories.sortedByDescending { it.importance }.take(10).map {
                 MemoryUi(it.description, it.emotionalIntensity, it.createdAt, it.type.label)
