@@ -2,6 +2,7 @@ package com.ripple.town.core.simulation
 
 import com.ripple.town.core.model.Building
 import com.ripple.town.core.model.BuildingType
+import com.ripple.town.core.model.DistrictType
 import com.ripple.town.core.model.Business
 import com.ripple.town.core.model.BusinessType
 import com.ripple.town.core.model.DelayedEffect
@@ -25,8 +26,6 @@ import com.ripple.town.core.model.SimTime
 import com.ripple.town.core.model.SkillType
 import com.ripple.town.core.model.SpriteConfig
 import com.ripple.town.core.model.Tile
-import com.ripple.town.core.model.TileType
-import com.ripple.town.core.model.TownMap
 import com.ripple.town.core.model.WorldState
 
 /**
@@ -38,71 +37,39 @@ class WorldGenerator(private val seed: Long, private val townName: String = "Ash
 
     fun generate(createdAtRealMs: Long): WorldState {
         val rng = SimRandom(seed, tick = -1L)
+        val mapResult = MapGenerator.generate(rng)
         val state = WorldState(
             seed = seed,
             townName = townName,
             createdAtRealMs = createdAtRealMs,
-            map = buildMap(rng)
+            map = mapResult.map
         )
         // Start mid-morning on a spring day in year 12 of the town's own history.
         state.time = 11L * SimTime.MINUTES_PER_YEAR + 62L * SimTime.MINUTES_PER_DAY + 9L * 60L
         state.nextElectionAt = state.time + 180L * SimTime.MINUTES_PER_DAY
 
-        buildBuildings(state)
+        buildDistricts(state, mapResult)
+        buildBuildings(state, mapResult)
         buildDetailedResidents(state, rng)
         buildBusinessesAndJobs(state)
-        // Real, connected background households (family/partner links, age pyramid) rather
-        // than the old flat buildBackgroundResidents(); see PopulationGenerator.kt's doc
-        // comment for why this replaces it outright instead of running alongside it.
+        buildProceduralBuildings(state, mapResult)
+        // Real, connected background households (family/partner links, age pyramid).
         PopulationGenerator.buildProceduralPopulation(state, rng, targetCount = PROCEDURAL_POPULATION_TARGET)
         buildRelationships(state, rng)
         seedScenarios(state)
 
-        // The starting followed resident is the player's own anchor into the town, not
-        // someone "discovered" — automatic world generation should never count as a
-        // discovery. See PeopleScreen's "Recently discovered" section, which already
-        // excludes the followed resident defensively, but the list itself should simply
-        // never contain them in the first place.
         state.followedResidentId = state.residents.values
             .first { it.firstName == "Mara" && it.surname == "Vale" }.id
         return state
     }
 
-    // ------------------------------------------------------------------ map
+    // ------------------------------------------------------------ districts
 
-    private fun buildMap(rng: SimRandom): TownMap {
-        val w = MAP_W
-        val h = MAP_H
-        val tiles = MutableList(w * h) { TileType.GRASS }
-        fun set(x: Int, y: Int, t: TileType) {
-            if (x in 0 until w && y in 0 until h) tiles[y * w + x] = t
+    private fun buildDistricts(state: WorldState, result: MapGenerator.GenerationResult) {
+        for (proto in result.districts) {
+            val id = state.nextDistrictId++
+            state.districts[id] = proto.copy(id = id)
         }
-        // River down the east edge
-        for (y in 0 until h) {
-            set(w - 1, y, TileType.WATER); set(w - 2, y, TileType.WATER)
-        }
-        // Roads: two horizontal, three vertical
-        for (x in 0 until w - 2) { set(x, HIGH_ST_Y, TileType.ROAD); set(x, ROWAN_ST_Y, TileType.ROAD) }
-        for (y in 0 until h) { set(10, y, TileType.ROAD); set(22, y, TileType.ROAD); set(34, y, TileType.ROAD) }
-        // Plaza in front of the town hall
-        for (x in 13..19) for (y in 11..12) if (tiles[y * w + x] == TileType.GRASS) set(x, y, TileType.PLAZA)
-        // Park greenery
-        for (x in 12..19) for (y in 23..29) {
-            val t = when {
-                rng.nextBoolean(0.18) -> TileType.TREE
-                rng.nextBoolean(0.25) -> TileType.FLOWERS
-                else -> TileType.GRASS
-            }
-            set(x, y, t)
-        }
-        for (x in 14..17) set(x, 26, TileType.PATH)
-        // Scattered trees elsewhere
-        repeat(46) {
-            val x = rng.nextInt(w - 2)
-            val y = rng.nextInt(h)
-            if (tiles[y * w + x] == TileType.GRASS) set(x, y, TileType.TREE)
-        }
-        return TownMap(w, h, tiles)
     }
 
     // ------------------------------------------------------------- buildings
@@ -149,12 +116,9 @@ class WorldGenerator(private val seed: Long, private val townName: String = "Ash
         Slot("12 Rowan Street", BuildingType.COTTAGE, 2, 27, 3, 3, 3, 26)
     )
 
-    private fun buildBuildings(state: WorldState) {
-        // The street plan is hand-authored (see class doc), not procedurally
-        // placed, so there is no runtime collision solver to lean on. Guard
-        // it anyway: fail fast if two footprints ever overlap, or a footprint
-        // is ever authored onto the seeded river, instead of silently
-        // producing a corrupt map for whichever seed happens to expose it.
+    private fun buildBuildings(state: WorldState, result: MapGenerator.GenerationResult) {
+        // Assign all hand-authored Ashcombe buildings to the TOWN_CENTRE district.
+        val townCentreId = state.districts.values.first { it.type == DistrictType.TOWN_CENTRE }.id
         val claimed = mutableSetOf<Pair<Int, Int>>()
         for (slot in slots()) {
             for (x in slot.x until slot.x + slot.w) {
@@ -162,8 +126,8 @@ class WorldGenerator(private val seed: Long, private val townName: String = "Ash
                     check(claimed.add(x to y)) {
                         "Building slot '${slot.name}' overlaps another building's footprint at ($x, $y)"
                     }
-                    check(!(x >= MAP_W - 2)) {
-                        "Building slot '${slot.name}' overlaps the seeded east-edge river at ($x, $y)"
+                    check(x !in 42..43) {
+                        "Building slot '${slot.name}' overlaps the river at ($x, $y)"
                     }
                 }
             }
@@ -181,7 +145,51 @@ class WorldGenerator(private val seed: Long, private val townName: String = "Ash
                 value = slot.value,
                 capacity = slot.capacity,
                 constructedAt = 0L,
-                abandoned = slot.type == BuildingType.VACANT
+                abandoned = slot.type == BuildingType.VACANT,
+                districtId = townCentreId
+            )
+        }
+    }
+
+    private fun buildProceduralBuildings(state: WorldState, result: MapGenerator.GenerationResult) {
+        val districtByType = state.districts.values.associateBy { it.type }
+        val streetCounters = mutableMapOf<String, Int>()
+
+        for (lot in result.homeLots) {
+            val num = (streetCounters[lot.streetName] ?: 0) + 1
+            streetCounters[lot.streetName] = num
+            val id = state.nextBuildingId++
+            state.buildings[id] = Building(
+                id = id,
+                name = "$num ${lot.streetName}",
+                type = lot.type,
+                origin = Tile(lot.x, lot.y),
+                width = lot.w,
+                height = lot.h,
+                door = Tile(lot.doorX, lot.doorY),
+                condition = 75.0,
+                capacity = lot.capacity,
+                constructedAt = 0L,
+                districtId = districtByType[lot.districtType]?.id
+            )
+        }
+
+        for (lot in result.civicLots) {
+            val id = state.nextBuildingId++
+            state.buildings[id] = Building(
+                id = id,
+                name = lot.streetName,
+                type = lot.type,
+                origin = Tile(lot.x, lot.y),
+                width = lot.w,
+                height = lot.h,
+                door = Tile(lot.doorX, lot.doorY),
+                condition = 80.0,
+                noise = lot.noise,
+                value = lot.value,
+                capacity = lot.capacity,
+                constructedAt = 0L,
+                districtId = districtByType[lot.districtType]?.id
             )
         }
     }
@@ -705,14 +713,12 @@ class WorldGenerator(private val seed: Long, private val townName: String = "Ash
     }
 
     companion object {
-        const val MAP_W = 44
-        const val MAP_H = 34
+        val MAP_W get() = MapGenerator.MAP_W
+        val MAP_H get() = MapGenerator.MAP_H
         const val HIGH_ST_Y = 10
         const val ROWAN_ST_Y = 22
-        /** Ceiling passed to [PopulationGenerator.buildProceduralPopulation] — real spare home
-         *  capacity across the existing 12 Rowan Street slots stops generation well short of
-         *  this on the current map; see docs/simulation-rules.md's "Procedural background
-         *  population" section for the honest accounting. */
+        /** Target for procedural background population; population will be capped by
+         *  available home capacity if fewer homes exist than needed to reach this target. */
         const val PROCEDURAL_POPULATION_TARGET = 500
         const val NEW_FAMILY_NOTE = "new_family_arrival"
     }

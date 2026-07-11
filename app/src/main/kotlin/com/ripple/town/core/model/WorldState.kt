@@ -188,6 +188,7 @@ data class WorldState(
     var weatherEndsAt: Long = 0L,
 
     val map: TownMap,
+    val districts: MutableMap<Long, District> = mutableMapOf(),
     val residents: MutableMap<Long, Resident> = mutableMapOf(),
     val households: MutableMap<Long, Household> = mutableMapOf(),
     val buildings: MutableMap<Long, Building> = mutableMapOf(),
@@ -297,6 +298,7 @@ data class WorldState(
     val townSentimentAppliedReasons: MutableList<String> = mutableListOf(),
 
     // Id counters (all state needed for deterministic continuation)
+    var nextDistrictId: Long = 1L,
     var nextResidentId: Long = 1L,
     var nextHouseholdId: Long = 1L,
     var nextBuildingId: Long = 1L,
@@ -349,6 +351,10 @@ data class WorldState(
      */
     val pendingPriceEasing: MutableMap<Long, PendingPriceEase> = mutableMapOf()
 ) {
+    fun district(id: Long): District? = districts[id]
+
+    fun districtAt(x: Int, y: Int): District? = districts.values.firstOrNull { it.containsTile(x, y) }
+
     fun resident(id: Long): Resident? = residents[id]
 
     fun requireResident(id: Long): Resident =

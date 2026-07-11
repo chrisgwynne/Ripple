@@ -262,7 +262,8 @@ class ProceduralSpriteProvider : SpriteProvider {
             wx += 8
         }
         // Shop sign band
-        if (type !in listOf(BuildingType.HOUSE, BuildingType.COTTAGE, BuildingType.TERRACE, BuildingType.FACTORY)) {
+        if (type !in listOf(BuildingType.HOUSE, BuildingType.COTTAGE, BuildingType.TERRACE,
+                BuildingType.FLAT, BuildingType.FACTORY)) {
             rect(2, roofH + 1, w - 4, 2, signColorOf(type))
         }
         // Factory chimney
@@ -414,6 +415,52 @@ class ProceduralSpriteProvider : SpriteProvider {
                         wx2 += 2
                     }
                 }
+                BuildingType.FIRE_STATION -> {
+                    // Wide bay door (vehicle access) instead of person door.
+                    rect(w / 2 - 6, h - 6, 10, 6, Color(0xFF5A5A5A))
+                    rect(w / 2 - 6, h - 6, 10, 1, Color(0xFFD9A648))
+                    rect(w / 2 - 6, h - 3, 10, 1, Color(0xFFD9A648))
+                    // Red stripe on sign band.
+                    rect(2, roofH + 1, w - 4, 2, Color(0xFFB2593F))
+                }
+                BuildingType.POLICE_STATION -> {
+                    // Dark blue sign band with a small shield badge.
+                    rect(2, roofH + 1, w - 4, 2, Color(0xFF2E3A4A))
+                    val bx = w / 2 - 1; val by = roofH + 1
+                    rect(bx, by, 3, 2, Color(0xFFF6E7B2))
+                    px(bx + 1, by + 1, Color(0xFF2E3A4A))
+                    // Blue lamp post stub by entrance.
+                    rect(w / 2 - doorW / 2 - 3, h - 6, 1, 5, Color(0xFF2E3A4A))
+                    px(w / 2 - doorW / 2 - 3, h - 6, Color(0xFF8FB6C9))
+                }
+                BuildingType.SPORTS_HALL -> {
+                    // Large high-windowed facade with coloured stripe.
+                    rect(2, roofH + 1, w - 4, 2, Color(0xFF3A8C6A))
+                    var wsx = 4
+                    while (wsx < w - 6) {
+                        rect(wsx, roofH + 4, 4, 6, window)
+                        wsx += 8
+                    }
+                }
+                BuildingType.COMMUNITY_CENTRE -> {
+                    // Welcoming canopy over entrance.
+                    rect(w / 2 - doorW / 2 - 2, h - 9, doorW + 4, 2, Color(0xFFB2593F))
+                    rect(w / 2 - doorW / 2 - 2, h - 9, doorW + 4, 1, Color(0xFFD9A648))
+                    // Notice board by door.
+                    rect(w - 6, h - 6, 3, 4, Color(0xFF8A7B63))
+                    rect(w - 6, h - 5, 3, 1, Color(0xFFF6E7B2))
+                }
+                BuildingType.FLAT -> {
+                    // Extra window row — flats are taller, more glass.
+                    var fx = 3
+                    while (fx < w - 4) {
+                        rect(fx, roofH + 8, 3, 3, window)
+                        fx += 6
+                    }
+                    // Intercom panel by door.
+                    rect(w / 2 + doorW / 2 + 1, h - 5, 2, 3, Color(0xFF8A7B63))
+                    px(w / 2 + doorW / 2 + 2, h - 4, Color(0xFFF6E7B2))
+                }
                 else -> {}
             }
         }
@@ -451,29 +498,40 @@ class ProceduralSpriteProvider : SpriteProvider {
         BuildingType.FACTORY -> 5 to 4
         BuildingType.PARK -> 8 to 7
         BuildingType.CEMETERY -> 5 to 4
+        BuildingType.SPORTS_HALL -> 7 to 5
+        BuildingType.COMMUNITY_CENTRE -> 6 to 4
         BuildingType.BAKERY, BuildingType.HARDWARE, BuildingType.PUB,
-        BuildingType.CLINIC, BuildingType.VACANT, BuildingType.WORKSHOP -> 4 to 3
+        BuildingType.CLINIC, BuildingType.VACANT, BuildingType.WORKSHOP,
+        BuildingType.FIRE_STATION, BuildingType.POLICE_STATION -> 4 to 3
         else -> 3 to 3
     }
 
     private fun wallColorOf(type: BuildingType, seed: Long): Color = when (type) {
-        BuildingType.HOUSE, BuildingType.COTTAGE, BuildingType.TERRACE ->
+        BuildingType.HOUSE, BuildingType.COTTAGE, BuildingType.TERRACE, BuildingType.FLAT ->
             listOf(Color(0xFFE8D9B8), Color(0xFFDCC7A5), Color(0xFFD9CBB5), Color(0xFFE3D2AE))[(seed % 4).toInt()]
         BuildingType.TOWN_HALL -> Color(0xFFDED3BC)
         BuildingType.CLINIC -> Color(0xFFE9E2D2)
         BuildingType.SCHOOL -> Color(0xFFD9C7A2)
         BuildingType.FACTORY -> Color(0xFFB3A48E)
         BuildingType.PUB -> Color(0xFFCDA97E)
+        BuildingType.FIRE_STATION -> Color(0xFFCEB89A)
+        BuildingType.POLICE_STATION -> Color(0xFFD0D8E0)
+        BuildingType.SPORTS_HALL -> Color(0xFFE2DDD0)
+        BuildingType.COMMUNITY_CENTRE -> Color(0xFFD9C48C)
         else -> Color(0xFFE0CCA8)
     }
 
     private fun roofColorOf(type: BuildingType, seed: Long): Color = when (type) {
-        BuildingType.HOUSE, BuildingType.COTTAGE, BuildingType.TERRACE ->
+        BuildingType.HOUSE, BuildingType.COTTAGE, BuildingType.TERRACE, BuildingType.FLAT ->
             listOf(Color(0xFFA85B44), Color(0xFF96543F), Color(0xFF8E6B4A), Color(0xFFA0654B))[(seed % 4).toInt()]
         BuildingType.TOWN_HALL -> Color(0xFF7D8FA3)
         BuildingType.CLINIC -> Color(0xFF8FB6C9)
         BuildingType.SCHOOL -> Color(0xFF97694C)
         BuildingType.FACTORY -> Color(0xFF6E6A5F)
+        BuildingType.FIRE_STATION -> Color(0xFF5A5A5A)
+        BuildingType.POLICE_STATION -> Color(0xFF2E3A4A)
+        BuildingType.SPORTS_HALL -> Color(0xFF5A6870)
+        BuildingType.COMMUNITY_CENTRE -> Color(0xFFB2593F)
         else -> Color(0xFFA85B44)
     }
 

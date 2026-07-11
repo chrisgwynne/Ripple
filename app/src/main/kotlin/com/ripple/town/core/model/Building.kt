@@ -6,6 +6,7 @@ enum class BuildingType(val label: String) {
     HOUSE("House"),
     COTTAGE("Cottage"),
     TERRACE("Terraced house"),
+    FLAT("Flats"),
     BAKERY("Bakery"),
     CAFE("Café"),
     PUB("Pub"),
@@ -20,11 +21,16 @@ enum class BuildingType(val label: String) {
     PARK("Park"),
     FACTORY("Small factory"),
     CEMETERY("Cemetery"),
-    VACANT("Vacant building")
+    VACANT("Vacant building"),
+    FIRE_STATION("Fire station"),
+    POLICE_STATION("Police station"),
+    SPORTS_HALL("Sports hall"),
+    COMMUNITY_CENTRE("Community centre")
 }
 
 val BuildingType.isHome: Boolean
-    get() = this == BuildingType.HOUSE || this == BuildingType.COTTAGE || this == BuildingType.TERRACE
+    get() = this == BuildingType.HOUSE || this == BuildingType.COTTAGE ||
+            this == BuildingType.TERRACE || this == BuildingType.FLAT
 
 val BuildingType.isPublicSpace: Boolean
     get() = this == BuildingType.PARK || this == BuildingType.PUB || this == BuildingType.CAFE
@@ -51,6 +57,8 @@ data class Building(
     val constructedAt: Long = 0L,
     var upgradeLevel: Int = 0,
     var abandoned: Boolean = false,
+    /** District this building belongs to; null for legacy/unassigned buildings. */
+    var districtId: Long? = null,
     /** Short strings describing visible changes over time ("Extension added", "Sign repainted"). */
     val visibleChanges: MutableList<String> = mutableListOf()
 ) {
@@ -63,7 +71,9 @@ data class Building(
 enum class BusinessType(val label: String) {
     BAKERY("Bakery"), CAFE("Café"), PUB("Pub"), GROCER("Grocer"), HARDWARE("Hardware shop"),
     BOOKSHOP("Bookshop"), TAILOR("Tailor"), WORKSHOP("Furniture workshop"), FACTORY("Factory"),
-    CLINIC("Clinic"), SCHOOL("School"), TOWN_HALL("Town hall")
+    CLINIC("Clinic"), SCHOOL("School"), TOWN_HALL("Town hall"),
+    FIRE_STATION("Fire station"), POLICE_STATION("Police station"),
+    SPORTS_HALL("Sports hall"), COMMUNITY_CENTRE("Community centre")
 }
 
 @Serializable
