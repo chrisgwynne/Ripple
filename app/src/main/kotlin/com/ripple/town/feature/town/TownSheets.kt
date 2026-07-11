@@ -52,6 +52,7 @@ import com.ripple.town.core.ui.StatBar
 import com.ripple.town.core.database.InterventionEntity
 import com.ripple.town.core.model.InterventionVerb
 import com.ripple.town.core.simulation.InterventionEngine
+import com.ripple.town.data.CommunityGroupUi
 import com.ripple.town.data.DeathSummary
 import com.ripple.town.data.DistrictSummaryUi
 import com.ripple.town.data.EventUi
@@ -418,6 +419,13 @@ private fun BusinessHealthSection(b: com.ripple.town.data.BuildingUi, owner: com
     if (debt != null && debt > 0) {
         Text(
             "Owner's outstanding debt: ${debt.toInt()} coins",
+            style = MaterialTheme.typography.bodyMedium,
+            color = RippleColors.DeepBrick
+        )
+    }
+    b.businessRivalName?.let { rivalName ->
+        Text(
+            "In rivalry with: $rivalName",
             style = MaterialTheme.typography.bodyMedium,
             color = RippleColors.DeepBrick
         )
@@ -1051,6 +1059,9 @@ fun TownOverviewSheetContent(world: WorldUi, viewModel: TownViewModel? = null) {
             if (world.families.isNotEmpty()) {
                 FamiliesPanelContent(world)
             }
+            if (world.communityGroups.isNotEmpty()) {
+                CommunitiesPanelContent(world)
+            }
             world.plausibilityScore?.let { score ->
                 SectionTitle("Simulation health")
                 Text(
@@ -1454,6 +1465,42 @@ fun DeathSummaryDialog(
             TextButton(onClick = onDismiss) { Text("Keep watching the town") }
         }
     )
+}
+
+// ------------------------------------------------------------ districts panel
+
+// ---------------------------------------------------------- communities panel
+
+/**
+ * Active community groups panel, shown inside [TownOverviewSheetContent]'s "At a glance" tab
+ * after Families. Groups are pre-sorted by member count and capped at 6 in [SnapshotBuilder].
+ */
+@Composable
+private fun CommunitiesPanelContent(world: WorldUi) {
+    SectionTitle("Communities")
+    world.communityGroups.take(4).forEach { group ->
+        CommunityGroupRow(group)
+    }
+}
+
+@Composable
+private fun CommunityGroupRow(group: CommunityGroupUi) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(group.name, style = MaterialTheme.typography.titleSmall, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
+            Text(group.type, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text(
+            "${group.memberCount} members · rep ${group.reputation}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
 }
 
 // ------------------------------------------------------------ districts panel

@@ -648,6 +648,22 @@ object SnapshotBuilder {
     private fun buildingUi(state: WorldState, b: Building, bizByBuilding: Map<Long, List<com.ripple.town.core.model.Business>>): BuildingUi {
         val biz = bizByBuilding[b.id]?.firstOrNull()
         val occupants = state.residentsIn(b.id).map { it.id }
+        // Rivalry: find the rival business name by looking at RIVAL relationships of this
+        // business's owner and checking if the rival owner runs a same-type business.
+        val rivalBizName: String? = if (biz != null && biz.open) {
+            val ownerId = biz.ownerId
+            if (ownerId != null) {
+                state.relationshipsOf(ownerId)
+                    .filter { it.kind == RelationshipKind.RIVAL }
+                    .sortedByDescending { it.resentment }
+                    .firstNotNullOfOrNull { rel ->
+                        val rivalId = rel.other(ownerId)
+                        state.businesses.values.firstOrNull { rb ->
+                            rb.ownerId == rivalId && rb.open && rb.type == biz.type && rb.id != biz.id
+                        }?.name
+                    }
+            } else null
+        } else null
         return BuildingUi(
             id = b.id, name = b.name, type = b.type, typeLabel = b.type.label,
             x = b.origin.x, y = b.origin.y, w = b.width, h = b.height,
@@ -678,7 +694,8 @@ object SnapshotBuilder {
             districtName = b.districtId?.let { state.district(it)?.name },
             districtCharacter = b.districtId?.let { state.district(it)?.character?.label },
             constructedAt = if (b.constructedAt > 0L) b.constructedAt else null,
-            tenantHistory = b.tenantHistory.toList()
+            tenantHistory = b.tenantHistory.toList(),
+            businessRivalName = rivalBizName
         )
     }
 }
