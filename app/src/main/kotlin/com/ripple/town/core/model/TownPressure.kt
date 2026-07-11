@@ -14,7 +14,23 @@ enum class ServiceType(val label: String) {
     FIRE("Fire service"),
     EMPLOYMENT("Employment"),
     RETAIL("Retail"),
-    PARKS("Parks & leisure")
+    PARKS("Parks & leisure"),
+    // --- Phase 6: expanded service coverage ---
+    CHILDCARE("Childcare"),
+    ELDERLY_CARE("Elderly care"),
+    FOOD_RETAIL("Food retail"),
+    CONVENIENCE_RETAIL("Convenience retail"),
+    CAFE_DINING("Cafés"),
+    RESTAURANT_DINING("Restaurants"),
+    NIGHTLIFE("Nightlife"),
+    PHARMACY_RETAIL("Pharmacy"),
+    HARDWARE_RETAIL("Hardware & DIY"),
+    OFFICE_SPACE("Office space"),
+    INDUSTRIAL_SPACE("Industrial space"),
+    COMMUNITY_FACILITIES("Community facilities"),
+    TRANSPORT("Transport"),
+    LEISURE_SPORTS("Leisure & sports"),
+    TRADES_SERVICES("Trades & services")
 }
 
 /**

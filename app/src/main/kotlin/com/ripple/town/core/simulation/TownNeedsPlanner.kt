@@ -135,6 +135,23 @@ object TownNeedsPlanner {
         ServiceType.EMPLOYMENT -> DevelopmentType.INDUSTRIAL
         ServiceType.RETAIL     -> DevelopmentType.COMMERCIAL_RETAIL
         ServiceType.PARKS      -> DevelopmentType.PARK
+        // Phase 6 service types — no automated DevelopmentType mapping yet;
+        // OpportunityDetectionSystem handles these via the Opportunity model instead.
+        ServiceType.CHILDCARE,
+        ServiceType.ELDERLY_CARE,
+        ServiceType.FOOD_RETAIL,
+        ServiceType.CONVENIENCE_RETAIL,
+        ServiceType.CAFE_DINING,
+        ServiceType.RESTAURANT_DINING,
+        ServiceType.NIGHTLIFE,
+        ServiceType.PHARMACY_RETAIL,
+        ServiceType.HARDWARE_RETAIL,
+        ServiceType.OFFICE_SPACE,
+        ServiceType.INDUSTRIAL_SPACE,
+        ServiceType.COMMUNITY_FACILITIES,
+        ServiceType.TRANSPORT,
+        ServiceType.LEISURE_SPORTS,
+        ServiceType.TRADES_SERVICES -> null
     }
 
     private data class DevSpec(val buildingType: BuildingType, val capacity: Int, val cost: Double)

@@ -194,7 +194,31 @@ enum class EventType(val label: String) {
     /** A family's business count (or failure count) has crossed a generational threshold.
      *  `sourceResidentId` = the founding member of the family, when available.
      *  Emitted by [com.ripple.town.core.simulation.FamilyLegacySystem]. */
-    FAMILY_MILESTONE("Family milestone")
+    FAMILY_MILESTONE("Family milestone"),
+
+    // --- Phase 6: Autonomous Town Evolution ---
+    /** A new household has moved into town. `payload["householdId"]` = household id;
+     *  `payload["arrivalType"]` = [HouseholdArrivalType] name;
+     *  `payload["reason"]` = [ArrivalReason] name.
+     *  Emitted by the migration system. */
+    FAMILY_ARRIVED("Family arrived"),
+    /** A household has left town. `payload["householdId"]` = household id;
+     *  `payload["reason"]` = [DepartureReason] name.
+     *  Emitted by the migration system. */
+    FAMILY_DEPARTED("Family departed"),
+    /** A new gap in services or business market has been identified.
+     *  `payload["opportunityId"]` = [Opportunity] id;
+     *  `payload["opportunityType"]` = [OpportunityType] name.
+     *  Emitted by OpportunityDetectionSystem. */
+    OPPORTUNITY_DETECTED("Opportunity detected"),
+    /** A condemned or derelict building has been cleared.
+     *  `buildingId` = the demolished building.
+     *  Emitted by the town-evolution system. */
+    BUILDING_DEMOLISHED("Building demolished"),
+    /** A building has changed its primary use (e.g. residential → commercial).
+     *  `buildingId` = the converted building; `payload["newUse"]` = new [BuildingType] name.
+     *  Emitted by the town-evolution system. */
+    BUILDING_CONVERTED("Building converted")
 }
 
 enum class EventVisibility {

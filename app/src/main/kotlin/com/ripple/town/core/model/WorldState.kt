@@ -448,7 +448,24 @@ data class WorldState(
     val civilisationSnapshots: MutableList<CivilisationSnapshot> = mutableListOf(),
     var nextFamilyLegacyId: Long = 1L,
     var nextMilestoneId: Long = 1L,
-    var nextSnapshotId: Long = 1L
+    var nextSnapshotId: Long = 1L,
+
+    // --- Phase 6: Autonomous Town Evolution ---
+    /**
+     * Inward and outward migration history, newest last.
+     * Capped at 500 entries by the migration system (evict oldest on overflow).
+     * Safe default (empty list) so existing checkpoints deserialise unchanged.
+     */
+    val migrationHistory: MutableList<MigrationRecord> = mutableListOf(),
+    /**
+     * Active development/business opportunities detected by OpportunityDetectionSystem,
+     * keyed by [Opportunity.id]. Entries are removed once status reaches
+     * [OpportunityStatus.EXPIRED] or [OpportunityStatus.FULFILLED].
+     * Safe default (empty map) so existing checkpoints deserialise unchanged.
+     */
+    val opportunities: MutableMap<Long, Opportunity> = mutableMapOf(),
+    /** Monotonically increasing counter for assigning [Opportunity.id] values. */
+    var nextOpportunityId: Long = 1L
 ) {
     // -------------------------------------------------------------------------
     // Performance indexes — NOT serialized (class body, not constructor params).
