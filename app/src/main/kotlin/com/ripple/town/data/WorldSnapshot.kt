@@ -210,7 +210,9 @@ data class BuildingUi(
     val businessExpensesToday: Double? = null,
     val businessEmployeeCapacity: Int? = null,
     val businessEmployeeIds: List<Long> = emptyList(),
-    val businessClosedAt: Long? = null
+    val businessClosedAt: Long? = null,
+    val districtName: String? = null,
+    val districtCharacter: String? = null
 )
 
 /** Simulation status shown while catching up after reopening the app. */
@@ -419,7 +421,9 @@ object SnapshotBuilder {
             businessExpensesToday = biz?.expensesToday,
             businessEmployeeCapacity = biz?.employeeCapacity,
             businessEmployeeIds = biz?.let { bz -> state.employeesOf(bz.id).map { it.residentId } } ?: emptyList(),
-            businessClosedAt = biz?.closedAt
+            businessClosedAt = biz?.closedAt,
+            districtName = b.districtId?.let { state.district(it)?.name },
+            districtCharacter = b.districtId?.let { state.district(it)?.character?.label }
         )
     }
 }

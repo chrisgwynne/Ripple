@@ -3,6 +3,7 @@ package com.ripple.town.core.simulation
 import com.ripple.town.core.model.BuildingType
 import com.ripple.town.core.model.CommunityGroup
 import com.ripple.town.core.model.CommunityGroupType
+import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.HobbyType
 import com.ripple.town.core.model.LifeStage
 import com.ripple.town.core.model.SimTime
@@ -49,6 +50,13 @@ object CommunitySystem {
             memberIds = mutableListOf(founder.id)
         )
         state.communityGroups[id] = group
+        ctx.emit(
+            EventType.COMMUNITY_EVENT,
+            "${group.name} has been founded by ${founder.firstName} ${founder.surname}.",
+            sourceResidentId = founder.id,
+            buildingId = meetingBuilding,
+            severity = 0.3
+        )
     }
 
     private fun updateGroups(ctx: TickContext) {
@@ -78,7 +86,15 @@ object CommunitySystem {
             group.reputation += (sizeFactor * 60.0 + 40.0 - group.reputation) * 0.05
             // Dissolve if too small and been running >1 year
             val ageYears = SimTime.ageYears(group.foundedAt, ctx.now)
-            if (group.memberIds.size < 2 && ageYears > 1) group.active = false
+            if (group.memberIds.size < 2 && ageYears > 1) {
+                group.active = false
+                ctx.emit(
+                    EventType.COMMUNITY_EVENT,
+                    "${group.name} has quietly dissolved — not enough members left to carry on.",
+                    buildingId = group.meetingBuildingId,
+                    severity = 0.2
+                )
+            }
         }
     }
 

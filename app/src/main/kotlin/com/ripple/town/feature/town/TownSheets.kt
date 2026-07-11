@@ -99,6 +99,13 @@ fun BuildingSheetContent(world: WorldUi, buildingId: Long, viewModel: TownViewMo
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+        if (b.districtName != null) {
+            Text(
+                "District: ${b.districtName}" + if (b.districtCharacter != null) " · ${b.districtCharacter}" else "",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
         Text(
             "No record of previous tenants is kept yet — this building's history before its current use isn't tracked.",
             style = MaterialTheme.typography.labelSmall,
