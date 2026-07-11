@@ -17,7 +17,8 @@ enum class AnomalyType(val label: String) {
     FAMILY_DOMINANCE("Governing family"),
     GENERATION_DYNASTY("Inherited calling"),
     UNLUCKY_LOCATION("Troubled address"),
-    PROLIFIC_DOCTOR("The town's healer")
+    PROLIFIC_DOCTOR("The town's healer"),
+    SECTOR_MONOPOLY("Sector monopoly")
 }
 
 /**

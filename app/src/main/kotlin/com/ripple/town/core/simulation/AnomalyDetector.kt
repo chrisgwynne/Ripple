@@ -28,6 +28,7 @@ import com.ripple.town.core.model.WorldState
 object AnomalyDetector {
 
     const val CHECK_INTERVAL_DAYS = 30L
+    const val MONOPOLY_DEMAND_THRESHOLD = 0.65
 
     fun updateMonthly(ctx: TickContext) {
         if (SimTime.dayIndex(ctx.now) % CHECK_INTERVAL_DAYS != 0L) return
@@ -41,6 +42,7 @@ object AnomalyDetector {
         checkGenerationDynasty(ctx)
         checkUnluckyLocation(ctx)
         checkProlificDoctor(ctx)
+        checkSectorMonopoly(ctx)
     }
 
     // ---- Detection checks ----------------------------------------------------------------------
@@ -236,6 +238,28 @@ object AnomalyDetector {
                 record(ctx, AnomalyType.PROLIFIC_DOCTOR,
                     "${r.fullName} is the closest thing ${ctx.state.townName} has to a proper doctor. Half the town has reason to be grateful.",
                     listOf(r.id), emptyList(), trustedBy.toDouble())
+            }
+        }
+    }
+
+    private fun checkSectorMonopoly(ctx: TickContext) {
+        val openBySector = ctx.state.businesses.values
+            .filter { it.open }
+            .groupBy { it.type }
+        for ((sector, businesses) in openBySector) {
+            if (businesses.size < 2) continue
+            val totalDemand = businesses.sumOf { it.demand }
+            if (totalDemand <= 0.0) continue
+            val dominant = businesses.maxByOrNull { it.demand } ?: continue
+            if (dominant.demand / totalDemand <= MONOPOLY_DEMAND_THRESHOLD) continue
+            val alreadyRecorded = ctx.state.anomalyRecords.any {
+                it.type == AnomalyType.SECTOR_MONOPOLY && dominant.buildingId in it.relatedBuildingIds
+            }
+            if (!alreadyRecorded) {
+                record(ctx, AnomalyType.SECTOR_MONOPOLY,
+                    "The ${dominant.name} holds near-complete dominance over the ${sector.label} sector. Competition has collapsed.",
+                    listOfNotNull(dominant.ownerId), listOf(dominant.buildingId),
+                    dominant.demand / totalDemand)
             }
         }
     }
