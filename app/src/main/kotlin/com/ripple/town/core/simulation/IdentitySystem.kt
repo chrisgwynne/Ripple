@@ -1,6 +1,9 @@
 package com.ripple.town.core.simulation
 
+import com.ripple.town.core.model.Belief
+import com.ripple.town.core.model.BeliefTopic
 import com.ripple.town.core.model.EventType
+import com.ripple.town.core.model.FamilyReputationType
 import com.ripple.town.core.model.Gender
 import com.ripple.town.core.model.IdentityFacet
 import com.ripple.town.core.model.IdentityLabel
@@ -35,8 +38,14 @@ object IdentitySystem {
                     }
                 }
             }
-            EventType.BUSINESS_OPENED -> if (resident.id == event.sourceResidentId) toAcquire += IdentityLabel.BUSINESS_OWNER
-            EventType.ELECTION_WON -> if (resident.id == event.sourceResidentId) toAcquire += IdentityLabel.COMMUNITY_LEADER
+            EventType.BUSINESS_OPENED -> if (resident.id == event.sourceResidentId) {
+                toAcquire += IdentityLabel.BUSINESS_OWNER
+                checkDynastyOrSelfMade(ctx, resident, event.id, isNewMayor = false)
+            }
+            EventType.ELECTION_WON -> if (resident.id == event.sourceResidentId) {
+                toAcquire += IdentityLabel.COMMUNITY_LEADER
+                checkDynastyOrSelfMade(ctx, resident, event.id, isNewMayor = true)
+            }
             EventType.MARRIAGE -> toAcquire += IdentityLabel.MARRIED
             EventType.RESIDENT_ARRIVED -> toAcquire += IdentityLabel.NEWCOMER
             EventType.BURGLARY, EventType.ARSON_ATTEMPT, EventType.FRAUD, EventType.SHOPLIFTING, EventType.MUGGING ->
@@ -66,6 +75,65 @@ object IdentitySystem {
                 acquireFacet(r, IdentityLabel.ELDER, ctx.now, null)
             }
         }
+    }
+
+    /**
+     * Checks whether a resident who has just achieved something notable (opened a business or
+     * won an election) should receive [IdentityLabel.DYNASTY_HEIR] or [IdentityLabel.SELF_MADE].
+     * The two labels are mutually exclusive; DYNASTY_HEIR takes priority.
+     *
+     * DYNASTY_HEIR: the family already has a prior achievement of the same kind
+     *   (businessesOwned >= 1 for a new business owner; mayorships >= 1 for a new mayor).
+     * SELF_MADE: the family's reputation type is ORDINARY or below AND this is the family's
+     *   first achievement of that kind (businessesOwned == 0 for a business; mayorships == 0
+     *   for a mayor), meaning the resident broke new ground for their surname.
+     *
+     * Belief drift is applied once, at the moment of assignment only.
+     */
+    private fun checkDynastyOrSelfMade(
+        ctx: TickContext,
+        resident: Resident,
+        eventId: Long,
+        isNewMayor: Boolean
+    ) {
+        // Skip if both labels already held (nothing to do)
+        val alreadyHeir = resident.identityFacets.any { it.label == IdentityLabel.DYNASTY_HEIR }
+        val alreadySelfMade = resident.identityFacets.any { it.label == IdentityLabel.SELF_MADE }
+        if (alreadyHeir && alreadySelfMade) return
+
+        val legacy = ctx.state.familyLegacies[resident.surname] ?: return
+
+        val familyHasPriorAchievement = if (isNewMayor) legacy.mayorships >= 1 else legacy.businessesOwned >= 1
+        val familyHasNoAchievement = if (isNewMayor) legacy.mayorships == 0 else legacy.businessesOwned == 0
+
+        val baselineReputations = setOf(
+            FamilyReputationType.ORDINARY.name,
+            FamilyReputationType.FALLEN.name
+        )
+        val isBaselineFamily = legacy.reputationType in baselineReputations
+
+        when {
+            !alreadyHeir && familyHasPriorAchievement -> {
+                acquireFacet(resident, IdentityLabel.DYNASTY_HEIR, ctx.now, eventId)
+                applyBeliefDrift(resident, BeliefTopic.INSTITUTIONAL_TRUST, +0.02, ctx.now)
+            }
+            !alreadySelfMade && isBaselineFamily && familyHasNoAchievement -> {
+                acquireFacet(resident, IdentityLabel.SELF_MADE, ctx.now, eventId)
+                applyBeliefDrift(resident, BeliefTopic.ECONOMIC_OPTIMISM, +0.02, ctx.now)
+            }
+        }
+    }
+
+    /**
+     * Applies a one-time [delta] drift to [resident]'s [topic] belief position, initialising the
+     * belief entry if it does not yet exist. Clamps position to -1.0..1.0 after application.
+     */
+    private fun applyBeliefDrift(resident: Resident, topic: BeliefTopic, delta: Double, now: Long) {
+        val belief = resident.beliefs.getOrPut(topic) {
+            Belief(topic = topic, position = 0.0, confidence = 0.1, lastUpdatedAt = now)
+        }
+        belief.position = (belief.position + delta).coerceIn(-1.0, 1.0)
+        belief.lastUpdatedAt = now
     }
 
     private fun acquireFacet(resident: Resident, label: IdentityLabel, now: Long, eventId: Long?) {

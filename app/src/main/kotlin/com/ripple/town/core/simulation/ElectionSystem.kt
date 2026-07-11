@@ -8,6 +8,7 @@ import com.ripple.town.core.model.LifeStage
 import com.ripple.town.core.model.MemoryType
 import com.ripple.town.core.model.Resident
 import com.ripple.town.core.model.SimTime
+import com.ripple.town.core.model.EventVisibility
 
 /**
  * Council seats and campaign-driven elections, extending the grassroots petitions in
@@ -104,6 +105,53 @@ object ElectionSystem {
         )
         for (c in candidates) {
             ctx.addMemory(c, MemoryType.ACHIEVEMENT, "I'm putting myself forward for the town.", 55.0, event.id)
+        }
+
+        // C4 — dynasty rivalry: if two or more candidates belong to different POLITICAL_DYNASTY
+        // families, emit a single DYNASTY_RIVALRY event and apply cross-dynasty affection penalty.
+        emitDynastyRivalryIfApplicable(ctx, candidates)
+    }
+
+    // -------------------------------------------------------- dynasty rivalry
+
+    /**
+     * Fired once per election call when at least two candidates come from different
+     * POLITICAL_DYNASTY families. Emits [EventType.DYNASTY_RIVALRY] and applies a
+     * -5.0 affection penalty between every living member of each opposing dynasty pair,
+     * to make the rivalry personal as well as political.
+     */
+    private fun emitDynastyRivalryIfApplicable(ctx: TickContext, candidates: List<Resident>) {
+        val state = ctx.state
+        // Collect distinct dynasty candidates (must be a confirmed POLITICAL_DYNASTY family)
+        val dynastyCandidates = candidates.filter { c ->
+            state.familyLegacies[c.surname]?.reputationType == FamilyReputationType.POLITICAL_DYNASTY.name
+        }
+        // Need at least two candidates from *different* families
+        val dynastySurnames = dynastyCandidates.map { it.surname }.distinct()
+        if (dynastySurnames.size < 2) return
+
+        // Pick the two most-prominent candidates (first two, already sorted by politicalInterest)
+        val candA = dynastyCandidates.first { it.surname == dynastySurnames[0] }
+        val candB = dynastyCandidates.first { it.surname == dynastySurnames[1] }
+
+        ctx.emit(
+            EventType.DYNASTY_RIVALRY,
+            "The ${candA.surname} and ${candB.surname} families clash for the mayoralty — a contest of old dynasties.",
+            sourceResidentId = candA.id,
+            targetResidentIds = listOf(candB.id),
+            severity = 0.55,
+            visibility = EventVisibility.PUBLIC
+        )
+
+        // Apply affection penalty between all living members of the two opposing dynasties
+        val membersA = state.livingResidents().filter { it.surname == candA.surname }.sortedBy { it.id }
+        val membersB = state.livingResidents().filter { it.surname == candB.surname }.sortedBy { it.id }
+        for (a in membersA) {
+            for (b in membersB) {
+                val rel = state.relationshipOrCreate(a.id, b.id)
+                rel.affection = (rel.affection - 5.0).coerceAtLeast(0.0)
+                rel.clampAll()
+            }
         }
     }
 

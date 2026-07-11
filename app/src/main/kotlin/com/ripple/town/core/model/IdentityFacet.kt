@@ -15,7 +15,9 @@ enum class IdentityLabel(val label: String) {
     BEREAVED("Bereaved"),
     MARRIED("Married"),
     CRAFTSPERSON("Craftsperson"),
-    SCHOLAR("Scholar")
+    SCHOLAR("Scholar"),
+    DYNASTY_HEIR("Dynasty heir"),
+    SELF_MADE("Self-made")
 }
 
 @Serializable

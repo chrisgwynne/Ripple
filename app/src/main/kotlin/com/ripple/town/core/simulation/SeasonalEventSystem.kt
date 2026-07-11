@@ -3,6 +3,8 @@
 import com.ripple.town.core.model.Building
 import com.ripple.town.core.model.BuildingType
 import com.ripple.town.core.model.BusinessType
+import com.ripple.town.core.model.CommunityGroup
+import com.ripple.town.core.model.CommunityGroupType
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.LifeStage
 import com.ripple.town.core.model.SimCalendar
@@ -51,6 +53,9 @@ object SeasonalEventSystem {
     const val WINTER_STRESS_RELIEF = 3.0
     const val WINTER_SOCIAL_BOOST = 4.0
     const val WINTER_DEMAND_BOOST = 9.0
+
+    /** CE2 — reputation boost applied to a community group that organises a seasonal event. */
+    const val GROUP_REPUTATION_BOOST = 10.0
 
     private val HARVEST_BUSINESS_TYPES = setOf(BusinessType.BAKERY, BusinessType.GROCER, BusinessType.PUB)
     private val WINTER_BUSINESS_TYPES = setOf(BusinessType.CAFE, BusinessType.HARDWARE, BusinessType.TAILOR)
@@ -132,11 +137,27 @@ object SeasonalEventSystem {
             }
         }
         val park = state.buildings.values.firstOrNull { it.type == BuildingType.PARK }
+
+        // CE2 — find the most relevant organising group for the Harvest Fair
+        val harvestGroup = findHarvestGroup(ctx)
+        val description = if (harvestGroup != null) {
+            val leaderName = state.resident(harvestGroup.founderResidentId)?.fullName
+            if (leaderName != null) {
+                "The ${harvestGroup.name}, led by $leaderName, organises this year's Harvest Fair."
+            } else {
+                "The ${harvestGroup.name} organises this year's Harvest Fair."
+            }
+        } else {
+            "The harvest fair filled the town with music, stalls and the smell of fresh baking."
+        }
         ctx.emit(
             EventType.COMMUNITY_EVENT,
-            "The harvest fair filled the town with music, stalls and the smell of fresh baking.",
+            description,
             buildingId = park?.id, severity = 0.35
         )
+        if (harvestGroup != null) {
+            harvestGroup.reputation = (harvestGroup.reputation + GROUP_REPUTATION_BOOST).coerceAtMost(100.0)
+        }
     }
 
     private fun runWinterMarket(ctx: TickContext) {
@@ -153,12 +174,42 @@ object SeasonalEventSystem {
             }
         }
         val townHall = state.buildings.values.firstOrNull { it.type == BuildingType.TOWN_HALL }
+
+        // CE2 — find the largest active group to organise the Winter Market
+        val winterGroup = findWinterGroup(ctx)
+        val description = if (winterGroup != null) {
+            val leaderName = state.resident(winterGroup.founderResidentId)?.fullName
+            if (leaderName != null) {
+                "The ${winterGroup.name}, led by $leaderName, organises this year's Winter Market."
+            } else {
+                "The ${winterGroup.name} organises this year's Winter Market."
+            }
+        } else {
+            "Stalls of mulled cider, woollens and winter fare lined the square for the winter market."
+        }
         ctx.emit(
             EventType.COMMUNITY_EVENT,
-            "Stalls of mulled cider, woollens and winter fare lined the square for the winter market.",
+            description,
             buildingId = townHall?.id, severity = 0.25
         )
+        if (winterGroup != null) {
+            winterGroup.reputation = (winterGroup.reputation + GROUP_REPUTATION_BOOST).coerceAtMost(100.0)
+        }
     }
+
+    // ------------------------------------------------- CE2 group helpers
+
+    /** Harvest Fair organiser: the largest active SPORTS_CLUB or CHARITY group. */
+    private fun findHarvestGroup(ctx: TickContext): CommunityGroup? =
+        ctx.state.communityGroups.values
+            .filter { it.active && (it.type == CommunityGroupType.SPORTS_CLUB || it.type == CommunityGroupType.CHARITY) }
+            .maxByOrNull { it.memberIds.size }
+
+    /** Winter Market organiser: the largest active group by member count across all types. */
+    private fun findWinterGroup(ctx: TickContext): CommunityGroup? =
+        ctx.state.communityGroups.values
+            .filter { it.active }
+            .maxByOrNull { it.memberIds.size }
 
     private fun maybeFlood(ctx: TickContext) {
         val state = ctx.state

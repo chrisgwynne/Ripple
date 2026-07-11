@@ -183,7 +183,18 @@ enum class EventType(val label: String) {
     /** A community group rallied to help repair a building damaged by a weather event or arson
      *  attempt. `sourceResidentId` = the group founder/leader; `buildingId` = the damaged
      *  building. Emitted by [com.ripple.town.core.simulation.IncidentSystem]. */
-    COMMUNITY_AID("Community aid")
+    COMMUNITY_AID("Community aid"),
+
+    // --- Phase 5 Wave 3 (C4 / C6) ---
+    /** Two candidates from different POLITICAL_DYNASTY families are running against each other
+     *  in the same election. `sourceResidentId` = one dynasty candidate; first
+     *  `targetResidentIds` entry = the other. Emitted once per election by
+     *  [com.ripple.town.core.simulation.ElectionSystem]. */
+    DYNASTY_RIVALRY("Dynasty rivalry"),
+    /** A family's business count (or failure count) has crossed a generational threshold.
+     *  `sourceResidentId` = the founding member of the family, when available.
+     *  Emitted by [com.ripple.town.core.simulation.FamilyLegacySystem]. */
+    FAMILY_MILESTONE("Family milestone")
 }
 
 enum class EventVisibility {
