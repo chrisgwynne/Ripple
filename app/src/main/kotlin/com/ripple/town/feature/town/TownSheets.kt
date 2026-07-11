@@ -97,6 +97,12 @@ private fun FamilyRow(f: FamilyLegacyUi) {
         else -> MaterialTheme.colorScheme.onSurface
     }
 
+    val trendColor = when (f.wealthTrend) {
+        "↑ Rising" -> RippleColors.DeepGreen
+        "↓ Falling" -> RippleColors.DeepBrick
+        else -> RippleColors.SoftInk
+    }
+
     // Pick the most interesting non-zero stat for the right-side badge.
     val statLabel = when {
         f.mayorships > 0 -> "Mayor ×${f.mayorships}"
@@ -121,6 +127,11 @@ private fun FamilyRow(f: FamilyLegacyUi) {
                 "${f.surname} · $repLabel",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                f.wealthTrend,
+                style = MaterialTheme.typography.labelSmall,
+                color = trendColor
             )
         }
         Text(
@@ -1494,6 +1505,13 @@ private fun CommunityGroupRow(group: CommunityGroupUi) {
         Column(Modifier.weight(1f)) {
             Text(group.name, style = MaterialTheme.typography.titleSmall, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium)
             Text(group.type, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (group.sharedMemoryCount > 0) {
+                Text(
+                    "${group.sharedMemoryCount} shared ${if (group.sharedMemoryCount == 1) "memory" else "memories"}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
         }
         Text(
             "${group.memberCount} members · rep ${group.reputation}",

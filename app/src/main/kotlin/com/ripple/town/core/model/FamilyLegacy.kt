@@ -2,6 +2,13 @@ package com.ripple.town.core.model
 
 import kotlinx.serialization.Serializable
 
+@Serializable
+enum class WealthTrend {
+    RISING,
+    STABLE,
+    FALLING
+}
+
 /**
  * The cumulative story of a family across generations. Created the first time a
  * surname appears in the town and updated as members achieve, fail, or transform the
@@ -34,6 +41,7 @@ data class FamilyLegacy(
     var peakWealth: Double = 0.0,
     var currentTotalWealth: Double = 0.0,
     var startingWealth: Double = 0.0,
+    var wealthTrend: WealthTrend = WealthTrend.STABLE,
 
     // ─── Reputation ─────────────────────────────────────────────────────────
     /** 0–100. Decays gently once all members leave or die. */

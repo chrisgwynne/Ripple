@@ -1,8 +1,10 @@
 package com.ripple.town.core.simulation
 
+import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.FamilyLegacy
 import com.ripple.town.core.model.FamilyReputationType
 import com.ripple.town.core.model.SimTime
+import com.ripple.town.core.model.WealthTrend
 
 /**
  * Tracks the cumulative story of every family that has ever lived in the town.
@@ -38,7 +40,7 @@ object FamilyLegacySystem {
             }
         }
 
-        // ─── Update each legacy ──────────────────────────────────────────��─
+        // ─── Update each legacy ─────────────────────────────────────────────
         for ((surname, legacy) in state.familyLegacies) {
             val members = living.filter { it.surname == surname }
             legacy.livingMembers = members.size
@@ -51,6 +53,13 @@ object FamilyLegacySystem {
             legacy.currentTotalWealth = totalWealth
             if (totalWealth > legacy.peakWealth) legacy.peakWealth = totalWealth
 
+            // Wealth trend: compare current total against starting and peak wealth
+            legacy.wealthTrend = when {
+                legacy.startingWealth > 0.0 && totalWealth > legacy.startingWealth * 1.2 -> WealthTrend.RISING
+                legacy.peakWealth > 0.0 && totalWealth < legacy.peakWealth * 0.6 -> WealthTrend.FALLING
+                else -> WealthTrend.STABLE
+            }
+
             // Mayorships: government records where the leader has this surname
             legacy.mayorships = state.governmentRecords.count { gov ->
                 state.resident(gov.leaderId)?.surname == surname
@@ -61,13 +70,18 @@ object FamilyLegacySystem {
                 state.resident(id)?.surname == surname
             }
 
-            // Businesses: count businesses owned by family members (alive or not)
+            // Businesses: count businesses owned by family members (alive or not).
+            // Split into open (businessesOwned used for scoring) and closed for milestone detection.
             val familyResidentIds = state.residents.values
                 .filter { it.surname == surname }
                 .map { it.id }
                 .toSet()
+            val prevBusinessesClosed = legacy.businessesClosed
+            val prevBusinessesOwned = legacy.businessesOwned
             legacy.businessesOwned = state.businesses.values
                 .count { biz -> biz.ownerId in familyResidentIds }
+            legacy.businessesClosed = state.businesses.values
+                .count { biz -> biz.ownerId in familyResidentIds && !biz.open }
 
             // Criminal convictions from corruption incidents
             legacy.criminalConvictions = state.corruptionIncidents.count { inc ->
@@ -86,6 +100,53 @@ object FamilyLegacySystem {
 
             // Named reputation type
             legacy.reputationType = evaluateReputationType(legacy).name
+
+            // C6 — family milestone events (just-crossed thresholds only)
+            val founderResident = state.residents.values
+                .firstOrNull { it.surname == surname }
+            checkFamilyMilestones(ctx, legacy, prevBusinessesClosed, prevBusinessesOwned, founderResident?.id)
+        }
+    }
+
+    /**
+     * C6 — emit [EventType.FAMILY_MILESTONE] when a family's business-closed or total-owned
+     * count crosses a significant threshold for the first time this monthly update.
+     *
+     * "Just crossed" is detected by checking that the value was strictly below the threshold
+     * before this update and is at or above it now.
+     */
+    private fun checkFamilyMilestones(
+        ctx: TickContext,
+        legacy: FamilyLegacy,
+        prevClosed: Int,
+        prevOwned: Int,
+        founderResidentId: Long?
+    ) {
+        // Milestone 1 — three businesses closed
+        if (prevClosed < 3 && legacy.businessesClosed >= 3) {
+            ctx.emit(
+                EventType.FAMILY_MILESTONE,
+                "The ${legacy.surname} name has seen three businesses fail.",
+                sourceResidentId = founderResidentId,
+                severity = 0.45
+            )
+            // Shift toward FALLEN when the family is also in poor financial health
+            if (legacy.wealthTrend == WealthTrend.FALLING &&
+                legacy.reputationType != FamilyReputationType.FALLEN.name
+            ) {
+                legacy.reputationType = FamilyReputationType.FALLEN.name
+            }
+        }
+
+        // Milestone 2 — five businesses ever owned (open + closed combined)
+        if (prevOwned < 5 && legacy.businessesOwned >= 5) {
+            ctx.emit(
+                EventType.FAMILY_MILESTONE,
+                "The ${legacy.surname} business empire spans generations.",
+                sourceResidentId = founderResidentId,
+                severity = 0.45
+            )
+            legacy.reputationType = FamilyReputationType.BUSINESS_EMPIRE.name
         }
     }
 

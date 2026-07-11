@@ -109,7 +109,9 @@ data class CommunityGroupUi(
     val type: String,
     val memberCount: Int,
     val reputation: Int,
-    val leaderName: String
+    val leaderName: String,
+    /** Number of significant events shared in the group's collective memory. */
+    val sharedMemoryCount: Int = 0
 )
 
 // ── Politics UI models ────────────────────────────────────────────────────────
@@ -270,7 +272,9 @@ data class FamilyLegacyUi(
     val businesses: Int,
     val reputationScore: Int,
     /** True if this family stands out — non-ORDINARY type, any mayorship, or 3+ businesses. */
-    val isNoteworthy: Boolean
+    val isNoteworthy: Boolean,
+    /** Human-readable wealth trend label, e.g. "↑ Rising", "— Stable", "↓ Falling". */
+    val wealthTrend: String = "— Stable"
 )
 
 @Immutable
@@ -420,7 +424,12 @@ object SnapshotBuilder {
                         reputationScore = f.reputation.toInt(),
                         isNoteworthy = f.reputationType != com.ripple.town.core.model.FamilyReputationType.ORDINARY.name
                             || f.mayorships > 0
-                            || f.businessesOwned > 2
+                            || f.businessesOwned > 2,
+                        wealthTrend = when (f.wealthTrend) {
+                            com.ripple.town.core.model.WealthTrend.RISING -> "↑ Rising"
+                            com.ripple.town.core.model.WealthTrend.FALLING -> "↓ Falling"
+                            else -> "— Stable"
+                        }
                     )
                 },
             communityGroups = state.communityGroups.values
@@ -434,7 +443,8 @@ object SnapshotBuilder {
                         type = g.type.label,
                         memberCount = g.memberIds.size,
                         reputation = g.reputation.toInt(),
-                        leaderName = leader?.fullName ?: "Unknown"
+                        leaderName = leader?.fullName ?: "Unknown",
+                        sharedMemoryCount = g.sharedMemories.size
                     )
                 }
         )
