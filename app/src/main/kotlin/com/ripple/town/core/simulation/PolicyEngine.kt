@@ -34,6 +34,12 @@ object PolicyEngine {
                 rec.status = PolicyStatus.REPEALED.name
                 rec.repealedAt = state.time
             }
+        // Tally real council votes for this party's manifesto using councillor party alignment.
+        // Governing-party councillors vote for with 85% reliability; opposition cross the floor
+        // at 15% (personality.agreeableness nudges both thresholds slightly).
+        val councillors = state.councillorIds.mapNotNull { state.resident(it) }
+        val (votesFor, votesAgainst) = tallyCouncilVotes(ctx, party, councillors)
+
         // Pass priority policies
         priorityTypes.forEach { type ->
             val id = state.nextPolicyId++
@@ -45,9 +51,9 @@ object PolicyEngine {
                 proposedByPartyId = party.id,
                 proposedByResidentId = party.leaderId,
                 proposedAt = state.time,
-                status = PolicyStatus.PASSED.name,
-                passedAt = state.time,
-                votesFor = 3, votesAgainst = 1,
+                status = if (votesFor > votesAgainst) PolicyStatus.PASSED.name else PolicyStatus.REJECTED.name,
+                passedAt = if (votesFor > votesAgainst) state.time else null,
+                votesFor = votesFor, votesAgainst = votesAgainst,
                 annualCost = type.annualCost,
                 delayDays = type.delayDays,
                 activatesAtDay = activates
@@ -57,14 +63,51 @@ object PolicyEngine {
             }
         }
         recomputeModifiers(state)
-        if (priorityTypes.isNotEmpty()) {
+        val passed = priorityTypes.size
+        val rejected = state.activePolicies.values.count {
+            it.status == PolicyStatus.REJECTED.name && it.proposedByPartyId == party.id &&
+            it.proposedAt == state.time
+        }
+        if (passed > 0 || rejected > 0) {
+            val detail = buildString {
+                if (passed > 0) append("${party.name} passed $passed polic${if (passed == 1) "y" else "ies"}")
+                if (rejected > 0) {
+                    if (passed > 0) append(", rejected $rejected")
+                    else append("${party.name} failed to pass $rejected polic${if (rejected == 1) "y" else "ies"} ($votesFor–$votesAgainst)")
+                }
+                append(" ($votesFor–$votesAgainst)")
+            }
             ctx.emit(
                 EventType.TOWN_MILESTONE,
-                "${party.name} enacted ${priorityTypes.size} manifesto polic${if (priorityTypes.size == 1) "y" else "ies"}",
+                detail,
                 sourceResidentId = party.leaderId,
-                severity = 0.5
+                severity = if (passed > 0) 0.5 else 0.4
             )
         }
+    }
+
+    private fun tallyCouncilVotes(
+        ctx: TickContext,
+        governingParty: PoliticalParty,
+        councillors: List<com.ripple.town.core.model.Resident>
+    ): Pair<Int, Int> {
+        var votesFor = 0
+        var votesAgainst = 0
+        // Mayor always casts a vote for the governing party's policies
+        ctx.state.mayorId?.let { ctx.state.resident(it) }?.let { mayor ->
+            if (mayor.partyId == governingParty.id || mayor.id == governingParty.leaderId) votesFor++
+            else votesAgainst++
+        }
+        for (councillor in councillors) {
+            val loyaltyBase = if (councillor.partyId == governingParty.id) 0.85 else 0.15
+            // Patience/kindness nudges loyalty ±5% — a more pragmatic councillor is likelier to cross
+            val temperament = (councillor.personality.patience + councillor.personality.kindness) / 2.0
+            val pFor = (loyaltyBase + (temperament - 0.5) * 0.10).coerceIn(0.05, 0.95)
+            if (ctx.rng.nextBoolean(pFor)) votesFor++ else votesAgainst++
+        }
+        // Ensure at least 1 vote for from an uncontested governing party
+        if (votesFor == 0) votesFor = 1
+        return votesFor to votesAgainst
     }
 
     // ─────────────────────────────────────────────────────────────────
