@@ -59,7 +59,7 @@ object TownDnaSystem {
 
         val avgReligious = if (residents.isEmpty()) 20.0 else
             residents.mapNotNull { it.beliefs[BeliefTopic.INSTITUTIONAL_TRUST]?.position }
-                .map { (it + 1.0) * 10.0 }.average()
+                .map { (it + 1.0) * 10.0 }.average().let { if (it.isNaN()) 20.0 else it }
         scores[TownArchetype.RELIGIOUS] = avgReligious.coerceIn(0.0, 100.0)
 
         scores[TownArchetype.WORKING_CLASS] = (factoryCount.toDouble() / totalBiz * 80.0).coerceIn(0.0, 100.0)
@@ -80,7 +80,7 @@ object TownDnaSystem {
 
         val avgSocialOpenness = if (residents.isEmpty()) 50.0 else
             residents.mapNotNull { it.beliefs[BeliefTopic.COMMUNITY_LOYALTY]?.position }
-                .map { (it + 1.0) * 50.0 }.average()
+                .map { (it + 1.0) * 50.0 }.average().let { if (it.isNaN()) 50.0 else it }
         scores[TownArchetype.FAMILY_ORIENTED] = ((100.0 - avgSocialOpenness) * 0.5).coerceIn(0.0, 100.0)
 
         scores[TownArchetype.AGRICULTURAL] = 20.0  // no agricultural era type yet; base score
@@ -90,7 +90,7 @@ object TownDnaSystem {
 
         val avgOptimism = if (residents.isEmpty()) 50.0 else
             residents.mapNotNull { it.beliefs[BeliefTopic.ECONOMIC_OPTIMISM]?.position }
-                .map { (it + 1.0) * 50.0 }.average()
+                .map { (it + 1.0) * 50.0 }.average().let { if (it.isNaN()) 50.0 else it }
         val crisisResolved = state.historicalMilestones.count { m ->
             m.type == com.ripple.town.core.model.HistoricalMilestoneType.CRISIS_OVERCOME.name
         }
