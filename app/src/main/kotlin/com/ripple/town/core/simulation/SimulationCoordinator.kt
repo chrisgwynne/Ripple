@@ -141,6 +141,9 @@ class SimulationCoordinator(
             if (dayIndex % DistrictCharacterSystem.UPDATE_INTERVAL_DAYS == 0L) {
                 DistrictCharacterSystem.updateWeekly(ctx)
             }
+            if (dayIndex % ServicePressureSystem.UPDATE_INTERVAL_DAYS == 0L) {
+                ServicePressureSystem.updateWeekly(ctx)
+            }
             if (dayIndex % TownNeedsPlanner.UPDATE_INTERVAL_DAYS == 0L) {
                 TownNeedsPlanner.updateMonthly(ctx)
             }

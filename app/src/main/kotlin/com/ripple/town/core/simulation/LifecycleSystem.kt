@@ -26,10 +26,38 @@ object LifecycleSystem {
 
     fun updateDaily(ctx: TickContext) {
         births(ctx)
+        checkInwardMigration(ctx)
         InteractionSystem.processSeparations(ctx)
         InteractionSystem.dailyDecay(ctx)
         memoryDecay(ctx)
         election(ctx)
+    }
+
+    /**
+     * Demand-driven inward migration: occasionally attract a new family when the town
+     * has unfilled jobs AND vacant homes AND the municipal budget is healthy enough to
+     * absorb new residents. Probability scales with the number of open job slots to
+     * avoid flooding a town that has no work.
+     */
+    private fun checkInwardMigration(ctx: TickContext) {
+        val state = ctx.state
+        // Vacant homes: homes with no household.
+        val vacantHomes = state.homes().count { h ->
+            !h.abandoned && state.households.values.none { it.homeBuildingId == h.id }
+        }
+        if (vacantHomes == 0) return
+        // Open job slots.
+        val openJobs = state.businesses.values
+            .filter { it.open }
+            .sumOf { biz -> (biz.employeeCapacity - state.employeesOf(biz.id).size).coerceAtLeast(0) }
+        if (openJobs == 0) return
+        // Budget health check: don't attract migrants when the town is in deep deficit.
+        if (state.municipalBudget.balance < -30_000.0) return
+        // Probability: 1.5% base + 0.5% per open job slot, capped at 5%.
+        val prob = (0.015 + openJobs * 0.005).coerceAtMost(0.05)
+        if (ctx.rng.nextBoolean(prob)) {
+            newFamilyArrives(ctx, null)
+        }
     }
 
     // ---------------------------------------------------------------- birth
