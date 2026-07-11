@@ -123,6 +123,19 @@ object GoalSystem {
             seedGoal(ctx, r, GoalType.RUN_FOR_OFFICE, "Somebody has to speak for this town.")
         }
 
+        // Damaged relationship + open personality -> want to make amends
+        if (stage == LifeStage.ADULT && r.personality.kindness > 0.35) {
+            val damaged = state.relationshipsOf(r.id).firstOrNull { it.affection < 15.0 && it.familiarity > 30.0 }
+            if (damaged != null) {
+                seedGoal(ctx, r, GoalType.REPAIR_RELATIONSHIP, "Something was left unresolved between us.")
+            }
+        }
+
+        // Approaching old age -> retire gracefully
+        if (r.ageAt(ctx.now) >= 65 && stage == LifeStage.ADULT && state.employmentOf(r) != null) {
+            seedGoal(ctx, r, GoalType.RETIRE_WELL, "There's less road left than there was.")
+        }
+
         // Persistent despair drives some adults to leave entirely:
         //   - Long-term unemployed + very low wealth + can't see a path
         //   - OR high-crime district + high stress + low safety + a friend already left
@@ -211,9 +224,36 @@ object GoalSystem {
                         )
                     }
                 }
-                GoalType.REPAIR_RELATIONSHIP, GoalType.RETIRE_WELL -> {
-                    goal.progress += 0.02
-                    if (goal.progress >= 1.0) complete(ctx, r, goal, "Done quietly")
+                GoalType.REPAIR_RELATIONSHIP -> {
+                    // Find the most damaged relationship; progress tracks how much it's healed.
+                    val worstRel = state.relationshipsOf(r.id)
+                        .filter { it.familiarity > 20.0 }
+                        .minByOrNull { it.affection }
+                    if (worstRel == null) {
+                        complete(ctx, r, goal, "The rifts have already healed")
+                    } else {
+                        goal.progress = (worstRel.affection / 60.0).coerceIn(0.0, 1.0)
+                        if (goal.progress >= 1.0) {
+                            r.needs.social = (r.needs.social + 5.0).coerceAtMost(100.0)
+                            ctx.addMemory(r, MemoryType.KINDNESS_GIVEN,
+                                "Made things right with someone I'd hurt.",
+                                intensity = 35.0, associated = listOf(worstRel.other(r.id)))
+                            complete(ctx, r, goal, "The air between us cleared")
+                        }
+                    }
+                }
+                GoalType.RETIRE_WELL -> {
+                    val notWorking = state.employmentOf(r) == null
+                    val comfortable = r.needs.comfort > 60.0 && r.needs.financialSecurity > 55.0
+                    goal.progress = ((r.needs.comfort + r.needs.financialSecurity) / 200.0).coerceIn(goal.progress, 1.0)
+                    if (notWorking && comfortable) {
+                        r.needs.comfort = (r.needs.comfort + 8.0).coerceAtMost(100.0)
+                        r.needs.purpose = (r.needs.purpose + 5.0).coerceAtMost(100.0)
+                        ctx.addMemory(r, MemoryType.ACHIEVEMENT,
+                            "Found peace in the later years.",
+                            intensity = 45.0)
+                        complete(ctx, r, goal, "Settled into a quieter life")
+                    }
                 }
                 GoalType.LEAVE_TOWN -> {
                     goal.progress += 0.015

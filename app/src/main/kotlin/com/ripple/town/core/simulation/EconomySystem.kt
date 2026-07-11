@@ -2003,7 +2003,7 @@ object EconomySystem {
             balance = GoalSystem.STARTUP_CAPITAL,
             demand = 45.0,
             reputation = 45.0,
-            employeeCapacity = 2,
+            employeeCapacity = 1,
             openedAt = ctx.now
         )
         state.businesses[biz.id] = biz
