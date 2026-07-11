@@ -168,7 +168,22 @@ enum class EventType(val label: String) {
     /** A resident has retired in good circumstances — employment ended voluntarily, wellbeing
      *  sound.  Emitted by [com.ripple.town.core.simulation.GoalSystem] when a RETIRE_WELL goal
      *  completes.  `sourceResidentId` = the retiree.  Always `PRIVATE`. */
-    RESIDENT_RETIRED("Retired")
+    RESIDENT_RETIRED("Retired"),
+
+    // --- Phase 5 Wave 2 (S4 / C2 / CE4) ---
+    /** A low-wealth resident emigrates from a GENTRIFYING district — pushed out by rising property
+     *  values. `sourceResidentId` = the displaced resident; description names the district.
+     *  Emitted by [com.ripple.town.core.simulation.GentrificationSystem]. */
+    DISPLACEMENT("Displacement"),
+    /** Two rival businesses (owners share a [com.ripple.town.core.model.RelationshipKind.RIVAL]
+     *  relationship) both cut their price within the same 7-day window — a price war has broken
+     *  out. `sourceResidentId` = one owner, first `targetResidentIds` entry = the other.
+     *  Emitted by [com.ripple.town.core.simulation.PriceDriftSystem]. */
+    PRICE_WAR("Price war"),
+    /** A community group rallied to help repair a building damaged by a weather event or arson
+     *  attempt. `sourceResidentId` = the group founder/leader; `buildingId` = the damaged
+     *  building. Emitted by [com.ripple.town.core.simulation.IncidentSystem]. */
+    COMMUNITY_AID("Community aid")
 }
 
 enum class EventVisibility {

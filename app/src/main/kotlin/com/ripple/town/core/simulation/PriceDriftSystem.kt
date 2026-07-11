@@ -3,6 +3,8 @@ package com.ripple.town.core.simulation
 import com.ripple.town.core.model.Business
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.EventVisibility
+import com.ripple.town.core.model.RelationshipKind
+import com.ripple.town.core.model.SimTime
 
 /**
  * Economy v2 slice: "prices that move" — slow, town-wide price drift,
@@ -53,6 +55,9 @@ object PriceDriftSystem {
     /** A swing at least this large across a single day is newsworthy. */
     const val NEWSWORTHY_SWING = 0.10
 
+    /** Days window within which two rival businesses both cutting prices triggers a PRICE_WAR. */
+    const val PRICE_WAR_WINDOW_DAYS = 7L
+
     /** Bounded, like every other daily system: never more than this many businesses processed per day. */
     const val MAX_BUSINESSES_PER_DAY = 60
 
@@ -87,6 +92,13 @@ object PriceDriftSystem {
         if (after == before) return
         biz.priceLevel = after
 
+        // Phase 5 C2: record the day of a price cut and check for a price war with a rival.
+        if (after < before) {
+            val today = SimTime.dayIndex(ctx.now)
+            biz.lastPriceCutDay = today
+            maybeEmitPriceWar(ctx, biz, today)
+        }
+
         // Only a swing that has accumulated to a genuinely noticeable size is worth a
         // headline — most individual drift steps are too small to be newsworthy on
         // their own, matching every other daily system's "small nudges, rare events" shape.
@@ -97,6 +109,49 @@ object PriceDriftSystem {
                 "Prices at ${biz.name} have $direction noticeably.",
                 sourceResidentId = biz.ownerId, businessId = biz.id,
                 buildingId = biz.buildingId, severity = 0.25, visibility = EventVisibility.PUBLIC
+            )
+        }
+    }
+
+    /**
+     * C2: check whether [biz]'s owner has a [RelationshipKind.RIVAL] relationship with another
+     * business owner, and if that rival's business also cut its price within the last
+     * [PRICE_WAR_WINDOW_DAYS]. If so, emit a single [EventType.PRICE_WAR] event (de-duped:
+     * the event is only emitted once — when biz's cut is the *later* of the two).
+     */
+    private fun maybeEmitPriceWar(ctx: TickContext, biz: Business, today: Long) {
+        val state = ctx.state
+        val ownerId = biz.ownerId ?: return
+        val owner = state.resident(ownerId) ?: return
+        if (!owner.inTown) return
+
+        // Find RIVAL relationships for this owner.
+        val rivalRels = state.relationshipsOf(ownerId)
+            .filter { it.kind == RelationshipKind.RIVAL }
+        for (rel in rivalRels) {
+            val rivalId = if (rel.aId == ownerId) rel.bId else rel.aId
+            val rival = state.resident(rivalId) ?: continue
+            if (!rival.inTown) continue
+            // Find the rival's business.
+            val rivalBiz = state.businesses.values.firstOrNull { it.open && it.ownerId == rivalId } ?: continue
+            // Check if the rival also cut prices within the 7-day window.
+            if (rivalBiz.lastPriceCutDay <= 0L) continue
+            val daysSinceRivalCut = today - rivalBiz.lastPriceCutDay
+            if (daysSinceRivalCut < 0 || daysSinceRivalCut > PRICE_WAR_WINDOW_DAYS) continue
+            // Only emit when biz's cut is the later one (rival cut first or same day with lower
+            // business id) to avoid a duplicate from the other side.
+            if (biz.lastPriceCutDay < rivalBiz.lastPriceCutDay) continue
+            if (biz.lastPriceCutDay == rivalBiz.lastPriceCutDay && biz.id > rivalBiz.id) continue
+
+            ctx.emit(
+                EventType.PRICE_WAR,
+                "A price war has broken out between ${biz.name} and ${rivalBiz.name} — " +
+                    "both have cut their prices within the same week.",
+                sourceResidentId = ownerId,
+                targetResidentIds = listOf(rivalId),
+                businessId = biz.id,
+                severity = 0.35,
+                visibility = EventVisibility.PUBLIC
             )
         }
     }

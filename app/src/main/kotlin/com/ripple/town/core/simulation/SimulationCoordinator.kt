@@ -182,6 +182,9 @@ class SimulationCoordinator(
             if (dayIndex % DistrictMechanicsSystem.UPDATE_INTERVAL_DAYS == 0L) {
                 DistrictMechanicsSystem.updateWeekly(ctx)
             }
+            // Phase 5 S4: gentrification causal effects — building appreciation, low-wealth
+            // displacement (DISPLACEMENT event), and supplemental wealthy in-migration.
+            GentrificationSystem.updateDaily(ctx)
             if (dayIndex % TownDnaSystem.UPDATE_INTERVAL_DAYS == 0L) {
                 TownDnaSystem.updateMonthly(ctx)
             }

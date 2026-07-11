@@ -10,6 +10,7 @@ import com.ripple.town.core.model.LifeStage
 import com.ripple.town.core.model.MemoryType
 import com.ripple.town.core.model.Resident
 import com.ripple.town.core.model.SimTime
+import com.ripple.town.core.model.WorldEvent
 
 /**
  * Lower-stakes, non-police incidents for the severity-graded incident system
@@ -59,6 +60,15 @@ object IncidentSystem {
         accumulateMissingPersonWorry(ctx)
         resolveMissingPersons(ctx)
         updateWorkplaceAccident(ctx)
+        // CE4: community groups respond to building damage events that fired this tick
+        // (WEATHER_DAMAGE from NeedsSystem/SeasonalEventSystem; ARSON_ATTEMPT from CrimeSystem).
+        for (event in ctx.newEvents) {
+            if (event.type == com.ripple.town.core.model.EventType.WEATHER_DAMAGE ||
+                event.type == com.ripple.town.core.model.EventType.ARSON_ATTEMPT) {
+                val buildingId = event.buildingId ?: continue
+                checkCommunityAid(ctx, event, buildingId)
+            }
+        }
     }
 
     /** Daily stress/safety/social drain and ANXIETY for close family while a resident remains missing.
@@ -479,6 +489,69 @@ object IncidentSystem {
             s.needs.stress += 3.0
         }
         ConsequenceEngine.onEvent(ctx, event)
+    }
+
+    // ============================================================
+    // CE4 — Community aid response to building damage
+    // ============================================================
+
+    /**
+     * When a WEATHER_DAMAGE or ARSON_ATTEMPT event fires, check whether any active community
+     * group has ≥2 members whose home building is within 5 Manhattan tiles of the damaged
+     * building's [com.ripple.town.core.model.Building.door] tile.  The highest-reputation
+     * qualifying group rallies to help: a [com.ripple.town.core.model.EventType.COMMUNITY_AID]
+     * event is emitted with the group founder as source, and each member contributes +5.0 to
+     * the building's [com.ripple.town.core.model.Building.condition] (applied immediately,
+     * capped at 100.0) — the equivalent of "spread over 3 days" as an immediate lump sum since
+     * there is no per-member delayed-increment mechanism for condition restoration today.
+     *
+     * Phase 5 CE4 (2026-07-11).
+     */
+    private fun checkCommunityAid(ctx: TickContext, causeEvent: com.ripple.town.core.model.WorldEvent, buildingId: Long) {
+        val state = ctx.state
+        val damaged = state.building(buildingId) ?: return
+
+        // Find qualifying groups: active, with ≥2 members whose home is within 5 tiles.
+        val qualifying = state.communityGroups.values
+            .filter { it.active }
+            .filter { group ->
+                val nearbyMembers = group.memberIds.count { memberId ->
+                    val member = state.resident(memberId) ?: return@count false
+                    if (!member.inTown) return@count false
+                    val homeBuilding = member.homeBuildingId?.let { state.building(it) } ?: return@count false
+                    homeBuilding.door.manhattan(damaged.door) <= 5
+                }
+                nearbyMembers >= 2
+            }
+            .sortedByDescending { it.reputation }
+
+        val group = qualifying.firstOrNull() ?: return
+        val leader = state.resident(group.founderResidentId) ?: return
+
+        // Apply the repair boost — each member contributes +5.0 condition, applied immediately
+        // as a lump sum (no per-member daily increment mechanism for condition exists today).
+        val repairPerMember = 5.0
+        val totalRepair = (group.memberIds.size * repairPerMember)
+            .coerceAtMost(100.0 - damaged.condition)
+        if (totalRepair > 0.0) {
+            damaged.condition = (damaged.condition + totalRepair).coerceAtMost(100.0)
+            damaged.visibleChanges += "${SimTime.formatDate(ctx.now)} — Repaired by community volunteers"
+            if (damaged.visibleChanges.size >= Building.MAX_VISIBLE_CHANGES) {
+                damaged.visibleChanges.removeAt(0)
+            }
+        }
+
+        ctx.emit(
+            EventType.COMMUNITY_AID,
+            "The ${group.name} rallied to help repair ${damaged.name}.",
+            sourceResidentId = leader.id,
+            buildingId = buildingId,
+            severity = 0.4,
+            visibility = EventVisibility.PUBLIC,
+            causeIds = listOf(causeEvent.id)
+        )
+        // Small reputation boost for a community group that steps up in a crisis.
+        group.reputation = (group.reputation + 3.0).coerceAtMost(100.0)
     }
 
     // ---- Chance ceilings ----

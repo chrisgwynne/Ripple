@@ -246,7 +246,15 @@ data class Business(
      * uses in that same function, reusing the pattern rather than inventing a parallel one. Safe-
      * default 0.0. Economy Calibration Gate Phase 2 (2026-07-11).
      */
-    var loanBalance: Double = 0.0
+    var loanBalance: Double = 0.0,
+    /**
+     * In-game day index of the most recent drift-driven price cut on this business (i.e. the last
+     * time [com.ripple.town.core.simulation.PriceDriftSystem] decreased `priceLevel`). Used by
+     * [PriceDriftSystem] to detect PRICE_WAR: two rival businesses both cutting within a 7-day
+     * window. Safe-default 0L so existing checkpoints deserialise unchanged.
+     * Phase 5 C2 (2026-07-11).
+     */
+    var lastPriceCutDay: Long = 0L
 )
 
 /**
