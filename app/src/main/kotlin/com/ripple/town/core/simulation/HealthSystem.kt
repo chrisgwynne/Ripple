@@ -31,7 +31,7 @@ object HealthSystem {
     fun updateDaily(ctx: TickContext) {
         for (r in ctx.state.residentsOrdered()) {
             if (!r.alive || !r.inTown) continue
-            if (r.detailLevel == DetailLevel.DETAILED) {
+            if (r.detailLevel != DetailLevel.BACKGROUND) {
                 progressConditions(ctx, r)
                 maybeStartCondition(ctx, r)
             }

@@ -38,7 +38,7 @@ object ServicePressureSystem {
 
         for (r in state.residents.values) {
             if (!r.alive || !r.inTown) continue
-            if (r.detailLevel != DetailLevel.DETAILED) continue
+            if (r.detailLevel == DetailLevel.BACKGROUND) continue
             val stage = r.lifeStageAt(state.time)
             val n = r.needs
 

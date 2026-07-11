@@ -342,7 +342,7 @@ class SimulationCoordinator(
     private fun buildStatistic(dayIndex: Long): TownStatistic {
         val living = state.livingResidents()
         val adults = living.filter { it.lifeStageAt(state.time) == com.ripple.town.core.model.LifeStage.ADULT }
-        val detailed = living.filter { it.detailLevel == com.ripple.town.core.model.DetailLevel.DETAILED }
+        val detailed = living.filter { it.detailLevel != com.ripple.town.core.model.DetailLevel.BACKGROUND }
         return TownStatistic(
             dayIndex = dayIndex,
             population = living.size,

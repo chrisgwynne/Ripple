@@ -38,6 +38,10 @@ object NeedsSystem {
                 updateBackground(ctx, r)
                 continue
             }
+            if (r.detailLevel == DetailLevel.CONNECTED) {
+                updateConnected(ctx, r)
+                continue
+            }
 
             val n = r.needs
             // Baseline drift
@@ -167,6 +171,31 @@ object NeedsSystem {
         val w = (wealth / 40.0).coerceIn(0.0, 70.0)
         val d = (debt / 30.0).coerceIn(0.0, 60.0)
         return (25.0 + w - d).coerceIn(0.0, 100.0)
+    }
+
+    /**
+     * CONNECTED tier — intermediate between DETAILED and BACKGROUND.
+     * Tracks employment effects on purpose/financialSecurity and basic stress/social drift.
+     * No full activity loop, no skill updates, no trauma modelling.
+     */
+    private fun updateConnected(ctx: TickContext, r: com.ripple.town.core.model.Resident) {
+        val n = r.needs
+        n.hunger = (n.hunger - 0.35).coerceAtLeast(40.0)
+        n.energy = (n.energy - 0.18).coerceAtLeast(40.0)
+        n.social  = (n.social  - 0.08).coerceAtLeast(20.0)
+        n.stress  = (n.stress  + 0.04).coerceAtMost(80.0)
+        // Employment gives purpose and financial security on a daily cadence
+        if (ctx.now % SimTime.MINUTES_PER_DAY == 0L) {
+            n.hunger = (n.hunger + 15.0).coerceAtMost(100.0)
+            n.energy = (n.energy + 15.0).coerceAtMost(100.0)
+            if (r.employmentId != null) {
+                n.purpose           = (n.purpose           + 3.0).coerceAtMost(100.0)
+                n.financialSecurity = (n.financialSecurity + 2.0).coerceAtMost(100.0)
+            } else {
+                n.purpose           = (n.purpose           - 1.0).coerceAtLeast(10.0)
+                n.financialSecurity = (n.financialSecurity - 1.5).coerceAtLeast(5.0)
+            }
+        }
     }
 
     private fun updateBackground(ctx: TickContext, r: com.ripple.town.core.model.Resident) {

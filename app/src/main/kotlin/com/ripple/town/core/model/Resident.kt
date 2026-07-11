@@ -4,7 +4,18 @@ import kotlinx.serialization.Serializable
 
 enum class Gender { FEMALE, MALE, NONBINARY }
 
-enum class DetailLevel { DETAILED, BACKGROUND }
+/**
+ * Simulation detail tier for a resident.
+ *
+ * - [DETAILED]   — full per-tick simulation: DecisionSystem, EmotionSystem, HealthSystem, full
+ *   NeedsSystem, movement, crime, politics. Target ~90–120 residents simultaneously.
+ * - [CONNECTED]  — intermediate tier: participates in hiring/firing, relationship events
+ *   (marriages, deaths of known people), basic NeedsSystem decay, and can be promoted to DETAILED.
+ *   Does NOT run DecisionSystem or EmotionSystem. Target ~200–300 residents simultaneously.
+ * - [BACKGROUND] — cheapest: minimal NeedsSystem tick, no events, statistical presence only.
+ *   The majority of the ~1,000-resident population is here at any given moment.
+ */
+enum class DetailLevel { DETAILED, CONNECTED, BACKGROUND }
 
 enum class LifeStage { CHILD, TEEN, ADULT, ELDER }
 

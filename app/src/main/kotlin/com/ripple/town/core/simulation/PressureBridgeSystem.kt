@@ -286,9 +286,11 @@ object PressureBridgeSystem {
         val buildingId = damageEvent.buildingId ?: return
         val occupants = ctx.state.residentsIn(buildingId)
         for (r in occupants) {
-            if (r.detailLevel != com.ripple.town.core.model.DetailLevel.DETAILED) continue
+            if (r.detailLevel == com.ripple.town.core.model.DetailLevel.BACKGROUND) continue
             ctx.addMemory(r, MemoryType.FEAR, description, 65.0, damageEvent.id)
-            EmotionSystem.spawnEmotion(ctx, r, EmotionType.FEAR, SEVERE_FEAR_INTENSITY, damageEvent.id)
+            if (r.detailLevel == com.ripple.town.core.model.DetailLevel.DETAILED) {
+                EmotionSystem.spawnEmotion(ctx, r, EmotionType.FEAR, SEVERE_FEAR_INTENSITY, damageEvent.id)
+            }
         }
     }
 

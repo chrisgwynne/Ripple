@@ -386,9 +386,16 @@ object LifecycleSystem {
 
     // ---------------------------------------------------- promotion/arrival
 
-    /** Background residents step into the detailed simulation when they start to matter. */
+    /** Background/connected residents step into the next detail tier when they start to matter. */
     fun promoteIfNeeded(ctx: TickContext, r: Resident, why: String) {
         if (r.detailLevel == DetailLevel.DETAILED) return
+        // Step through the tier ladder: BACKGROUND → CONNECTED → DETAILED.
+        // Callers that need full DETAILED immediately (e.g. a hired owner) call this twice;
+        // single-step promotion lets the ActivationSystem gate the rate of CONNECTED→DETAILED.
+        if (r.detailLevel == DetailLevel.BACKGROUND) {
+            r.detailLevel = DetailLevel.CONNECTED
+            return
+        }
         r.detailLevel = DetailLevel.DETAILED
         if (r.homeBuildingId == null) {
             // Move into the emptiest home with space.

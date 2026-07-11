@@ -657,7 +657,7 @@ object EconomySystem {
         // Residents: living costs, debt interest, rent on the 1st
         val firstOfMonth = SimTime.dayOfMonth(state.time) == 1
         for (r in state.residentsOrdered()) {
-            if (!r.inTown || r.detailLevel != com.ripple.town.core.model.DetailLevel.DETAILED) continue
+            if (!r.inTown || r.detailLevel == com.ripple.town.core.model.DetailLevel.BACKGROUND) continue
             val stage = r.lifeStageAt(state.time)
             if (stage == com.ripple.town.core.model.LifeStage.CHILD) continue
             // Snapshot the classified DebtState *before* today's debt arithmetic touches wealth/
@@ -1047,7 +1047,7 @@ object EconomySystem {
                     it.ageAt(state.time) < 66
             }
             .sortedByDescending { r ->
-                (if (r.detailLevel == com.ripple.town.core.model.DetailLevel.DETAILED) 10.0 else 0.0) +
+                (when (r.detailLevel) { com.ripple.town.core.model.DetailLevel.DETAILED -> 10.0; com.ripple.town.core.model.DetailLevel.CONNECTED -> 5.0; else -> 0.0 }) +
                     (if (r.goals.any { it.type == com.ripple.town.core.model.GoalType.FIND_JOB && it.status == com.ripple.town.core.model.GoalStatus.ACTIVE }) 20.0 else 0.0) +
                     r.skill(relevantSkillFor(biz.type)) / 10.0
             }
@@ -1603,7 +1603,7 @@ object EconomySystem {
         val health = healthStateOf(biz)
         if (health < BusinessHealthState.AT_RISK) return
         val owner = biz.ownerId?.let { state.resident(it) } ?: return
-        if (!owner.alive || !owner.inTown || owner.detailLevel != DetailLevel.DETAILED) return
+        if (!owner.alive || !owner.inTown || owner.detailLevel == DetailLevel.BACKGROUND) return
 
         val today = SimTime.dayIndex(ctx.now)
         fun offCooldown(lever: String, cooldownDays: Long): Boolean {
@@ -1757,7 +1757,7 @@ object EconomySystem {
         val buyer = state.residentsOrdered()
             .filter {
                 it.inTown && it.alive && it.id != owner.id &&
-                    it.detailLevel == DetailLevel.DETAILED && it.employmentId == null &&
+                    it.detailLevel != DetailLevel.BACKGROUND && it.employmentId == null &&
                     it.lifeStageAt(ctx.now) == LifeStage.ADULT && it.ageAt(ctx.now) < 66 &&
                     it.wealth >= GoalSystem.STARTUP_CAPITAL * 0.5 && it.personality.ambition > 0.45
             }
@@ -2055,7 +2055,7 @@ object EconomySystem {
         val state = ctx.state
         val founder = state.residentsOrdered()
             .filter {
-                it.inTown && it.alive && it.detailLevel == DetailLevel.DETAILED &&
+                it.inTown && it.alive && it.detailLevel != DetailLevel.BACKGROUND &&
                     it.employmentId == null && it.lifeStageAt(ctx.now) == LifeStage.ADULT &&
                     it.ageAt(ctx.now) < 66 && it.wealth >= GoalSystem.STARTUP_CAPITAL &&
                     it.personality.ambition > 0.5
