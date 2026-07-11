@@ -203,22 +203,84 @@ object GoalSystem {
         }
     }
 
+    /** Candidate business types a fresh `START_BUSINESS` opening will consider, in preference
+     *  order — WORKSHOP first (the pre-existing default, and always gate-viable per
+     *  `EconomySystem.estimateFormationViability`'s contract-shaped carve-out), then the everyday
+     *  retail sectors a resident with a craft/cooking/business skill could plausibly run. Economy
+     *  Calibration Gate Phase 2 (2026-07-11) — see docs/simulation-rules.md "Business formation
+     *  gate". */
+    private val FORMATION_CANDIDATE_TYPES = listOf(
+        BusinessType.WORKSHOP, BusinessType.CAFE, BusinessType.BAKERY, BusinessType.GROCER,
+        BusinessType.HARDWARE, BusinessType.BOOKSHOP, BusinessType.TAILOR
+    )
+
+    /**
+     * Business formation gate (Economy Calibration Gate Phase 2, 2026-07-11) — see
+     * docs/simulation-rules.md "Business formation gate". Before this pass, ANY vacant building
+     * was opened as a WORKSHOP the moment a resident's `START_BUSINESS` goal completed, with no
+     * check on whether projected demand could actually support it. Now: try every vacant building
+     * against every candidate type (via `EconomySystem.estimateFormationViability`, which reads
+     * real catchment demand, local competition and a lean owner-only break-even), and open the
+     * FIRST genuinely viable building/type combination found. If none are viable, the goal is not
+     * silently lost — it stays active at a high-but-not-complete progress so the resident keeps
+     * trying (a real retry, matching the pre-existing "ready, waiting on money" pattern one branch
+     * up in `progressGoals`) rather than either opening a doomed business or abandoning the dream
+     * outright.
+     */
     private fun openBusiness(ctx: TickContext, r: Resident, goal: Goal) {
         val state = ctx.state
-        val building = state.buildings.values.firstOrNull { it.type == BuildingType.VACANT && it.abandoned }
-            ?: return
-        building.type = BuildingType.WORKSHOP
+        val vacants = state.buildings.values.filter { it.type == BuildingType.VACANT && it.abandoned }.sortedBy { it.id }
+        if (vacants.isEmpty()) {
+            goal.progress = 0.95 // nowhere to open — keep the ambition alive, don't abandon it
+            return
+        }
+
+        var chosenBuilding: com.ripple.town.core.model.Building? = null
+        var chosenType: BusinessType? = null
+        for (building in vacants) {
+            for (type in FORMATION_CANDIDATE_TYPES) {
+                val viability = EconomySystem.estimateFormationViability(ctx, building, type, STARTUP_CAPITAL)
+                if (viability.viable) {
+                    chosenBuilding = building
+                    chosenType = type
+                    break
+                }
+            }
+            if (chosenBuilding != null) break
+        }
+
+        if (chosenBuilding == null || chosenType == null) {
+            // No viable building/type combination anywhere in town right now — a real rejection,
+            // not a silent no-op: the resident keeps the ambition (goal stays active, same "ready,
+            // waiting" holding pattern the pre-existing capital-shortfall branch already uses) and
+            // will re-check on a future day once demand/competition/vacancy has shifted.
+            goal.progress = 0.95
+            return
+        }
+
+        val building = chosenBuilding
+        val type = chosenType
+        building.type = when (type) {
+            BusinessType.WORKSHOP -> BuildingType.WORKSHOP
+            BusinessType.CAFE -> BuildingType.CAFE
+            BusinessType.BAKERY -> BuildingType.BAKERY
+            BusinessType.GROCER -> BuildingType.GROCER
+            BusinessType.HARDWARE -> BuildingType.HARDWARE
+            BusinessType.BOOKSHOP -> BuildingType.BOOKSHOP
+            BusinessType.TAILOR -> BuildingType.TAILOR
+            else -> BuildingType.WORKSHOP
+        }
         building.abandoned = false
         building.ownerId = r.id
         building.condition = 70.0
         building.visibleChanges += "New sign painted, windows cleaned"
         r.wealth -= STARTUP_CAPITAL
-        val name = "${r.surname}'s Workshop"
+        val name = "${r.surname}'s ${type.label}"
         val biz = Business(
             id = state.nextBusinessId++,
             buildingId = building.id,
             name = name,
-            type = BusinessType.WORKSHOP,
+            type = type,
             ownerId = r.id,
             // Was STARTUP_CAPITAL * 0.6 (240) against ~75/day overhead+owner-salary once staffed
             // (~3.2 days runway) and a below-reputation starting demand of 35 — the calibration
@@ -232,17 +294,28 @@ object GoalSystem {
             balance = STARTUP_CAPITAL,
             demand = 45.0,
             reputation = 45.0,
-            employeeCapacity = 2,
+            // Staffing ramp (Economy Calibration Gate Phase 2, 2026-07-11): lean, owner-only start
+            // — was already the case before this pass (only the owner is hired below), but
+            // `employeeCapacity` is now also trimmed to 1 at opening (was 2) so the business can't
+            // even hire a second person until it EXPANDS (see `EconomySystem.expandBusiness`,
+            // which raises capacity by 1 as a real, earned outcome of sustained trade) — matching
+            // the brief's "zero or one employee" starting shape literally, not just in practice.
+            employeeCapacity = 1,
             openedAt = ctx.now
         )
         state.businesses[biz.id] = biz
         val emp = com.ripple.town.core.model.Employment(
             id = state.nextEmploymentId++, residentId = r.id, businessId = biz.id,
-            role = "Owner", dailySalary = 45.0, startedAt = ctx.now
+            role = "Owner", dailySalary = EconomySystem.salaryFor(type).coerceAtMost(45.0), startedAt = ctx.now
         )
         state.employments[emp.id] = emp
         r.employmentId = emp.id
-        r.occupation = "Workshop owner"
+        // WORKSHOP keeps the pre-existing "Workshop owner" wording (BuildingType.WORKSHOP's own
+        // label, "Workshop" — BusinessType.WORKSHOP's label is the more specific "Furniture
+        // workshop", used for the business/shop NAME above but not this occupation string, to
+        // avoid changing this common-case default's wording as a side effect of the Phase 2
+        // formation-gate work).
+        r.occupation = if (type == BusinessType.WORKSHOP) "Workshop owner" else "${type.label} owner"
         r.needs.purpose += 25.0
         complete(ctx, r, goal, "The doors are open")
         val e = ctx.emit(
@@ -251,7 +324,7 @@ object GoalSystem {
             sourceResidentId = r.id, businessId = biz.id, buildingId = building.id,
             severity = 0.6, causeIds = listOfNotNull(goal.causeEventId)
         )
-        ctx.addMemory(r, MemoryType.ACHIEVEMENT, "Turning the key on my own workshop.", 85.0, e.id)
+        ctx.addMemory(r, MemoryType.ACHIEVEMENT, "Turning the key on my own ${type.label.lowercase()}.", 85.0, e.id)
         ConsequenceEngine.onEvent(ctx, e)
     }
 

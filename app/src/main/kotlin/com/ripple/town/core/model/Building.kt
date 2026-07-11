@@ -95,7 +95,33 @@ data class Business(
      * deserialize unchanged; `reserveRunway` degrades gracefully to a single-day reading until
      * this fills up.
      */
-    val recentNetDaily: MutableList<Double> = mutableListOf()
+    val recentNetDaily: MutableList<Double> = mutableListOf(),
+    /**
+     * Consecutive days ending `daysInTrouble == 0` AND `demand` above
+     * `EconomySystem.SUSTAINED_DEMAND_HIRING_THRESHOLD` — i.e. real, sustained trade, not one
+     * lucky day. Economy Calibration Gate Phase 2 (2026-07-11, see docs/simulation-rules.md
+     * "Staffing ramp, recovery ladder, formation gate, contract demand"). Drives the staffing-ramp
+     * hiring gate in `EconomySystem.settleBusinessDay` — a new business (or one recovering from
+     * trouble) must clear this streak before it's allowed to hire its next employee, rather than
+     * hiring off a single good day. Safe-default 0 so existing checkpoints deserialize unchanged.
+     */
+    var consecutiveHealthyDemandDays: Int = 0,
+    /**
+     * Per-lever last-fired in-game-day index for the recovery ladder (`EconomySystem
+     * .maybeAttemptRecovery`), keyed by a short lever name (e.g. "price_cut", "seek_finance") —
+     * cooldown-gates each lever independently so the same response doesn't fire every single day
+     * once a business is in trouble. Safe-default empty map. Economy Calibration Gate Phase 2
+     * (2026-07-11).
+     */
+    val recoveryLeverLastFiredDay: MutableMap<String, Long> = mutableMapOf(),
+    /**
+     * Bounded, temporary debt taken on via the recovery ladder's "seek finance" lever — a genuine
+     * business-side loan, separate from `Resident.debt` (owner-personal debt). Repaid automatically
+     * out of `balance` in `dailySettlement`, same gentle-interest shape `Resident.debt` already
+     * uses in that same function, reusing the pattern rather than inventing a parallel one. Safe-
+     * default 0.0. Economy Calibration Gate Phase 2 (2026-07-11).
+     */
+    var loanBalance: Double = 0.0
 )
 
 /**

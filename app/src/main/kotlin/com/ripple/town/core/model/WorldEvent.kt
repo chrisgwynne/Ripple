@@ -60,6 +60,18 @@ enum class EventType(val label: String) {
     PETITION_RESOLVED("Petition resolved"),
     PRICES_SHIFTED("Prices shifting"),
     BUSINESS_SUCCESSION("Business handed down"),
+    /** A struggling business's owner takes a real recovery action beyond a price cut/layoff —
+     *  seeking finance, an owner capital injection, or restructuring/relocating. Economy
+     *  Calibration Gate Phase 2 (2026-07-11), see docs/simulation-rules.md "Recovery ladder". */
+    BUSINESS_RECOVERY_ACTION("Fighting to stay open"),
+    /** A business genuinely recovers out of trouble following a recovery-ladder action —
+     *  `daysInTrouble` returns to 0 from a real AT_RISK-or-worse state, not just never having
+     *  been in trouble. Economy Calibration Gate Phase 2 (2026-07-11). */
+    BUSINESS_RECOVERED("Business recovered"),
+    /** A periodic contract won by a WORKSHOP/FACTORY — external/institutional demand, not
+     *  resident footfall. Economy Calibration Gate Phase 2 (2026-07-11), see
+     *  docs/simulation-rules.md "External/contract demand". */
+    CONTRACT_WON("Contract won"),
     HOME_PURCHASED("Home purchased"),
     /** A curated, abstract national-scale pressure starting or resolving. See
      *  `ExternalWorldEventProvider`. Deliberately background/town-wide news, not personal. */

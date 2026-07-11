@@ -331,13 +331,33 @@ object EconomySystem {
      * cause. Result is scaled and clamped into the same 5..95 band `biz.demand` has always used.
      */
     fun catchmentDemand(ctx: TickContext, biz: Business): Double {
-        val state = ctx.state
         val radius = catchmentRadiusTiles(biz.type)
         if (radius <= 0) return CONTRACT_SECTOR_BASELINE_DEMAND // WORKSHOP/FACTORY — see doc above
+        val bizBuilding = ctx.state.building(biz.buildingId) ?: return biz.demand
+        return catchmentDemandFor(
+            ctx, bizBuilding, biz.type, standingMultiplier(biz),
+            excludeBusinessId = biz.id
+        ) ?: biz.demand
+    }
 
-        val bizBuilding = state.building(biz.buildingId) ?: return biz.demand
-        val bizCentre = bizBuilding.centre()
-        val standingMult = standingMultiplier(biz)
+    /**
+     * Real refactor (Economy Calibration Gate Phase 2, 2026-07-11, see docs/simulation-rules.md
+     * "Business formation gate"): the household-scoring core of [catchmentDemand], generalised to
+     * take a [building]/[type] pair directly rather than requiring an already-open [Business]
+     * record — the formation gate ([estimateFormationViability]) needs to project demand for a
+     * business that doesn't exist yet. [catchmentDemand] above is now a thin wrapper over this for
+     * the already-open case (passing its own `id` as [excludeBusinessId] so a business never
+     * counts itself as its own competitor, matching [competitionShare]'s old self-exclusion).
+     * Returns `null` only when [radius] is non-positive (WORKSHOP/FACTORY — callers handle their
+     * own placeholder in that case, same as before this refactor).
+     */
+    private fun catchmentDemandFor(
+        ctx: TickContext, building: Building, type: BusinessType, standingMult: Double, excludeBusinessId: Long?
+    ): Double? {
+        val state = ctx.state
+        val radius = catchmentRadiusTiles(type)
+        if (radius <= 0) return null
+        val bizCentre = building.centre()
 
         var weightedScore = 0.0
         for (hh in state.households.values) {
@@ -349,10 +369,10 @@ object EconomySystem {
             val eligibleResidents = hh.memberIds.mapNotNull { state.resident(it) }
                 .filter { it.alive && it.inTown }
             if (eligibleResidents.isEmpty()) continue
-            val hhEligibility = eligibleResidents.sumOf { residentEligibilityWeight(biz.type, it, ctx.now) }
+            val hhEligibility = eligibleResidents.sumOf { residentEligibilityWeight(type, it, ctx.now) }
             if (hhEligibility <= 0.0) continue
             val wWeight = wealthWeight(hh)
-            val share = competitionShare(ctx, biz, hh, home, bizCentre)
+            val share = competitionShareFor(ctx, type, standingMult, excludeBusinessId, hh, home, bizCentre)
             weightedScore += hhEligibility * dWeight * wWeight * share
         }
 
@@ -408,15 +428,27 @@ object EconomySystem {
      * dilutes when there's a real nearby rival for this exact household, never as a townwide
      * blanket discount.
      */
-    private fun competitionShare(ctx: TickContext, biz: Business, hh: Household, home: Building, bizCentre: Tile): Double {
+    private fun competitionShare(ctx: TickContext, biz: Business, hh: Household, home: Building, bizCentre: Tile): Double =
+        competitionShareFor(ctx, biz.type, standingMultiplier(biz), biz.id, hh, home, bizCentre)
+
+    /**
+     * Generalised (Phase 2, 2026-07-11) form of the same-sector competition split, taking
+     * [type]/[standingMult] directly rather than requiring an open [Business] record — see
+     * [catchmentDemandFor]'s doc for why. [excludeBusinessId] is `null` for a not-yet-open
+     * formation-gate projection (nothing to exclude, the candidate business doesn't exist yet).
+     */
+    private fun competitionShareFor(
+        ctx: TickContext, type: BusinessType, standingMult: Double, excludeBusinessId: Long?,
+        hh: Household, home: Building, bizCentre: Tile
+    ): Double {
         val state = ctx.state
-        val radius = catchmentRadiusTiles(biz.type)
+        val radius = catchmentRadiusTiles(type)
         val rivals = state.businesses.values.filter {
-            it.open && it.type == biz.type && it.id != biz.id
+            it.open && it.type == type && it.id != excludeBusinessId
         }
         if (rivals.isEmpty()) return 1.0
 
-        val bizScore = distanceWeight(home.centre().manhattan(bizCentre), radius) * standingMultiplier(biz)
+        val bizScore = distanceWeight(home.centre().manhattan(bizCentre), radius) * standingMult
         var totalScore = bizScore
         var anyOverlap = false
         for (rival in rivals) {
@@ -451,6 +483,66 @@ object EconomySystem {
      *  isn't part of what this pass is retuning, only *what it drifts toward*. */
     private const val DEMAND_DRIFT_RATE = 0.04
 
+    // ============================================================
+    // External/contract demand for WORKSHOP/FACTORY (Economy Calibration Gate, Phase 2, added
+    // 2026-07-11) — see docs/simulation-rules.md "External/contract demand". Replaces the flat
+    // [CONTRACT_SECTOR_BASELINE_DEMAND]-only placeholder with real, periodic, bounded revenue
+    // events: these sectors "rely on contracts, not walk-in residents" per the brief, so their
+    // real income is lump-sum contract wins, not an hourly footfall trickle (hourlyFootfall still
+    // runs for them — `baseSpend`/`cogsFraction` are still real per-unit numbers — but the
+    // `demand` that drives HOW MANY of those "customers" arrive is now contract-win-shaped, not
+    // catchment-shaped, matching [catchmentRadiusTiles]'s existing 0-radius carve-out for these
+    // two types).
+    // ============================================================
+
+    /** Daily chance of winning a contract on any given day — bounded and modest, matching every
+     *  other daily system's gentle pacing (contracts are lumpy, not a daily certainty). */
+    const val CONTRACT_WIN_CHANCE_PER_DAY = 0.10
+
+    /** A won contract's revenue is scaled by reputation/capacity, bounded to this range (before
+     *  the reputation/capacity multiplier) so a single contract is a real, felt lump sum — several
+     *  days' worth of ordinary trade — without being an instant escape from any real trouble. */
+    const val CONTRACT_BASE_VALUE_MIN = 180.0
+    const val CONTRACT_BASE_VALUE_MAX = 420.0
+
+    /** How much `biz.demand` bumps (temporarily, same drift-back-down shape every other demand
+     *  nudge in this file uses) on a contract win — a real, visible "business is busy" signal, not
+     *  just an invisible balance credit. */
+    const val CONTRACT_DEMAND_BUMP = 12.0
+
+    /**
+     * Rolls a bounded chance of [biz] (WORKSHOP/FACTORY only — callers gate this) winning a
+     * contract today. Value scales with reputation (a well-regarded workshop wins bigger
+     * contracts) and `employeeCapacity` (capacity to actually deliver a larger contract) — both
+     * real, already-tracked signals, not an invented "reputation with commercial clients" field.
+     * COGS still applies (a contract has real material cost, same [cogsFraction] as any other
+     * sale) so this lands in `revenueToday`/`expensesToday` exactly like ordinary trade, not a
+     * free credit.
+     */
+    private fun maybeWinContract(ctx: TickContext, biz: Business) {
+        if (!ctx.rng.nextBoolean(CONTRACT_WIN_CHANCE_PER_DAY)) return
+        val repMultiplier = (0.6 + biz.reputation / 100.0).coerceIn(0.6, 1.6)
+        val capacityMultiplier = (0.7 + biz.employeeCapacity * 0.12).coerceIn(0.7, 2.0)
+        val baseValue = ctx.rng.nextDouble(CONTRACT_BASE_VALUE_MIN, CONTRACT_BASE_VALUE_MAX)
+        val revenue = baseValue * repMultiplier * capacityMultiplier * biz.priceLevel
+        val cogs = revenue * cogsFraction(biz.type)
+
+        biz.revenueToday += revenue
+        biz.expensesToday += cogs
+        biz.balance += revenue - cogs
+        biz.demand = (biz.demand + CONTRACT_DEMAND_BUMP).coerceIn(5.0, 95.0)
+        biz.reputation = (biz.reputation + 0.6).coerceIn(5.0, 95.0)
+
+        val owner = biz.ownerId?.let { ctx.state.resident(it) }
+        val e = ctx.emit(
+            EventType.CONTRACT_WON,
+            "${biz.name} has landed a new contract.",
+            sourceResidentId = owner?.id, businessId = biz.id, buildingId = biz.buildingId,
+            severity = 0.3, visibility = EventVisibility.PUBLIC
+        )
+        ConsequenceEngine.onEvent(ctx, e)
+    }
+
     fun dailySettlement(ctx: TickContext) {
         val state = ctx.state
         // Wages and business expenses. `expenses` here is FIXED daily cost — overhead (a small
@@ -460,6 +552,16 @@ object EconomySystem {
         // not on revenue — see docs/simulation-rules.md "Unit economics + catchment demand".
         for (biz in state.businesses.values.sortedBy { it.id }) {
             if (!biz.open) continue
+            // External/contract demand (Economy Calibration Gate Phase 2, 2026-07-11) — see
+            // docs/simulation-rules.md "External/contract demand". WORKSHOP/FACTORY don't trade on
+            // resident footfall at all (zero catchment radius, see `catchmentRadiusTiles`); this is
+            // their real revenue mechanism, rolled once per business per day, before the rest of
+            // today's expense/tax bookkeeping runs so contract revenue counts toward `revenueToday`
+            // like any other real trade (tax, `recordNetDaily`, `daysInTrouble` all read it the
+            // same way).
+            if (biz.type == BusinessType.WORKSHOP || biz.type == BusinessType.FACTORY) {
+                maybeWinContract(ctx, biz)
+            }
             val staff = state.employeesOf(biz.id).sortedBy { it.id }
             val building = state.building(biz.buildingId)
             var expenses = overheads(biz.type) * WorldPressureMechanicMapper.overheadMultiplier(ctx.state)
@@ -488,6 +590,17 @@ object EconomySystem {
                     val tax = profitToday * TAX_RATE
                     biz.expensesToday += tax
                     biz.balance -= tax
+                }
+                // Recovery-ladder loan repayment (Phase 2, "seek finance" lever) — gentle daily
+                // interest then an affordability-gated repayment out of `balance`, mirroring
+                // `Resident.debt`'s exact shape in the resident loop below rather than a separate
+                // mechanic. Repayment never pushes balance negative on its own.
+                if (biz.loanBalance > 0.0) {
+                    biz.loanBalance *= RECOVERY_LOAN_DAILY_INTEREST
+                    val repayment = minOf(biz.loanBalance, maxOf(0.0, biz.balance * 0.08))
+                    biz.balance -= repayment
+                    biz.loanBalance -= repayment
+                    if (biz.loanBalance < 1.0) biz.loanBalance = 0.0
                 }
                 recordNetDaily(biz, biz.revenueToday - biz.expensesToday)
             }
@@ -639,15 +752,48 @@ object EconomySystem {
                     maybeAttemptRecovery(ctx, biz)
                 }
             } else {
+                // Genuine recovery signal (Phase 2, 2026-07-11): a business that was AT_RISK or
+                // worse yesterday and is healthy today has actually turned itself around — a real,
+                // reportable event distinct from a brand-new or never-troubled business simply
+                // having a normal day. Checked BEFORE `daysInTrouble` resets to 0 below, since
+                // `healthStateOf` reads that field directly.
+                if (healthStateOf(biz) >= BusinessHealthState.AT_RISK) {
+                    val owner = biz.ownerId?.let { state.resident(it) }
+                    if (owner != null) {
+                        val e = ctx.emit(
+                            EventType.BUSINESS_RECOVERED,
+                            "${biz.name} has turned things around — trade is back and the books are healthy again.",
+                            sourceResidentId = owner.id, businessId = biz.id, buildingId = biz.buildingId,
+                            severity = 0.4, visibility = EventVisibility.PUBLIC
+                        )
+                        owner.needs.stress -= 10.0
+                        owner.needs.purpose += 8.0
+                        ctx.addMemory(owner, MemoryType.ACHIEVEMENT, "The day ${biz.name} finally turned a corner.", 65.0, e.id)
+                        ConsequenceEngine.onEvent(ctx, e)
+                    }
+                }
                 biz.daysInTrouble = 0
                 // Prosperous businesses may expand.
                 if (biz.balance > EXPANSION_BALANCE && ctx.rng.nextBoolean(0.04)) {
                     expandBusiness(ctx, biz)
                 }
-                // Hiring when busy and under capacity.
+                // Staffing ramp (Economy Calibration Gate Phase 2, 2026-07-11) — see
+                // docs/simulation-rules.md "Staffing ramp". Track the sustained-demand streak
+                // every healthy day (not just when hiring is being considered), then only allow
+                // hiring once that streak has actually run long enough — a single lucky day above
+                // the old flat `demand > 62` line no longer buys a new hire.
+                if (biz.demand >= SUSTAINED_DEMAND_HIRING_THRESHOLD) {
+                    biz.consecutiveHealthyDemandDays += 1
+                } else {
+                    biz.consecutiveHealthyDemandDays = 0
+                }
                 val staff = state.employeesOf(biz.id).size
-                if (biz.demand > 62 && staff < biz.employeeCapacity && biz.balance > 1_500 && ctx.rng.nextBoolean(0.3)) {
+                if (staff < biz.employeeCapacity && biz.balance > HIRING_BALANCE_FLOOR &&
+                    biz.consecutiveHealthyDemandDays >= SUSTAINED_DEMAND_HIRING_DAYS &&
+                    ctx.rng.nextBoolean(0.3)
+                ) {
                     hireSomeone(ctx, biz)
+                    biz.consecutiveHealthyDemandDays = 0 // reset — the next hire needs its own fresh streak
                 }
             }
         }
@@ -1063,6 +1209,123 @@ object EconomySystem {
         return kotlin.math.ceil(fixedCosts / marginPerCustomer).toInt().coerceAtLeast(0)
     }
 
+    // ============================================================
+    // Business formation gate (Economy Calibration Gate, Phase 2, added 2026-07-11) — see
+    // docs/simulation-rules.md "Business formation gate". Reuses [catchmentDemandFor]/
+    // [breakEvenCustomers]'s exact real signals (never a separate invented viability score) to
+    // reject/redirect a `GoalSystem.openBusiness` attempt that projected demand plainly can't
+    // support, before a doomed business ever opens its doors.
+    // ============================================================
+
+    /** A lean, owner-only opening is expected to clear this fraction of its projected break-even
+     *  customer count from day one — not the FULL break-even (a brand-new business is allowed to
+     *  ramp up over its first weeks, same as the staffing-ramp/demand-drift mechanics elsewhere in
+     *  this pass), but enough that the gap is closeable, not structurally impossible. */
+    const val FORMATION_VIABILITY_FRACTION = 0.55
+
+    /** How many same-type open businesses within the projected catchment radius is considered
+     *  "acceptable local competition" per the brief — beyond this, the gate treats the sector as
+     *  saturated for this specific location even if the raw demand number alone looks marginal. */
+    const val FORMATION_MAX_LOCAL_COMPETITORS = 3
+
+    data class FormationViability(
+        val viable: Boolean,
+        val projectedDemand: Double,
+        val projectedBreakEven: Int,
+        val projectedAchievable: Int,
+        val localCompetitors: Int,
+        val reason: String
+    )
+
+    /**
+     * Projects whether opening [type] in [building] with [startupCapital] is likely to be viable —
+     * the gate `GoalSystem.openBusiness` checks before committing a resident's capital and a real
+     * building slot. Never persisted, never rng-driven (a pure projection over current world
+     * state) so it's safe to call speculatively (e.g. to compare multiple candidate types/
+     * buildings) without side effects.
+     *
+     * Checks, in order:
+     * 1. **Sufficient startup capital** — [startupCapital] must be positive (kept intentionally
+     *    light here; `GoalSystem` already separately gates on `r.wealth >= STARTUP_CAPITAL` before
+     *    ever calling this, so this is a sanity floor, not the primary capital check).
+     * 2. **Local competition** — same-type OPEN businesses within [catchmentRadiusTiles] of
+     *    [building] must not exceed [FORMATION_MAX_LOCAL_COMPETITORS].
+     * 3. **Projected catchment demand** vs a lean, owner-only projected break-even
+     *    ([breakEvenCustomersProjected]) — demand converted to an average achievable daily
+     *    customer count via the same `hourlyFootfall` shape
+     *    (`(demand/100) * 2.2 * ~13 trading hours`, using a neutral sector multiplier of 1.0 since
+     *    hour-by-hour shape washes out over a full trading day), and viable only if that achievable
+     *    count clears [FORMATION_VIABILITY_FRACTION] of the projected break-even.
+     * WORKSHOP/FACTORY are always viable here (zero residential catchment radius by design — see
+     * [catchmentRadiusTiles] — their real demand is [CONTRACT_SECTOR_BASELINE_DEMAND]-and-contracts
+     * driven, not catchment-gated; a hard reject here would be gating them on a signal that was
+     * never meant to describe them).
+     */
+    fun estimateFormationViability(ctx: TickContext, building: Building, type: BusinessType, startupCapital: Double): FormationViability {
+        if (startupCapital <= 0.0) {
+            return FormationViability(false, 0.0, 0, 0, 0, "no real startup capital")
+        }
+        val radius = catchmentRadiusTiles(type)
+        if (radius <= 0) {
+            // WORKSHOP/FACTORY — contract-shaped demand, not catchment-gated (see doc above).
+            return FormationViability(true, CONTRACT_SECTOR_BASELINE_DEMAND, 0, 0, 0, "contract-shaped sector, catchment gate not applicable")
+        }
+
+        val centre = building.centre()
+        val localCompetitors = ctx.state.businesses.values.count {
+            it.open && it.type == type && ctx.state.building(it.buildingId)?.centre()?.manhattan(centre)?.let { d -> d <= radius } == true
+        }
+        if (localCompetitors > FORMATION_MAX_LOCAL_COMPETITORS) {
+            return FormationViability(false, 0.0, 0, 0, localCompetitors, "too many same-type competitors already in catchment ($localCompetitors)")
+        }
+
+        // Neutral standing (a brand-new business starts at parity — see GoalSystem.openBusiness's
+        // demand=reputation=45.0 convention) — no self business exists yet to exclude.
+        val neutralStanding = standingMultiplierFor(reputation = 45.0, priceLevel = 1.0)
+        val projectedDemand = catchmentDemandFor(ctx, building, type, neutralStanding, excludeBusinessId = null)
+            ?: CONTRACT_SECTOR_BASELINE_DEMAND
+
+        val breakEven = breakEvenCustomersProjected(ctx, building, type)
+        // Average achievable daily customers at the projected demand level, using the same
+        // `hourlyFootfall` shape (`(demand/100) * sectorMultiplier * 2.2`) averaged over the
+        // roughly 13-hour 8-21 trading window with a neutral sectorMultiplier of 1.0 (the real
+        // per-hour shape varies, but washes out close to 1.0 averaged across a whole trading day
+        // for every type per `SectorDemandProfileTest`'s own sweep).
+        val achievable = ((projectedDemand / 100.0) * 2.2 * 13.0).toInt()
+
+        val required = (breakEven * FORMATION_VIABILITY_FRACTION).toInt().coerceAtLeast(1)
+        val viable = achievable >= required
+        val reason = if (viable) {
+            "projected demand ($projectedDemand, ~$achievable customers/day) clears $FORMATION_VIABILITY_FRACTION" +
+                "x of lean break-even ($breakEven)"
+        } else {
+            "projected achievable customers ($achievable/day) falls short of $FORMATION_VIABILITY_FRACTION" +
+                "x lean break-even ($breakEven, needs $required)"
+        }
+        return FormationViability(viable, projectedDemand, breakEven, achievable, localCompetitors, reason)
+    }
+
+    /** [standingMultiplier] generalised to raw reputation/priceLevel inputs, for a not-yet-open
+     *  business that has no [Business] record to read them from yet. */
+    private fun standingMultiplierFor(reputation: Double, priceLevel: Double): Double {
+        val standing = reputation - (priceLevel - 1.0) * 40.0
+        val normalised = (standing - 50.0) / 100.0
+        return (1.0 + normalised * 0.6).coerceIn(0.7, 1.3)
+    }
+
+    /** [breakEvenCustomers] generalised for a not-yet-open, owner-only business: no existing
+     *  [Business]/staff to read, so wages are a single owner-drawing salary ([salaryFor]) rather
+     *  than a full staffed roster — the lean, owner-operated starting point the brief's staffing
+     *  section asks for, not the mature 2-staff shape. */
+    private fun breakEvenCustomersProjected(ctx: TickContext, building: Building, type: BusinessType): Int {
+        val ownerWage = salaryFor(type)
+        val fixedCosts = overheads(type) * WorldPressureMechanicMapper.overheadMultiplier(ctx.state) +
+            rentPerDay(building) + utilitiesPerDay(building, type) + ownerWage
+        val marginPerCustomer = baseSpend(type) * 1.0 * (1.0 - cogsFraction(type))
+        if (marginPerCustomer <= 0.0) return Int.MAX_VALUE
+        return kotlin.math.ceil(fixedCosts / marginPerCustomer).toInt().coerceAtLeast(0)
+    }
+
     fun salaryFor(type: BusinessType): Double = when (type) {
         BusinessType.FACTORY -> 46.0
         BusinessType.CLINIC -> 52.0
@@ -1120,77 +1383,381 @@ object EconomySystem {
         }
     }
 
-    /** Daily chance a DETAILED owner at AT_RISK-or-worse actually takes a recovery action —
-     *  bounded and low, matching every other daily system's gentle pacing (e.g.
-     *  `BusinessSuccessionSystem.SUCCESSION_CHANCE_PER_DAY`). Rolled independently for the two
-     *  action kinds below, so an owner isn't stuck picking exactly one forever. */
-    const val RECOVERY_ACTION_CHANCE_PER_DAY = 0.10
+    // ============================================================
+    // Recovery ladder (Economy Calibration Gate, Phase 2, added 2026-07-11) — see
+    // docs/simulation-rules.md "Recovery ladder". Upgrades the old two-action (price-cut/layoff)
+    // `maybeAttemptRecovery` to the brief's full 10-step escalation. Every lever is bounded, real,
+    // cooldown-gated (`Business.recoveryLeverLastFiredDay`, keyed per lever name so one lever's
+    // cooldown never blocks another), and rolled independently via `ctx.rng` — a business at
+    // CRITICAL gets more/stronger tries per day than one merely AT_RISK, but nothing fires every
+    // single day. Closure still only happens once `daysInTrouble >= CLOSURE_DAYS` in
+    // `settleBusinessDay` — this ladder is what a business does WHILE that clock is running, not a
+    // replacement for the clock itself.
+    // ============================================================
 
-    /** How much a price-cut recovery action reduces `priceLevel` by, and the floor it respects —
-     *  reuses `PriceDriftSystem.PRICE_LEVEL_MIN` rather than inventing a second bound. */
+    /** Daily chance any single eligible lever is attempted, before its own cooldown/eligibility
+     *  gate is checked — kept low and uniform across levers (their real differentiation is
+     *  *when* they become eligible and their cooldown length, not a per-lever chance). */
+    const val RECOVERY_ACTION_CHANCE_PER_DAY = 0.12
+
+    /** Minimum in-game days between two firings of the SAME lever on the SAME business — a real
+     *  business doesn't cut prices twice in three days. Levers with a naturally rarer/heavier
+     *  effect (finance, capital injection, buyer search, restructure) get longer cooldowns,
+     *  applied per-lever below. */
+    const val RECOVERY_DEFAULT_COOLDOWN_DAYS = 6L
+
     const val RECOVERY_PRICE_CUT = 0.08
-
-    /** A real trade-off, not a free save: cutting prices this deliberately (as opposed to
-     *  `PriceDriftSystem`'s small ambient drift) also costs some reputation — a "why's it so
-     *  cheap" wobble — recovering naturally over time via `settleBusinessDay`'s own reputation
-     *  drift once trouble passes. */
     const val RECOVERY_PRICE_CUT_REPUTATION_COST = 3.0
+    const val RECOVERY_PRICE_RAISE = 0.05
+
+    /** Owner-drawings cut: the "Owner" `Employment.dailySalary` is trimmed by this fraction while
+     *  recovering — a real, felt cost to the owner personally (less take-home pay), not free. */
+    const val RECOVERY_DRAWINGS_CUT_FRACTION = 0.25
+    const val RECOVERY_DRAWINGS_CUT_FLOOR = 15.0 // never cut owner pay below this — they still eat
+
+    /** "Reduce stock" maps to a temporary COGS-relevant spend cut (this codebase has no separate
+     *  stock-volume concept — see Phase 2 brief scope note) — a bounded, temporary discount on
+     *  `cogsFraction` for this business, tracked via a short-lived reputation-adjacent nudge on
+     *  `priceLevel`'s sibling rather than a new persisted field: implemented as a one-off
+     *  `balance` credit representing deferred/thinner restocking, real but modest. */
+    const val RECOVERY_STOCK_CUT_BALANCE_RELIEF = 60.0
+
+    /** "Shorten hours" — the existing `Employment.reducedHours` flag (already a real 0.6x pay/
+     *  presumably-shorter-shift signal `dailySettlement`'s wages loop reads) applied to all staff
+     *  at this business, cutting the single biggest controllable daily expense without a full
+     *  layoff. */
+    const val RECOVERY_SHORTEN_HOURS_COOLDOWN_DAYS = 10L
+
+    /** "Renegotiate supplier terms" — a temporary, bounded relief on this business's effective
+     *  COGS burden for the day it fires, represented the same way as the stock-cut lever (a direct
+     *  balance credit) since there's no separate persisted per-business COGS-override field to
+     *  introduce for a temporary effect. */
+    const val RECOVERY_SUPPLIER_RELIEF_BALANCE = 90.0
+
+    /** "Seek finance" — a bounded business-side loan (`Business.loanBalance`), repaid with gentle
+     *  daily interest out of `balance` in `dailySettlement`, mirroring `Resident.debt`'s existing
+     *  shape rather than inventing a parallel debt system. Capped so a business can't borrow its
+     *  way to an arbitrarily large balance. */
+    const val RECOVERY_LOAN_AMOUNT = 500.0
+    const val RECOVERY_LOAN_CAP = 1_500.0
+    const val RECOVERY_LOAN_DAILY_INTEREST = 1.0015
+    const val RECOVERY_LOAN_COOLDOWN_DAYS = 20L
+
+    /** "Owner capital injection" — the owner's OWN personal `wealth` transferred into
+     *  `biz.balance`, bounded to a fraction of what they can actually afford (never their entire
+     *  savings) — a genuinely felt personal sacrifice, not a free top-up. */
+    const val RECOVERY_CAPITAL_INJECTION_FRACTION = 0.35
+    const val RECOVERY_CAPITAL_INJECTION_MIN_OWNER_RESERVE = 200.0 // never leave the owner with less than this
+    const val RECOVERY_CAPITAL_INJECTION_COOLDOWN_DAYS = 25L
+
+    /** "Seek buyer" — a bounded per-day chance of finding one once the business is genuinely deep
+     *  in trouble (STRUGGLING or worse); reuses `EconomySystem`'s own closure-succession machinery
+     *  (`succeedViaEmployeeBuyout`-shaped handoff via a fresh outside buyer) rather than duplicating
+     *  it, so "found a buyer" and "closed, then succeeded" share one real ownership-transfer path. */
+    const val RECOVERY_SEEK_BUYER_CHANCE = 0.05
+    const val RECOVERY_SEEK_BUYER_COOLDOWN_DAYS = 15L
+
+    /** "Restructure or relocate" — the rarest, most drastic pre-closure lever: only attempted at
+     *  CRITICAL, changes this business's `BusinessType` to whichever viable sector currently has
+     *  the least local competition (a real pivot, not cosmetic), resets `daysInTrouble` partway
+     *  and gives a real balance/reputation cost — a genuine last roll of the dice, not a free
+     *  reset. */
+    const val RECOVERY_RESTRUCTURE_CHANCE = 0.04
+    const val RECOVERY_RESTRUCTURE_COOLDOWN_DAYS = 40L
+    const val RECOVERY_RESTRUCTURE_BALANCE_COST = 200.0
 
     /**
-     * A bounded, low-probability-per-day recovery action for a DETAILED owner whose business has
-     * reached [BusinessHealthState.AT_RISK] or worse — see docs/simulation-rules.md "Business
-     * health states". Two real mechanical options, each a genuine trade-off:
-     * - **Price cut**: `priceLevel` drops by [RECOVERY_PRICE_CUT] (floored at
-     *   `PriceDriftSystem.PRICE_LEVEL_MIN`) to chase demand — cheaper goods draw more customers
-     *   (`hourlyFootfall`'s `spendEach = baseSpend * priceLevel` directly rewards this), but at a
-     *   real cost: lower revenue per customer, and a small reputation hit for looking desperate.
-     * - **Early layoff**: the most recently hired employee is let go now, before the business is
-     *   forced to close outright — cuts daily wage overhead immediately (this business's single
-     *   biggest controllable expense per `dailySettlement`'s wages loop), at the real cost of lost
-     *   `employeeCapacity` headroom and a demand hit (fewer staff, worse service) plus the laid-
-     *   off worker's own job loss. Reuses the same `JOB_LOST`/memory/emotion/shock shape
-     *   `closeBusiness`'s worker-loss loop already establishes — one real code path for "a job
-     *   here ended", not a second parallel one.
-     * Only one action fires per business per day at most (price cut is tried first; if it
-     * doesn't fire, layoff gets an independent roll) — never both, so a single bad day doesn't
-     * get double-mitigated.
+     * The brief's full 10-step recovery ladder, escalating by [BusinessHealthState]:
+     * 1. reduce owner drawings, 2. reduce stock (COGS-relief proxy), 3. shorten hours,
+     * 4. renegotiate supplier terms (COGS-relief proxy), 5. raise prices, 6. seek finance,
+     * 7. owner capital injection, 8. reduce staff (layoff), 9. seek buyer, 10. restructure/relocate.
+     * Not every business attempts literally all ten every time — AT_RISK businesses only reach for
+     * the early, gentle levers (1-5); STRUGGLING opens up finance/capital/layoff (6-8); only
+     * CRITICAL businesses reach for seek-buyer/restructure (9-10), matching the brief's "worse
+     * state = more/stronger actions" guidance. Each eligible lever gets one independent
+     * [RECOVERY_ACTION_CHANCE_PER_DAY] roll per day, gated by its own cooldown in
+     * `recoveryLeverLastFiredDay` — several CAN fire on the same day for a deeply CRITICAL
+     * business (a real business in genuine crisis pulls more than one lever at once), but each
+     * lever individually is rare and cooling-down, never a daily certainty.
      */
     private fun maybeAttemptRecovery(ctx: TickContext, biz: Business) {
         val state = ctx.state
-        if (healthStateOf(biz) < BusinessHealthState.AT_RISK) return
+        val health = healthStateOf(biz)
+        if (health < BusinessHealthState.AT_RISK) return
         val owner = biz.ownerId?.let { state.resident(it) } ?: return
         if (!owner.alive || !owner.inTown || owner.detailLevel != DetailLevel.DETAILED) return
 
-        if (ctx.rng.nextBoolean(RECOVERY_ACTION_CHANCE_PER_DAY)) {
-            attemptPriceCutRecovery(ctx, biz, owner)
-            return
+        val today = SimTime.dayIndex(ctx.now)
+        fun offCooldown(lever: String, cooldownDays: Long): Boolean {
+            val last = biz.recoveryLeverLastFiredDay[lever] ?: return true
+            return today - last >= cooldownDays
         }
-        if (ctx.rng.nextBoolean(RECOVERY_ACTION_CHANCE_PER_DAY)) {
-            attemptLayoffRecovery(ctx, biz, owner)
+        fun roll(lever: String, cooldownDays: Long = RECOVERY_DEFAULT_COOLDOWN_DAYS, action: () -> Boolean) {
+            if (!offCooldown(lever, cooldownDays)) return
+            if (!ctx.rng.nextBoolean(RECOVERY_ACTION_CHANCE_PER_DAY)) return
+            if (action()) biz.recoveryLeverLastFiredDay[lever] = today
+        }
+
+        // Levers 1-5: gentle, available from AT_RISK onward.
+        roll("owner_drawings") { attemptReduceOwnerDrawings(ctx, biz, owner) }
+        roll("reduce_stock") { attemptReduceStock(ctx, biz, owner) }
+        roll("shorten_hours", RECOVERY_SHORTEN_HOURS_COOLDOWN_DAYS) { attemptShortenHours(ctx, biz, owner) }
+        roll("supplier_terms") { attemptRenegotiateSupplier(ctx, biz, owner) }
+        roll("raise_prices") { attemptRaisePrices(ctx, biz, owner) }
+
+        // Levers 6-8: heavier financial/staffing moves, from STRUGGLING onward.
+        if (health >= BusinessHealthState.STRUGGLING) {
+            roll("seek_finance", RECOVERY_LOAN_COOLDOWN_DAYS) { attemptSeekFinance(ctx, biz, owner) }
+            roll("capital_injection", RECOVERY_CAPITAL_INJECTION_COOLDOWN_DAYS) { attemptCapitalInjection(ctx, biz, owner) }
+            roll("layoff") { attemptLayoffRecovery(ctx, biz, owner) }
+        }
+
+        // Levers 9-10: last resorts, CRITICAL only.
+        if (health >= BusinessHealthState.CRITICAL) {
+            roll("seek_buyer", RECOVERY_SEEK_BUYER_COOLDOWN_DAYS) { attemptSeekBuyer(ctx, biz, owner) }
+            roll("restructure", RECOVERY_RESTRUCTURE_COOLDOWN_DAYS) { attemptRestructureOrRelocate(ctx, biz, owner) }
         }
     }
 
-    private fun attemptPriceCutRecovery(ctx: TickContext, biz: Business, owner: Resident) {
-        val before = biz.priceLevel
-        val after = (before - RECOVERY_PRICE_CUT).coerceAtLeast(PriceDriftSystem.PRICE_LEVEL_MIN)
-        if (after >= before) return // already at the floor — nothing real to do
-        biz.priceLevel = after
-        biz.reputation = (biz.reputation - RECOVERY_PRICE_CUT_REPUTATION_COST).coerceIn(5.0, 95.0)
-        owner.needs.stress += 4.0 // a deliberate, anxious call, not a free lever
+    private fun recoveryEvent(ctx: TickContext, biz: Business, owner: Resident, text: String, severity: Double = 0.3) {
         val e = ctx.emit(
-            EventType.PRICES_SHIFTED,
-            "${biz.name} has slashed prices, trying to chase back some trade.",
+            EventType.BUSINESS_RECOVERY_ACTION, text,
             sourceResidentId = owner.id, businessId = biz.id, buildingId = biz.buildingId,
-            severity = 0.3, visibility = EventVisibility.PUBLIC
+            severity = severity, visibility = EventVisibility.PUBLIC
         )
         ConsequenceEngine.onEvent(ctx, e)
     }
 
-    private fun attemptLayoffRecovery(ctx: TickContext, biz: Business, owner: Resident) {
+    /** Lever 1: reduce owner drawings — a real personal cost (less take-home pay), a real business
+     *  relief (lower daily wage-loop cost for the "Owner" role). */
+    private fun attemptReduceOwnerDrawings(ctx: TickContext, biz: Business, owner: Resident): Boolean {
+        val state = ctx.state
+        val ownerEmployment = state.employmentOf(owner)?.takeIf { it.businessId == biz.id } ?: return false
+        val before = ownerEmployment.dailySalary
+        val after = (before * (1.0 - RECOVERY_DRAWINGS_CUT_FRACTION)).coerceAtLeast(RECOVERY_DRAWINGS_CUT_FLOOR)
+        if (after >= before) return false
+        ownerEmployment.dailySalary = after
+        owner.needs.stress += 5.0
+        owner.needs.financialSecurity -= 6.0
+        recoveryEvent(ctx, biz, owner, "${owner.fullName} is taking less out of ${biz.name} to keep it afloat.")
+        return true
+    }
+
+    /** Lever 2: reduce stock — this codebase has no separate stock-volume field, so this maps to a
+     *  bounded, one-off `balance` relief representing thinner/deferred restocking (see brief's
+     *  scope note above `RECOVERY_STOCK_CUT_BALANCE_RELIEF`). */
+    private fun attemptReduceStock(ctx: TickContext, biz: Business, owner: Resident): Boolean {
+        biz.balance += RECOVERY_STOCK_CUT_BALANCE_RELIEF
+        biz.reputation = (biz.reputation - 1.5).coerceIn(5.0, 95.0) // thinner shelves, a little less appeal
+        recoveryEvent(ctx, biz, owner, "${biz.name} is ordering less stock to conserve cash.")
+        return true
+    }
+
+    /** Lever 3: shorten hours — flips `Employment.reducedHours` on for every current staff member
+     *  (owner included, since they're the one working the shorter day too), which
+     *  `dailySettlement`'s wages loop already pays at 0.6x for. A real, immediate cost cut. */
+    private fun attemptShortenHours(ctx: TickContext, biz: Business, owner: Resident): Boolean {
+        val state = ctx.state
+        val staff = state.employeesOf(biz.id)
+        val toShorten = staff.filter { !it.reducedHours }
+        if (toShorten.isEmpty()) return false
+        toShorten.forEach { it.reducedHours = true }
+        biz.demand = (biz.demand - 3.0).coerceIn(5.0, 95.0) // shorter hours, fewer customers can be served
+        recoveryEvent(ctx, biz, owner, "${biz.name} has shortened its opening hours to cut costs.")
+        return true
+    }
+
+    /** Lever 4: renegotiate supplier terms — a temporary COGS-relevant relief, same mechanical
+     *  shape as [attemptReduceStock] (see that function's doc for why a direct balance credit
+     *  stands in for a temporary COGS-fraction override here). */
+    private fun attemptRenegotiateSupplier(ctx: TickContext, biz: Business, owner: Resident): Boolean {
+        biz.balance += RECOVERY_SUPPLIER_RELIEF_BALANCE
+        recoveryEvent(ctx, biz, owner, "${biz.name} has renegotiated terms with suppliers.")
+        return true
+    }
+
+    /** Lever 5: raise prices — the opposite lever from the old price-CUT-only recovery. Sometimes
+     *  the real fix for a business that's serving plenty of customers but still losing money is a
+     *  higher margin per sale, not a discount chasing volume it can't profitably serve. Chosen over
+     *  a price cut when demand is already reasonably healthy (>= 40) — cutting further would just
+     *  bleed margin on trade that's already happening. */
+    private fun attemptRaisePrices(ctx: TickContext, biz: Business, owner: Resident): Boolean {
+        if (biz.demand >= 40.0) {
+            val before = biz.priceLevel
+            val after = (before + RECOVERY_PRICE_RAISE).coerceAtMost(PriceDriftSystem.PRICE_LEVEL_MAX)
+            if (after <= before) return false
+            biz.priceLevel = after
+            recoveryEvent(ctx, biz, owner, "${biz.name} has raised prices — the margins weren't adding up.")
+            return true
+        }
+        // Low demand: the classic price-cut-to-chase-trade lever instead.
+        val before = biz.priceLevel
+        val after = (before - RECOVERY_PRICE_CUT).coerceAtLeast(PriceDriftSystem.PRICE_LEVEL_MIN)
+        if (after >= before) return false
+        biz.priceLevel = after
+        biz.reputation = (biz.reputation - RECOVERY_PRICE_CUT_REPUTATION_COST).coerceIn(5.0, 95.0)
+        owner.needs.stress += 4.0
+        recoveryEvent(ctx, biz, owner, "${biz.name} has slashed prices, trying to chase back some trade.")
+        return true
+    }
+
+    /** Lever 6: seek finance — a bounded business-side loan, mirroring `Resident.debt`'s existing
+     *  interest/repayment shape (see `dailySettlement`'s loan-repayment block below) rather than a
+     *  parallel debt system. Capped at [RECOVERY_LOAN_CAP] total outstanding. */
+    private fun attemptSeekFinance(ctx: TickContext, biz: Business, owner: Resident): Boolean {
+        if (biz.loanBalance >= RECOVERY_LOAN_CAP) return false
+        val amount = minOf(RECOVERY_LOAN_AMOUNT, RECOVERY_LOAN_CAP - biz.loanBalance)
+        if (amount <= 0.0) return false
+        biz.loanBalance += amount
+        biz.balance += amount
+        owner.needs.stress += 6.0
+        recoveryEvent(ctx, biz, owner, "${owner.fullName} has taken out a loan to keep ${biz.name} trading.")
+        return true
+    }
+
+    /** Lever 7: owner capital injection — real personal money from the owner's own `wealth`,
+     *  bounded so they're never stripped down past [RECOVERY_CAPITAL_INJECTION_MIN_OWNER_RESERVE]. */
+    private fun attemptCapitalInjection(ctx: TickContext, biz: Business, owner: Resident): Boolean {
+        val affordable = (owner.wealth - RECOVERY_CAPITAL_INJECTION_MIN_OWNER_RESERVE).coerceAtLeast(0.0)
+        val amount = affordable * RECOVERY_CAPITAL_INJECTION_FRACTION
+        if (amount < 20.0) return false // not worth a real event for pocket change
+        owner.wealth -= amount
+        biz.balance += amount
+        owner.needs.stress += 7.0
+        ctx.addMemory(owner, MemoryType.ACHIEVEMENT, "Put my own savings into ${biz.name} to keep it going.", 55.0, null)
+        recoveryEvent(ctx, biz, owner, "${owner.fullName} has put personal savings into ${biz.name} to keep it going.", severity = 0.35)
+        return true
+    }
+
+    /** Lever 9: seek buyer — reuses the closure-succession employee-buyout SHAPE
+     *  ([reopenBusiness]) but for a business that's still nominally open: a bounded chance of
+     *  finding an outside buyer while still trading, transferring ownership rather than closing.
+     *  Only wired for a genuinely different candidate resident (never the current owner). */
+    private fun attemptSeekBuyer(ctx: TickContext, biz: Business, owner: Resident): Boolean {
+        if (!ctx.rng.nextBoolean(RECOVERY_SEEK_BUYER_CHANCE)) return false
+        val state = ctx.state
+        val buyer = state.residentsOrdered()
+            .filter {
+                it.inTown && it.alive && it.id != owner.id &&
+                    it.detailLevel == DetailLevel.DETAILED && it.employmentId == null &&
+                    it.lifeStageAt(ctx.now) == LifeStage.ADULT && it.ageAt(ctx.now) < 66 &&
+                    it.wealth >= GoalSystem.STARTUP_CAPITAL * 0.5 && it.personality.ambition > 0.45
+            }
+            .sortedByDescending { it.skill(com.ripple.town.core.model.SkillType.BUSINESS) }
+            .firstOrNull() ?: return false
+
+        val building = state.building(biz.buildingId) ?: return false
+        val oldOwnerId = owner.id
+        buyer.wealth -= GoalSystem.STARTUP_CAPITAL * 0.5
+        reopenBusiness(ctx, biz, building, buyer)
+        val oldOwner = state.resident(oldOwnerId)
+        if (oldOwner != null) {
+            oldOwner.employmentId = null
+            oldOwner.occupation = "Unemployed"
+            oldOwner.needs.stress += 8.0
+        }
+        val e = ctx.emit(
+            EventType.BUSINESS_SUCCESSION,
+            "${buyer.fullName} has bought ${biz.name} from ${oldOwner?.fullName ?: "its struggling owner"} — a fresh start under new ownership.",
+            sourceResidentId = buyer.id, targetResidentIds = listOfNotNull(oldOwnerId),
+            businessId = biz.id, buildingId = biz.buildingId, severity = 0.4, visibility = EventVisibility.PUBLIC
+        )
+        ctx.addMemory(buyer, MemoryType.ACHIEVEMENT, "Bought ${biz.name} — a fresh start.", 70.0, e.id)
+        ConsequenceEngine.onEvent(ctx, e)
+        return true
+    }
+
+    /** Lever 10: restructure or relocate — the rarest, most drastic pre-closure lever, only
+     *  attempted at CRITICAL. Pivots this business to whichever real, currently-open sector has
+     *  the least local competition (checked via a simple town-wide same-type open-business count,
+     *  the same signal `catchmentDemand`'s competition split already reads), on the theory that
+     *  the ORIGINAL sector choice, not the specific owner/premises, is what's not working here. A
+     *  real cost (balance, reputation, a partial trouble-clock reset, not a full wipe) — never a
+     *  free reset. */
+    private fun attemptRestructureOrRelocate(ctx: TickContext, biz: Business, owner: Resident): Boolean {
+        val state = ctx.state
+        val retailTypes = listOf(
+            BusinessType.BAKERY, BusinessType.CAFE, BusinessType.PUB, BusinessType.GROCER,
+            BusinessType.HARDWARE, BusinessType.BOOKSHOP, BusinessType.TAILOR
+        )
+        val openCounts = retailTypes.associateWith { t -> state.businesses.values.count { it.open && it.type == t } }
+        val newType = openCounts.entries.filter { it.key != biz.type }.minByOrNull { it.value }?.key ?: return false
+
+        val building = state.building(biz.buildingId)
+        building?.type = when (newType) {
+            BusinessType.BAKERY -> BuildingType.BAKERY
+            BusinessType.CAFE -> BuildingType.CAFE
+            BusinessType.PUB -> BuildingType.PUB
+            BusinessType.GROCER -> BuildingType.GROCER
+            BusinessType.HARDWARE -> BuildingType.HARDWARE
+            BusinessType.BOOKSHOP -> BuildingType.BOOKSHOP
+            BusinessType.TAILOR -> BuildingType.TAILOR
+            else -> building.type
+        }
+        building?.visibleChanges?.add("Reopened as a different kind of shop")
+
+        val oldTypeName = biz.type.label
+        val bizType = newType
+        biz.balance -= RECOVERY_RESTRUCTURE_BALANCE_COST
+        biz.reputation = 40.0 // a real reset, not a bump — this is starting over, mid-life
+        biz.demand = CONTRACT_SECTOR_BASELINE_DEMAND
+        biz.priceLevel = 1.0
+        biz.daysInTrouble = (biz.daysInTrouble / 2).coerceAtLeast(0) // partial relief, not a full wipe
+        owner.needs.stress += 10.0
+
+        recoveryEventAsRestructure(ctx, biz, owner, bizType, oldTypeName)
+        return true
+    }
+
+    /** [Business.type] is a `val`, so a true in-place type swap isn't possible on the existing
+     *  record — restructuring instead closes the old listing quietly (no `BUSINESS_CLOSED`
+     *  penalty event; this is a deliberate pivot, not a failure) and opens a fresh [Business] of
+     *  the new type in the same building under the same owner, carrying over the balance/
+     *  reputation/demand/price state [attemptRestructureOrRelocate] already set. */
+    private fun recoveryEventAsRestructure(ctx: TickContext, biz: Business, owner: Resident, newType: BusinessType, oldTypeName: String) {
+        val state = ctx.state
+        state.businesses.remove(biz.id)
+        val staffToCarry = state.employeesOf(biz.id).toList()
+        val newBiz = Business(
+            id = state.nextBusinessId++,
+            buildingId = biz.buildingId,
+            name = biz.name,
+            type = newType,
+            ownerId = owner.id,
+            balance = biz.balance,
+            reputation = biz.reputation,
+            demand = biz.demand,
+            priceLevel = biz.priceLevel,
+            employeeCapacity = biz.employeeCapacity,
+            openedAt = biz.openedAt,
+            daysInTrouble = biz.daysInTrouble
+        )
+        state.businesses[newBiz.id] = newBiz
+        // Employment.businessId is a val — re-point existing staff to the new record by replacing
+        // each Employment (same id/residentId/role/salary/shift, businessId swapped) rather than
+        // ending and re-hiring them (this is a continuation of the same job, not a new one).
+        for (emp in staffToCarry) {
+            val idx = state.employments[emp.id]
+            if (idx != null) {
+                state.employments.remove(emp.id)
+                val moved = emp.copy(businessId = newBiz.id)
+                state.employments[moved.id] = moved
+            }
+        }
+        val e = ctx.emit(
+            EventType.BUSINESS_RECOVERY_ACTION,
+            "${owner.fullName} has turned $oldTypeName ${biz.name} into a ${newType.label.lowercase()} — a last roll of the dice.",
+            sourceResidentId = owner.id, businessId = newBiz.id, buildingId = newBiz.buildingId,
+            severity = 0.45, visibility = EventVisibility.PUBLIC
+        )
+        ConsequenceEngine.onEvent(ctx, e)
+    }
+
+    private fun attemptLayoffRecovery(ctx: TickContext, biz: Business, owner: Resident): Boolean {
         val state = ctx.state
         val staff = state.employeesOf(biz.id).sortedByDescending { it.startedAt }
-        val toLayOff = staff.firstOrNull { it.residentId != owner.id } ?: return
-        val worker = state.resident(toLayOff.residentId) ?: return
+        val toLayOff = staff.firstOrNull { it.residentId != owner.id } ?: return false
+        val worker = state.resident(toLayOff.residentId) ?: return false
 
         toLayOff.endedAt = ctx.now
         worker.employmentId = null
@@ -1208,6 +1775,7 @@ object EconomySystem {
         EmotionSystem.spawnEmotion(ctx, worker, com.ripple.town.core.model.EmotionType.ANXIETY, 55.0, jobLost.id)
         scheduleShock(ctx, worker, jobLost.id)
         ConsequenceEngine.onEvent(ctx, jobLost)
+        return true
     }
 
     // ============================================================
@@ -1426,4 +1994,26 @@ object EconomySystem {
     const val CLOSURE_DAYS = 18
     const val EXPANSION_BALANCE = 9_000.0
     val PUBLIC_SERVICES = setOf(BusinessType.CLINIC, BusinessType.SCHOOL, BusinessType.TOWN_HALL)
+
+    // ============================================================
+    // Staffing ramp (Economy Calibration Gate, Phase 2, added 2026-07-11) — see
+    // docs/simulation-rules.md "Staffing ramp". `GoalSystem.openBusiness`/
+    // `succeedViaNewEntrepreneur` already open owner-only (no second hire at creation) — this
+    // constant set is the other half: a real, sustained-demand gate on the FIRST and every
+    // subsequent hire after opening, replacing the old single-day `demand > 62` check.
+    // ============================================================
+
+    /** `biz.demand` must be at or above this for a day to count toward the hiring streak — the
+     *  same 62 the old single-day gate used, kept as the "genuinely busy" bar rather than
+     *  retuned, since Phase 1 already confirmed demand/reputation levels are sane; only the
+     *  *sustained* requirement is new. */
+    const val SUSTAINED_DEMAND_HIRING_THRESHOLD = 62.0
+
+    /** Consecutive qualifying days required before a hire is even considered — a real "sustained
+     *  demand" bar (about two working weeks), not one lucky day. */
+    const val SUSTAINED_DEMAND_HIRING_DAYS = 10
+
+    /** Balance floor before a hire is considered — unchanged from the old flat gate; this pass's
+     *  new lever is the sustained-demand streak above, not the cash-floor number. */
+    const val HIRING_BALANCE_FLOOR = 1_500.0
 }

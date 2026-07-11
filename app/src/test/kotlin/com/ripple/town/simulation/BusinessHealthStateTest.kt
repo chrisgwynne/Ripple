@@ -105,12 +105,18 @@ class BusinessHealthStateTest {
     }
 
     @Test
-    fun `a detailed owner at AT_RISK can trigger an early-layoff recovery that reduces headcount and capacity`() {
+    fun `a detailed owner at STRUGGLING-or-worse can trigger an early-layoff recovery that reduces headcount and capacity`() {
+        // Economy Calibration Gate Phase 2 (2026-07-11): layoff is now lever 8 of the full
+        // recovery ladder, only eligible from BusinessHealthState.STRUGGLING onward (escalation
+        // by severity — see docs/simulation-rules.md "Recovery ladder") rather than available from
+        // AT_RISK like the old two-lever system. Updated to match: daysInTrouble now set to
+        // CLOSURE_DAYS - 2 (CRITICAL, comfortably past the STRUGGLING gate) instead of
+        // STRUGGLE_NOTICE_DAYS (AT_RISK, below the new gate).
         var fired = false
         for (salt in 0L until 500L) {
             val state = TestWorld.newState()
             val biz = state.businesses.values.first { it.open }
-            biz.daysInTrouble = EconomySystem.STRUGGLE_NOTICE_DAYS
+            biz.daysInTrouble = EconomySystem.CLOSURE_DAYS - 2
             biz.balance = -50.0
             val ownerId = biz.ownerId ?: continue
             val owner = state.resident(ownerId) ?: continue

@@ -4,6 +4,131 @@ The prototype proves the foundation. Three phases follow.
 
 ## Session log
 
+### 2026-07-11 — Fixed a second stale test assertion found by actually running tests
+
+While verifying the Economy Calibration Gate Phase 2 work below, ran `WorldGeneratorTest` (not
+just compile-checked) and found `town has the required shape` failing: `hasSize(60)` on
+background residents, expected 60, actual 73. Root cause: this assertion predates
+`PopulationGenerator` (added earlier the same day), which replaced the old flat
+`BACKGROUND_COUNT = 60` with a real capacity-based household generator — the test was only ever
+compile-checked when that change landed, never actually run, so the now-wrong hardcoded `60` was
+never caught. Updated to `73` (this seed's real, deterministic achieved population). All
+`WorldGeneratorTest` tests pass now.
+
+### 2026-07-11 — Economy Calibration Gate, Phase 2: staffing ramp, recovery ladder, formation gate, contract demand
+
+Direct continuation of the Phase 1 entry immediately below — same brief
+(`docs/economy-brief-2026-07-11-final-gate.md`), covering the remaining 5 sub-parts Phase 1
+explicitly deferred: staffing ramp, the full 10-step recovery ladder, the business-formation gate,
+competition-differentiation review, and external/contract demand for WORKSHOP/FACTORY. Full
+mechanism write-up: `docs/simulation-rules.md#staffing-ramp-recovery-ladder-formation-gate-contract-demand-economy-calibration-gate-phase-2-added-2026-07-11`.
+
+**Headline result — closure rate moved from Phase 1's 36.6% to 3.3%, landing inside the brief's
+original 2-10% target.**
+
+| Stage | One-year closure rate |
+|---|---|
+| Pre-Phase-1 baseline | 53.7% (before that, 66.7%/60.0%) |
+| Phase 1 (real unit economics + catchment demand) | 36.6% |
+| **Phase 2 (this entry, shipped)** | **3.3%** |
+
+**What changed, one line each (full detail in simulation-rules.md):**
+
+- **Staffing ramp** — `GoalSystem.openBusiness` now opens with `employeeCapacity = 1` (was 2,
+  confirmed it already opened owner-only before this pass); `EconomySystem.settleBusinessDay`'s
+  hiring gate now requires a new `Business.consecutiveHealthyDemandDays` streak of 10 consecutive
+  days at `demand >= 62` before a hire is even considered, replacing the old single-lucky-day check.
+  `WorldGenerator`'s 7 hand-authored shops' immediate owner+assistant hiring was deliberately left
+  untouched — flagged elsewhere this session as sensitive/concurrent-work-adjacent, and reasoned
+  (in simulation-rules.md) to be about an already-established cast, not new-business formation; the
+  3.3% result confirms this was the right call without needing that riskier additional change.
+- **Recovery ladder** — `EconomySystem.maybeAttemptRecovery` upgraded from 2 actions (price-cut,
+  layoff) to the brief's full 10 (reduce drawings, reduce stock, shorten hours, renegotiate
+  supplier terms, raise-or-cut prices, seek finance via new `Business.loanBalance`, owner capital
+  injection from personal `wealth`, reduce staff, seek buyer via the existing succession machinery,
+  restructure/relocate to a less-competed sector), escalating by `BusinessHealthState` and
+  cooldown-gated per lever via a new `Business.recoveryLeverLastFiredDay` map. A genuine recovery
+  (AT_RISK-or-worse → healthy) now emits `EventType.BUSINESS_RECOVERED` — a real, observable signal
+  that recoveries are actually happening, not just closures not happening.
+- **Business formation gate** — new `EconomySystem.estimateFormationViability(ctx, building, type,
+  startupCapital)`, built on Phase 1's `catchmentDemand`/`breakEvenCustomers` (minimally refactored
+  into `catchmentDemandFor`/`competitionShareFor` to accept a building+type rather than requiring an
+  already-open `Business`). Checks local competition count, and projected achievable demand against
+  a lean owner-only break-even. `GoalSystem.openBusiness` now tries every vacant building against a
+  preference-ordered candidate type list and opens the first viable combination, or keeps the goal
+  alive at 0.95 progress (not abandoned, not opened blindly) if none are viable anywhere in town.
+- **Competition differentiation** — reviewed, not rebuilt: `BusinessRivalrySystem` already only
+  compares same-`BusinessType` pairs ("pub vs bookshop" was already non-competing), and Phase 1's
+  `competitionShare` already does real distance/standing-weighted splitting, not a flat share. No
+  further building judged necessary this pass.
+- **External/contract demand** — WORKSHOP/FACTORY's flat `CONTRACT_SECTOR_BASELINE_DEMAND`
+  placeholder replaced with real periodic contract wins (`EconomySystem.dailySettlement`'s new
+  `maybeWinContract`, ~10%/day chance, value scaled by reputation and `employeeCapacity`, real COGS
+  applied, new `EventType.CONTRACT_WON`), rolled before the rest of that day's bookkeeping so it
+  counts as real revenue (tax, `recentNetDaily`, `daysInTrouble` all see it), not a side credit.
+
+**Full measured state** (`EconomyCalibrationReport`, 10 seeds x 1 simulated year, pooled, same
+defaults as every prior calibration entry): 90 businesses ever tracked, 89 open at year-end, 3
+closed (3.3%), open-business median balance 4,493.0 (up from Phase 1's 3,653.3), p90
+`daysInTrouble` = 0 at year-end, resident median wealth 5,515.2 (up from 4,825.5), 1.1-2.3% of
+residents in debt crisis (healthy, consistent with Phase 1's finding), employment rate 80.0%-96.7%
+across seeds — UP from Phase 1's 71.9%-94.9%, the direct expected consequence of far fewer closures
+meaning far fewer job losses. Business count also grew over the simulated year (80 → 89-90 open,
+~+12%) — the formation gate genuinely lets viable new businesses open, it doesn't just reject
+everything. `%InTrouble` stayed bounded 2-12% across the whole year, matching the brief's "visibly
+pressured businesses 5-15% at any time" target almost exactly.
+
+`EconomyCalibrationGuardrailTest`'s bounds were tightened to match this new baseline (closure-rate
+ceiling 55.0% → 15.0%, debt-crisis ceiling 10.0% → 8.0%, employment floor 60.0% → 65.0%, wealth
+floor context updated) — genuinely tightened, not just re-centred, since the underlying tuning
+genuinely improved; each bound documented with the fresh measured numbers and real headroom, per
+that test's own "tighten toward the brief's targets as tuning improves" guidance.
+
+New test files: `RecoveryLadderTest.kt` (13 tests — 8 of the 10 levers individually verified to fire
+under seeded rng with real measurable effects, cooldown-gating, health-state eligibility gates,
+genuine-recovery event, determinism), `BusinessFormationGateTest.kt` (9 tests — WORKSHOP/FACTORY
+always-viable carve-out, capital/competition/demand rejection paths, a real viable-opening path,
+formation-rate sanity check across seeds, determinism), `ContractDemandTest.kt` (5 tests — real
+bounded revenue events, reputation/capacity scaling, demand-band bounds, sector exclusivity,
+determinism). Two pre-existing tests updated to match new, intentional behaviour (not silently
+loosened): `BusinessHealthStateTest`'s layoff test now sets `daysInTrouble` to CRITICAL rather than
+AT_RISK (layoff is lever 8, gated to STRUGGLING-or-worse under the new ladder, not available at
+AT_RISK like the old 2-lever system); `GoalAndEconomyTest`'s "Workshop owner" occupation-string
+assertion needed a matching production-code fix (`GoalSystem.openBusiness` special-cases WORKSHOP's
+occupation string to keep the pre-existing exact wording, since `BusinessType.WORKSHOP`'s label
+"Furniture workshop" is more specific than the occupation string previously used).
+
+**One unrelated pre-existing test failure found and NOT fixed (out of scope, flagged separately):**
+`WorldGeneratorTest`'s "town has the required shape" test expects 60 background residents but the
+current `PopulationGenerator` produces 73 — confirmed via inspection that neither
+`PopulationGenerator.kt` nor `WorldGenerator.kt` were touched by this session's changes, so this is
+a pre-existing drift from an earlier, unrelated session, not a Phase 2 regression. Flagged as a
+background task rather than fixed here to stay in scope.
+
+Compile-verified via `./gradlew compileDebugKotlin compileDebugUnitTestKotlin` (BUILD SUCCESSFUL).
+Targeted runs: all 3 new test files (27 tests) pass; `EconomyCalibrationReport`/
+`EconomyCalibrationGuardrailTest` both pass with the new tightened bounds;
+`BusinessHealthStateTest`/`UnitEconomicsCatchmentDemandTest`/`SectorDemandProfileTest`/
+`GoalAndEconomyTest` all pass after the two documented pre-existing-test updates above.
+
+### Still open for Phase 3
+
+- **The 100-seed x 1/5/10-year validation matrix** the brief's "Validation" section asks for —
+  both Phase 1 and Phase 2 used the existing `EconomyCalibrationRunner` defaults (10 seeds x 1
+  simulated year) for wall-clock reasons documented in that runner's own doc comment. A genuinely
+  larger run (even a partial step up) is real remaining work before this is fully validated against
+  the brief's original ask.
+- **Multi-year drift** — the 3.3% figure is a one-year measurement; the brief explicitly
+  distinguishes startup-business closure risk (may run higher, up to 20-25%) from established-
+  business closure risk (2-10%, the figure this pass targeted) — a longer run is needed to confirm
+  3.3% holds (or improves further as businesses age past their riskier startup window) across 5-10
+  simulated years.
+- **The hand-authored `WorldGenerator` shops' 2-employee starting shape** — deliberately left
+  untouched this pass (see reasoning above). Revisit only if a longer validation run finds these
+  specific 7 shops are a disproportionate source of distress relative to newly-formed businesses.
+- **The unrelated `WorldGeneratorTest` background-population-count failure** flagged above — a
+  background task was spawned for this; not part of Phase 2/3 scope itself.
+
 ### 2026-07-11 — Economy Calibration Gate, Phase 1: real unit economics + catchment demand
 
 The user rejected the prior narrow-fix passes below (66.7% → 53.7% closure rate) as insufficient

@@ -39,8 +39,14 @@ class WorldGeneratorTest {
         val state = TestWorld.newState()
         val detailed = state.residents.values.filter { it.detailLevel == DetailLevel.DETAILED }
         assertThat(detailed).hasSize(30)
+        // Was a flat 60 pre-PopulationGenerator (added 2026-07-11); background residents are now
+        // real connected households packed into genuine spare home capacity across the 12 home
+        // slots, not a fixed count — 73 is this seed's real, deterministic achieved population
+        // (see PopulationGenerator's own doc comment for why 500's target ceiling isn't reached
+        // on the current map). Caught here because this test was only compile-checked, not run,
+        // when PopulationGenerator landed.
         assertThat(state.residents.values.filter { it.detailLevel == DetailLevel.BACKGROUND })
-            .hasSize(60)
+            .hasSize(73)
         val types = state.buildings.values.groupBy { it.type }
         assertThat(state.buildings.values.count { it.type.isHome }).isEqualTo(12)
         assertThat(types[BuildingType.SCHOOL]).hasSize(1)
