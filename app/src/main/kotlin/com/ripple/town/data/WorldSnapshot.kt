@@ -18,6 +18,7 @@ import com.ripple.town.core.model.SpriteConfig
 import com.ripple.town.core.model.TimeOfDay
 import com.ripple.town.core.model.TownMap
 import com.ripple.town.core.model.Weather
+import com.ripple.town.core.model.OpportunityStatus
 import com.ripple.town.core.model.RelationshipKind
 import com.ripple.town.core.model.WorldState
 
@@ -74,7 +75,11 @@ data class WorldUi(
      */
     val families: List<FamilyLegacyUi> = emptyList(),
     /** Active community groups, sorted by member count descending, capped at 6. */
-    val communityGroups: List<CommunityGroupUi> = emptyList()
+    val communityGroups: List<CommunityGroupUi> = emptyList(),
+    /** Population statistics panel: births/deaths/migration over last 30 sim-days. */
+    val populationStats: PopulationStatsUi = PopulationStatsUi(),
+    /** Top 5 OPEN opportunities sorted by capital required ascending. */
+    val opportunities: List<OpportunityUi> = emptyList()
 ) {
     val residentsById: Map<Long, ResidentUi> by lazy { residents.associateBy { it.id } }
     val buildingsById: Map<Long, BuildingUi> by lazy { buildings.associateBy { it.id } }
@@ -151,6 +156,36 @@ data class TownStatsUi(
     val averageHealth: Double,
     val averageWealth: Double,
     val employedCount: Int
+)
+
+/**
+ * Population statistics over the last 30 sim-days, shown in the "At a glance" panel.
+ * Safe defaults (all zeros/empty strings) so the field can be added to [WorldUi] without
+ * a migration — the SnapshotBuilder always overwrites it.
+ */
+@Immutable
+data class PopulationStatsUi(
+    val totalPopulation: Int = 0,
+    val households: Int = 0,
+    val births: Int = 0,        // last 30 sim-days
+    val deaths: Int = 0,        // last 30 sim-days
+    val arrivals: Int = 0,      // last 30 sim-days (migration in)
+    val departures: Int = 0,    // last 30 sim-days (migration out)
+    val netMigration: Int = 0,  // arrivals - departures
+    val ageStructure: String = "",   // e.g. "12% children · 28% working age · 18% elderly"
+    val vacantHomes: Int = 0,
+    val openOpportunities: Int = 0   // count of OPEN opportunities
+)
+
+/**
+ * A single development/business opportunity surfaced to the "At a glance" panel.
+ */
+@Immutable
+data class OpportunityUi(
+    val type: String,            // human-readable opportunity type
+    val district: String,        // district name, or "Town-wide"
+    val evidence: String,
+    val capitalRequired: String  // formatted £ string, e.g. "£12,000"
 )
 
 @Immutable
@@ -372,6 +407,60 @@ object SnapshotBuilder {
                     vacancyRate = d.vacancyRate
                 )
             }
+        // ── Population stats (last 30 sim-days) ──────────────────────────────
+        val cutoff30Days = state.time - 30L * SimTime.MINUTES_PER_DAY
+        val living = state.livingResidents()
+        val births30 = living.count { r ->
+            r.bornAt > cutoff30Days && (r.motherId != null || r.fatherId != null)
+        }
+        val deaths30 = state.residents.values.count { r ->
+            !r.alive && r.diedAt != null && r.diedAt!! > cutoff30Days
+        }
+        val arrivals30 = state.migrationHistory.count { it.isArrival && it.tick > cutoff30Days }
+        val departures30 = state.migrationHistory.count { !it.isArrival && it.tick > cutoff30Days }
+        val activeHouseholds = state.households.values.count { hh ->
+            hh.memberIds.any { id -> state.residents[id]?.alive == true }
+        }
+        val vacantHomes = state.homes().count { it.buildingState == BuildingState.VACANT }
+        val openOpportunitiesCount = state.opportunities.values.count { it.status == OpportunityStatus.OPEN }
+        val ageStructureStr = if (living.isEmpty()) "" else {
+            val children = living.count { r ->
+                (state.time - r.bornAt) / SimTime.MINUTES_PER_DAY / SimTime.DAYS_PER_YEAR < 18
+            }
+            val elderly = living.count { r ->
+                (state.time - r.bornAt) / SimTime.MINUTES_PER_DAY / SimTime.DAYS_PER_YEAR >= 65
+            }
+            val working = living.size - children - elderly
+            val total = living.size.coerceAtLeast(1)
+            "${(children * 100) / total}% children · ${(working * 100) / total}% working age · ${(elderly * 100) / total}% elderly"
+        }
+        val populationStats = PopulationStatsUi(
+            totalPopulation = living.size,
+            households = activeHouseholds,
+            births = births30,
+            deaths = deaths30,
+            arrivals = arrivals30,
+            departures = departures30,
+            netMigration = arrivals30 - departures30,
+            ageStructure = ageStructureStr,
+            vacantHomes = vacantHomes,
+            openOpportunities = openOpportunitiesCount
+        )
+        // ── Opportunities (top 5 OPEN, sorted by capital required asc) ───────
+        val opportunitiesList = state.opportunities.values
+            .filter { it.status == OpportunityStatus.OPEN }
+            .sortedBy { it.estimatedCapitalRequired }
+            .take(5)
+            .map { opp ->
+                val districtName = opp.districtId?.let { state.district(it)?.name } ?: "Town-wide"
+                val typeLabel = opp.type.name.lowercase()
+                    .replace('_', ' ')
+                    .replaceFirstChar { it.uppercase() }
+                val capital = if (opp.estimatedCapitalRequired > 0)
+                    "£${"%,.0f".format(opp.estimatedCapitalRequired)}" else "Unknown"
+                OpportunityUi(type = typeLabel, district = districtName, evidence = opp.evidence, capitalRequired = capital)
+            }
+
         return WorldUi(
             worldSeed = state.seed,
             townName = state.townName,
@@ -446,7 +535,9 @@ object SnapshotBuilder {
                         leaderName = leader?.fullName ?: "Unknown",
                         sharedMemoryCount = g.sharedMemories.size
                     )
-                }
+                },
+            populationStats = populationStats,
+            opportunities = opportunitiesList
         )
     }
 

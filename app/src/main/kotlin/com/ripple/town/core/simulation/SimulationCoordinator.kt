@@ -148,6 +148,9 @@ class SimulationCoordinator(
             BudgetSystem.updateDaily(ctx)
             DevelopmentSystem.updateDaily(ctx)
             VacancySystem.updateDaily(ctx)
+            if (dayIndex % DemolitionSystem.UPDATE_INTERVAL_DAYS == 0L) {
+                DemolitionSystem().updateMonthly(ctx)
+            }
             if (dayIndex % DistrictCharacterSystem.UPDATE_INTERVAL_DAYS == 0L) {
                 DistrictCharacterSystem.updateWeekly(ctx)
             }

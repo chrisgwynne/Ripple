@@ -8,6 +8,7 @@ import com.ripple.town.core.model.DevelopmentType
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.EventVisibility
 import com.ripple.town.core.model.LifeStage
+import com.ripple.town.core.model.Resident
 import com.ripple.town.core.model.ServicePressure
 import com.ripple.town.core.model.ServiceType
 import com.ripple.town.core.model.SimTime
@@ -88,6 +89,147 @@ object TownNeedsPlanner {
         )
 
         for ((k, p) in pressures) state.servicePressures[k.name] = p
+
+        // --- Phase 6: expanded service demand for 15 additional ServiceTypes ---
+        val ageOf: (Resident) -> Int = { r -> SimTime.ageYears(r.bornAt, state.time) }
+        val allLiving = state.livingResidents()
+
+        // CHILDCARE: demand = children under 6; capacity = nursery building capacity
+        val childcareDemand = allLiving.count { ageOf(it) < 6 }.coerceAtLeast(1)
+        val childcareCapacity = state.buildings.values
+            .filter { it.type == BuildingType.NURSERY }
+            .sumOf { it.capacity }
+        state.servicePressures[ServiceType.CHILDCARE.name] =
+            pressure(ServiceType.CHILDCARE, childcareDemand, childcareCapacity)
+
+        // ELDERLY_CARE: demand = residents 75+; capacity = hospital half-beds + clinic quarter-beds
+        val elderlyDemand = allLiving.count { ageOf(it) >= 75 }.coerceAtLeast(1)
+        val elderlyCapacity =
+            state.buildings.values.filter { it.type == BuildingType.HOSPITAL }.sumOf { it.capacity / 2 } +
+            state.buildings.values.filter { it.type == BuildingType.CLINIC }.sumOf { it.capacity / 4 }
+        state.servicePressures[ServiceType.ELDERLY_CARE.name] =
+            pressure(ServiceType.ELDERLY_CARE, elderlyDemand, elderlyCapacity)
+
+        // FOOD_RETAIL: demand = pop / 50; capacity = open grocer + supermarket
+        val foodRetailDemand = (pop / 50).coerceAtLeast(1)
+        val foodRetailCapacity = state.buildings.values
+            .filter { it.type == BuildingType.GROCER || it.type == BuildingType.SUPERMARKET }
+            .filter { state.businessAt(it.id)?.open == true }
+            .sumOf { it.capacity }
+        state.servicePressures[ServiceType.FOOD_RETAIL.name] =
+            pressure(ServiceType.FOOD_RETAIL, foodRetailDemand, foodRetailCapacity)
+
+        // CONVENIENCE_RETAIL: demand = pop / 30; capacity = open grocer + half of open pharmacy
+        val convenienceDemand = (pop / 30).coerceAtLeast(1)
+        val convenienceCapacity =
+            state.buildings.values.filter { it.type == BuildingType.GROCER }
+                .filter { state.businessAt(it.id)?.open == true }.sumOf { it.capacity } +
+            state.buildings.values.filter { it.type == BuildingType.PHARMACY }
+                .filter { state.businessAt(it.id)?.open == true }.sumOf { it.capacity / 2 }
+        state.servicePressures[ServiceType.CONVENIENCE_RETAIL.name] =
+            pressure(ServiceType.CONVENIENCE_RETAIL, convenienceDemand, convenienceCapacity)
+
+        // CAFE_DINING: demand = employed adults / 35; capacity = open café + bakery
+        val employedAdults = state.employments.values.count { it.active &&
+            state.resident(it.residentId)?.inTown == true }
+        val cafeDemand = (employedAdults / 35).coerceAtLeast(1)
+        val cafeCapacity = state.buildings.values
+            .filter { it.type == BuildingType.CAFE || it.type == BuildingType.BAKERY }
+            .filter { state.businessAt(it.id)?.open == true }
+            .sumOf { it.capacity }
+        state.servicePressures[ServiceType.CAFE_DINING.name] =
+            pressure(ServiceType.CAFE_DINING, cafeDemand, cafeCapacity)
+
+        // RESTAURANT_DINING: demand = pop / 30; capacity = open restaurant + pub + takeaway
+        val restaurantDemand = (pop / 30).coerceAtLeast(1)
+        val restaurantCapacity = state.buildings.values
+            .filter { it.type == BuildingType.RESTAURANT || it.type == BuildingType.PUB ||
+                      it.type == BuildingType.TAKEAWAY }
+            .filter { state.businessAt(it.id)?.open == true }
+            .sumOf { it.capacity }
+        state.servicePressures[ServiceType.RESTAURANT_DINING.name] =
+            pressure(ServiceType.RESTAURANT_DINING, restaurantDemand, restaurantCapacity)
+
+        // NIGHTLIFE: demand = residents 18-35 / 20; capacity = open pub + nightclub
+        val nightlifeDemand = (allLiving.count { ageOf(it) in 18..35 } / 20).coerceAtLeast(1)
+        val nightlifeCapacity = state.buildings.values
+            .filter { it.type == BuildingType.PUB || it.type == BuildingType.NIGHTCLUB }
+            .filter { state.businessAt(it.id)?.open == true }
+            .sumOf { it.capacity }
+        state.servicePressures[ServiceType.NIGHTLIFE.name] =
+            pressure(ServiceType.NIGHTLIFE, nightlifeDemand, nightlifeCapacity)
+
+        // PHARMACY_RETAIL: demand = pop / 120; capacity = open pharmacies
+        val pharmacyDemand = (pop / 120).coerceAtLeast(1)
+        val pharmacyCapacity = state.buildings.values
+            .filter { it.type == BuildingType.PHARMACY }
+            .filter { state.businessAt(it.id)?.open == true }
+            .sumOf { it.capacity }
+        state.servicePressures[ServiceType.PHARMACY_RETAIL.name] =
+            pressure(ServiceType.PHARMACY_RETAIL, pharmacyDemand, pharmacyCapacity)
+
+        // HARDWARE_RETAIL: demand = buildings with condition < 70, /10; capacity = open hardware
+        val hardwareDemand = (state.buildings.values.count { it.condition < 70 } / 10).coerceAtLeast(1)
+        val hardwareCapacity = state.buildings.values
+            .filter { it.type == BuildingType.HARDWARE }
+            .filter { state.businessAt(it.id)?.open == true }
+            .sumOf { it.capacity }
+        state.servicePressures[ServiceType.HARDWARE_RETAIL.name] =
+            pressure(ServiceType.HARDWARE_RETAIL, hardwareDemand, hardwareCapacity)
+
+        // OFFICE_SPACE: demand = pop / 80; capacity = open offices
+        val officeDemand = (pop / 80).coerceAtLeast(1)
+        val officeCapacity = state.buildings.values
+            .filter { it.type == BuildingType.OFFICE }
+            .filter { state.businessAt(it.id)?.open == true }
+            .sumOf { it.capacity }
+        state.servicePressures[ServiceType.OFFICE_SPACE.name] =
+            pressure(ServiceType.OFFICE_SPACE, officeDemand, officeCapacity)
+
+        // INDUSTRIAL_SPACE: demand = pop / 150; capacity = open factory + warehouse + workshop
+        val industrialDemand = (pop / 150).coerceAtLeast(1)
+        val industrialCapacity = state.buildings.values
+            .filter { it.type == BuildingType.FACTORY || it.type == BuildingType.WAREHOUSE ||
+                      it.type == BuildingType.WORKSHOP }
+            .filter { state.businessAt(it.id)?.open == true }
+            .sumOf { it.capacity }
+        state.servicePressures[ServiceType.INDUSTRIAL_SPACE.name] =
+            pressure(ServiceType.INDUSTRIAL_SPACE, industrialDemand, industrialCapacity)
+
+        // COMMUNITY_FACILITIES: demand = pop / 40; capacity = community centre + sports hall + library
+        val communityDemand = (pop / 40).coerceAtLeast(1)
+        val communityCapacity = state.buildings.values
+            .filter { it.type == BuildingType.COMMUNITY_CENTRE ||
+                      it.type == BuildingType.SPORTS_HALL || it.type == BuildingType.LIBRARY }
+            .sumOf { it.capacity }
+        state.servicePressures[ServiceType.COMMUNITY_FACILITIES.name] =
+            pressure(ServiceType.COMMUNITY_FACILITIES, communityDemand, communityCapacity)
+
+        // LEISURE_SPORTS: demand = residents 10-60 / 25; capacity = sports hall + swimming pool
+        val leisureDemand = (allLiving.count { ageOf(it) in 10..60 } / 25).coerceAtLeast(1)
+        val leisureCapacity = state.buildings.values
+            .filter { it.type == BuildingType.SPORTS_HALL || it.type == BuildingType.SWIMMING_POOL }
+            .sumOf { it.capacity }
+        state.servicePressures[ServiceType.LEISURE_SPORTS.name] =
+            pressure(ServiceType.LEISURE_SPORTS, leisureDemand, leisureCapacity)
+
+        // TRANSPORT: demand = pop / 100; capacity = 80% of demand (permanent slight shortfall)
+        val transportDemand = (pop / 100).coerceAtLeast(1)
+        val transportCapacity = (transportDemand * 0.8).toInt()
+        state.servicePressures[ServiceType.TRANSPORT.name] =
+            pressure(ServiceType.TRANSPORT, transportDemand, transportCapacity)
+
+        // TRADES_SERVICES: demand = buildings with condition < 65, /5; capacity = open workshop + garage
+        val tradesDemand = (state.buildings.values.count { it.condition < 65 } / 5).coerceAtLeast(1)
+        val tradesCapacity = state.buildings.values
+            .filter { it.type == BuildingType.WORKSHOP || it.type == BuildingType.GARAGE }
+            .filter { state.businessAt(it.id)?.open == true }
+            .sumOf { it.capacity }
+        state.servicePressures[ServiceType.TRADES_SERVICES.name] =
+            pressure(ServiceType.TRADES_SERVICES, tradesDemand, tradesCapacity)
+
+        // Detect and log opportunities based on the updated pressures
+        OpportunityDetectionSystem.updateMonthly(ctx)
 
         // Propose development if under pressure and budget allows.
         if (state.municipalBudget.balance < MIN_BUDGET_TO_PROPOSE) return

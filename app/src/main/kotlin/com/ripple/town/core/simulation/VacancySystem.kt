@@ -106,6 +106,7 @@ object VacancySystem {
                     "${building.name} has been condemned as structurally unsafe.",
                     buildingId = building.id, severity = 0.55, visibility = EventVisibility.PUBLIC
                 )
+                // DemolitionSystem.updateMonthly will process this building next month.
             }
         }
     }

@@ -57,12 +57,107 @@ import com.ripple.town.data.DeathSummary
 import com.ripple.town.data.DistrictSummaryUi
 import com.ripple.town.data.EventUi
 import com.ripple.town.data.FamilyLegacyUi
+import com.ripple.town.data.OpportunityUi
 import com.ripple.town.data.PartyStandingUi
 import com.ripple.town.data.PoliticsSummaryUi
 import com.ripple.town.data.TownStatsUi
 import com.ripple.town.data.WorldUi
 
 // ResidentSheetContent moved to ResidentProfileScreen.kt (hero header + tabs redesign).
+
+// --------------------------------------------------- population stats panel
+
+/**
+ * Compact population statistics panel, shown first in the "At a glance" tab.
+ * Covers total population, households, births/deaths (last 30 sim-days),
+ * net migration, age structure, vacant homes, and open opportunities count.
+ */
+@Composable
+private fun PopulationStatsPanel(world: WorldUi) {
+    val stats = world.populationStats
+    SectionTitle("Population")
+    Text(
+        "Total: ${stats.totalPopulation}  ·  Households: ${stats.households}",
+        style = MaterialTheme.typography.bodyMedium
+    )
+    if (stats.ageStructure.isNotBlank()) {
+        Text(
+            stats.ageStructure,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+    Text(
+        "Last 30 days — births: ${stats.births}  ·  deaths: ${stats.deaths}",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    val migrationColor = when {
+        stats.netMigration > 0 -> RippleColors.DeepGreen
+        stats.netMigration < 0 -> RippleColors.DeepBrick
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Text(
+        "Arrivals: ${stats.arrivals}  ·  departures: ${stats.departures}" +
+            "  ·  net: ${if (stats.netMigration >= 0) "+" else ""}${stats.netMigration}",
+        style = MaterialTheme.typography.bodySmall,
+        color = migrationColor
+    )
+    if (stats.vacantHomes > 0) {
+        Text(
+            "Vacant homes: ${stats.vacantHomes}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+// --------------------------------------------------- opportunities panel
+
+/**
+ * Compact opportunities panel in the "At a glance" tab, placed after the Districts section.
+ * Shows the top 5 OPEN opportunities sorted by capital required. Hidden when list is empty.
+ */
+@Composable
+private fun OpportunitiesPanel(world: WorldUi) {
+    if (world.opportunities.isEmpty()) return
+    SectionTitle("Opportunities")
+    world.opportunities.forEach { opp -> OpportunityRow(opp) }
+}
+
+@Composable
+private fun OpportunityRow(opp: OpportunityUi) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(opp.type, style = MaterialTheme.typography.titleSmall)
+            Text(
+                opp.district,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            if (opp.evidence.isNotBlank()) {
+                Text(
+                    opp.evidence,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+            }
+        }
+        Text(
+            opp.capitalRequired,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
 
 // ----------------------------------------------------------- families panel
 
@@ -1042,6 +1137,7 @@ fun TownOverviewSheetContent(world: WorldUi, viewModel: TownViewModel? = null) {
                 }
                 Spacer(Modifier.height(10.dp))
             }
+            PopulationStatsPanel(world)
             SectionTitle("At a glance")
             Text("Population: ${stats.population}", style = MaterialTheme.typography.bodyMedium)
             Text("In work: ${stats.employedCount}", style = MaterialTheme.typography.bodyMedium)
@@ -1067,6 +1163,7 @@ fun TownOverviewSheetContent(world: WorldUi, viewModel: TownViewModel? = null) {
             if (world.districts.isNotEmpty()) {
                 DistrictsPanelContent(world)
             }
+            OpportunitiesPanel(world)
             if (world.families.isNotEmpty()) {
                 FamiliesPanelContent(world)
             }
