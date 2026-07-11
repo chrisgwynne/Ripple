@@ -5,6 +5,7 @@ import com.ripple.town.core.model.BuildingState
 import com.ripple.town.core.model.BuildingType
 import com.ripple.town.core.model.DevelopmentProject
 import com.ripple.town.core.model.DevelopmentStage
+import com.ripple.town.core.model.DevelopmentType
 import com.ripple.town.core.model.EventType
 import com.ripple.town.core.model.EventVisibility
 import com.ripple.town.core.model.SimTime
@@ -48,6 +49,50 @@ object DevelopmentSystem {
                 DevelopmentStage.CONSTRUCTION -> advanceConstruction(ctx, proj)
                 else -> {}
             }
+        }
+        checkRegenerationOpportunities(ctx)
+    }
+
+    /**
+     * Regeneration: condemned buildings with very low value attract opportunistic renovation.
+     * Low land value = cheap entry; a small daily probability triggers a new HOUSING_RESIDENTIAL
+     * or COMMERCIAL_RETAIL project targeted at the condemned site's tile position, skipping the
+     * normal need-planner route. The original condemned building is left in place until
+     * construction completes, at which point VacancySystem detects it as occupied.
+     *
+     * This closes the decline loop: derelict → condemned → cheap land → renovation → regeneration.
+     */
+    private fun checkRegenerationOpportunities(ctx: TickContext) {
+        val state = ctx.state
+        val condemned = state.buildings.values.filter {
+            it.buildingState == BuildingState.CONDEMNED &&
+            state.developmentProjects.values.none { p ->
+                p.buildingId == it.id || (p.tileX == it.origin.x && p.tileY == it.origin.y)
+            }
+        }
+        for (building in condemned) {
+            // Only renovate when land value is genuinely depressed.
+            if (building.value > 15_000.0) continue
+            if (!ctx.rng.nextBoolean(0.008)) continue
+            val devType = if (building.type.isHome) DevelopmentType.HOUSING_RESIDENTIAL
+                          else DevelopmentType.COMMERCIAL_RETAIL
+            val spec = when (devType) {
+                DevelopmentType.HOUSING_RESIDENTIAL -> Triple(BuildingType.TERRACE,  6,  20_000.0)
+                else                                 -> Triple(BuildingType.GROCER,  3,  15_000.0)
+            }
+            val proj = DevelopmentProject(
+                id = state.nextProjectId++,
+                type = devType,
+                districtId = building.districtId,
+                tileX = building.origin.x, tileY = building.origin.y,
+                buildingType = spec.first, capacity = spec.second,
+                estimatedCost = spec.third,
+                stage = DevelopmentStage.APPROVED,   // skip public consultation for opportunistic renovation
+                createdAt = ctx.now, stageChangedAt = ctx.now,
+                note = "Opportunistic renovation of condemned site"
+            )
+            state.developmentProjects[proj.id] = proj
+            building.visibleChanges += "Renovation interest"
         }
     }
 
