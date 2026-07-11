@@ -160,6 +160,12 @@ class SimulationCoordinator(
             if (dayIndex % TownNeedsPlanner.UPDATE_INTERVAL_DAYS == 0L) {
                 TownNeedsPlanner.updateMonthly(ctx)
             }
+            // Phase 6F: entrepreneurs respond to detected opportunities — runs right after
+            // TownNeedsPlanner (which calls OpportunityDetectionSystem) so opportunities
+            // flagged this month are available for response in the same monthly pass.
+            if (dayIndex % OpportunityResponderSystem.UPDATE_INTERVAL_DAYS == 0L) {
+                OpportunityResponderSystem.updateMonthly(ctx)
+            }
             // Mysteries engine: legends accumulate, cold cases decay, eras open/close, anomalies detected monthly.
             LegendSystem.updateDaily(ctx)
             UnsolvedCaseSystem.updateDaily(ctx)
