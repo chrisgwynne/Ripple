@@ -114,9 +114,15 @@ object InterventionEngine {
             }
             InterventionVerb.DIVERT -> {
                 if (r == null) return null
-                val spot = state.buildings.values
-                    .filter { it.type == com.ripple.town.core.model.BuildingType.PARK || it.type == com.ripple.town.core.model.BuildingType.CAFE }
-                    .minByOrNull { it.id } ?: return null
+                val diversions = state.buildings.values.filter {
+                    it.type == com.ripple.town.core.model.BuildingType.PARK || it.type == com.ripple.town.core.model.BuildingType.CAFE
+                }
+                val currentOrigin = r.currentBuildingId?.let { state.building(it)?.origin }
+                val spot = if (currentOrigin != null)
+                    diversions.minByOrNull { currentOrigin.manhattan(it.origin) }
+                else
+                    ctx.rng.pickOrNull(diversions)
+                spot ?: return null
                 ctx.sendTo(r, spot.id, Activity.IDLE, 40, "Took the long way round")
                 "${r.firstName} took a different route today, past ${spot.name}."
             }
@@ -159,7 +165,7 @@ object InterventionEngine {
             InterventionVerb.MISPLACE -> {
                 val b = targetBuildingId?.let { state.building(it) } ?: r?.currentBuildingId?.let { state.building(it) } ?: return null
                 // A small object out of place: someone will linger looking for it.
-                val nearby = state.residentsIn(b.id).minByOrNull { it.id }
+                val nearby = ctx.rng.pickOrNull(state.residentsIn(b.id))
                 nearby?.let { it.activityEndsAt += 45 }
                 "Something ordinary at ${b.name} is not where it was left."
             }

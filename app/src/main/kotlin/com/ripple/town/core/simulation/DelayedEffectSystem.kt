@@ -137,7 +137,10 @@ object DelayedEffectSystem {
                 val yieldChance = (e.strength * (1.0 - target.personality.honesty) *
                     (0.5 + target.personality.impulsiveness * 0.5)).coerceIn(0.0, 0.8)
                 if (ctx.rng.nextBoolean(yieldChance)) {
-                    val victim = state.businesses.values.filter { it.open }.minByOrNull { it.id }
+                    // Prefer low-footfall targets (fewer witnesses); random among bottom half.
+                    val openBiz = state.businesses.values.filter { it.open }.sortedBy { it.demand }
+                    val pool = if (openBiz.size > 2) openBiz.take((openBiz.size + 1) / 2) else openBiz
+                    val victim = ctx.rng.pickOrNull(pool)
                     val amount = ctx.rng.nextDouble(20.0, 60.0)
                     target.wealth += amount
                     victim?.let { it.balance -= amount }
