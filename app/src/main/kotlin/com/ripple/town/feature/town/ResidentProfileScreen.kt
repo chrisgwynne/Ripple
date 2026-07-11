@@ -205,6 +205,16 @@ fun ResidentSheetContent(
         ) {
             PersonalityTab(r)
         }
+        if (r.aspirations.isNotEmpty() || r.identityFacetLabels.isNotEmpty()) {
+            ExpandableCard(
+                title = "Life arc",
+                subtitle = if (r.identityFacetLabels.isNotEmpty()) r.identityFacetLabels.take(2).joinToString(" · ") else null,
+                expanded = expandedCard == ProfileCard.LIFE_ARC,
+                onToggle = { expandedCard = toggle(expandedCard, ProfileCard.LIFE_ARC) }
+            ) {
+                LifeArcCardBody(r)
+            }
+        }
     }
 
     if (showTree) {
@@ -219,7 +229,7 @@ fun ResidentSheetContent(
 }
 
 /** Which of the accordion cards is currently expanded (single-open accordion). */
-private enum class ProfileCard { SUMMARY, RELATIONSHIPS, NEEDS, SKILLS, HOUSEHOLD, STORY, TIMELINE, PERSONALITY }
+private enum class ProfileCard { SUMMARY, RELATIONSHIPS, NEEDS, SKILLS, HOUSEHOLD, STORY, TIMELINE, PERSONALITY, LIFE_ARC }
 
 /** Tapping an already-open card's header collapses it; tapping a closed one opens it (and closes the rest). */
 private fun toggle(current: ProfileCard?, target: ProfileCard): ProfileCard? =
@@ -899,4 +909,47 @@ private fun PersonalityTab(r: ResidentUi) {
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.padding(top = 6.dp)
     )
+}
+
+// ------------------------------------------------------------------ life arc card body
+
+@Composable
+private fun LifeArcCardBody(r: ResidentUi) {
+    if (r.identityFacetLabels.isNotEmpty()) {
+        SectionTitle("Who they are")
+        Text(
+            r.identityFacetLabels.joinToString(" · "),
+            style = MaterialTheme.typography.bodyMedium
+        )
+        androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
+    }
+    if (r.aspirations.isNotEmpty()) {
+        SectionTitle("Aspirations")
+        r.aspirations.forEach { (typeLabel, statusLabel, progress) ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 3.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(typeLabel, style = MaterialTheme.typography.bodyMedium)
+                    Text(statusLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (statusLabel != "Fulfilled") {
+                    StatBar("", progress, modifier = Modifier.width(80.dp))
+                } else {
+                    Text("✓", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+        androidx.compose.foundation.layout.Spacer(Modifier.height(8.dp))
+    }
+    if (r.lifeSatisfactionBreakdown.isNotEmpty()) {
+        SectionTitle("Life satisfaction")
+        r.lifeSatisfactionBreakdown.forEach { (dimension, value) ->
+            StatBar(dimension, value)
+        }
+    }
 }

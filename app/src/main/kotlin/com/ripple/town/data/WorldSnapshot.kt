@@ -2,10 +2,12 @@ package com.ripple.town.data
 
 import androidx.compose.runtime.Immutable
 import com.ripple.town.core.model.Activity
+import com.ripple.town.core.model.AspirationStatus
 import com.ripple.town.core.model.Building
 import com.ripple.town.core.model.BuildingState
 import com.ripple.town.core.model.BuildingType
 import com.ripple.town.core.model.DetailLevel
+import com.ripple.town.core.model.EmergenceRecord
 import com.ripple.town.core.model.LifeStage
 import com.ripple.town.core.model.Mood
 import com.ripple.town.core.model.Personality
@@ -13,7 +15,6 @@ import com.ripple.town.core.model.SimSpeed
 import com.ripple.town.core.model.SimTime
 import com.ripple.town.core.model.SpriteConfig
 import com.ripple.town.core.model.TimeOfDay
-import com.ripple.town.core.model.EmergenceRecord
 import com.ripple.town.core.model.TownMap
 import com.ripple.town.core.model.Weather
 import com.ripple.town.core.model.WorldState
@@ -136,7 +137,15 @@ data class ResidentUi(
     val activeGoalLabels: List<String>,
     val conditionLabels: List<String>,
     val memories: List<MemoryUi>,
-    val relationships: List<RelationUi>
+    val relationships: List<RelationUi>,
+    /** Aspirations: list of (typeLabel, statusLabel, progress 0-100) triples. */
+    val aspirations: List<Triple<String, String, Double>> = emptyList(),
+    /** Identity facets the resident has accumulated (IdentityLabel.label strings). */
+    val identityFacetLabels: List<String> = emptyList(),
+    /** Life-satisfaction overall score (0-100). */
+    val lifeSatisfactionScore: Double = 50.0,
+    /** Life-satisfaction breakdown: list of (dimension, value) pairs. */
+    val lifeSatisfactionBreakdown: List<Pair<String, Double>> = emptyList()
 )
 
 @Immutable
@@ -319,7 +328,24 @@ object SnapshotBuilder {
             memories = if (isBackground) emptyList() else r.memories.sortedByDescending { it.importance }.take(10).map {
                 MemoryUi(it.description, it.emotionalIntensity, it.createdAt, it.type.label)
             },
-            relationships = relationships
+            relationships = relationships,
+            aspirations = if (isBackground) emptyList() else r.aspirations
+                .filter { it.status != AspirationStatus.ABANDONED }
+                .sortedWith(compareBy({ it.status == AspirationStatus.FULFILLED }, { -it.progress }))
+                .take(5)
+                .map { Triple(it.type.label, it.status.name.lowercase().replaceFirstChar { c -> c.uppercase() }, it.progress) },
+            identityFacetLabels = if (isBackground) emptyList() else r.identityFacets
+                .sortedByDescending { it.strength }
+                .map { it.label.label },
+            lifeSatisfactionScore = r.lifeSatisfaction.overall(),
+            lifeSatisfactionBreakdown = if (isBackground) emptyList() else listOf(
+                "Family" to r.lifeSatisfaction.family,
+                "Career" to r.lifeSatisfaction.career,
+                "Purpose" to r.lifeSatisfaction.purpose,
+                "Community" to r.lifeSatisfaction.community,
+                "Legacy" to r.lifeSatisfaction.legacy,
+                "Health" to r.lifeSatisfaction.health
+            )
         )
     }
 
