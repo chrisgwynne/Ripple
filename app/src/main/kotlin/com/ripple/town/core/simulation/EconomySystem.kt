@@ -826,7 +826,7 @@ object EconomySystem {
         biz.closedAt = ctx.now
         val building = state.building(biz.buildingId)
         building?.abandoned = true
-        building?.visibleChanges?.add("Shutters down — closed")
+        building?.visibleChanges?.add("${SimTime.formatDate(ctx.now)} — Shutters down — closed")
         // Cause payload (added 2026-07-10, see docs/simulation-rules.md "Events, causes,
         // importance"): "immediate" is just `why` — already the daysInTrouble-based reason
         // string this function has always taken, genuinely descriptive on its own.
@@ -986,7 +986,7 @@ object EconomySystem {
         biz.balance -= 800.0
         val building = ctx.state.building(biz.buildingId)
         building?.upgradeLevel = (building?.upgradeLevel ?: 0) + 1
-        building?.visibleChanges?.add("Extension added")
+        building?.visibleChanges?.add("${SimTime.formatDate(ctx.now)} — Extension added")
         building?.value = (building?.value ?: 0.0) + 6_000.0
         val e = ctx.emit(
             EventType.BUSINESS_EXPANDED,
@@ -1736,7 +1736,7 @@ object EconomySystem {
             BusinessType.TAILOR -> BuildingType.TAILOR
             else -> building.type
         }
-        building?.visibleChanges?.add("Reopened as a different kind of shop")
+        building?.visibleChanges?.add("${SimTime.formatDate(ctx.now)} — Reopened as a different kind of shop")
 
         val oldTypeName = biz.type.label
         val bizType = newType
@@ -1967,7 +1967,7 @@ object EconomySystem {
         biz.reputation = biz.reputation.coerceIn(30.0, 60.0) // some standing carries over, but softened
         building.abandoned = false
         building.ownerId = newOwner.id
-        building.visibleChanges += "Reopened under new ownership"
+        building.visibleChanges += "${SimTime.formatDate(ctx.now)} — Reopened under new ownership"
     }
 
     /** A fresh resident opens something new in the shell of a business that stayed shut long
@@ -1992,7 +1992,7 @@ object EconomySystem {
         building.abandoned = false
         building.ownerId = founder.id
         building.condition = 65.0
-        building.visibleChanges += "New owner, doors open again"
+        building.visibleChanges += "${SimTime.formatDate(ctx.now)} — New owner, doors open again"
 
         val biz = Business(
             id = state.nextBusinessId++,

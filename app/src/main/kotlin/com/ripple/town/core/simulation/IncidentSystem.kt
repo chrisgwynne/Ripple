@@ -144,7 +144,7 @@ object IncidentSystem {
         val building = ctx.state.building(buildingId)
         building?.let {
             it.condition = (it.condition - ctx.rng.nextDouble(6.0, 16.0)).coerceAtLeast(5.0)
-            it.visibleChanges += "Fresh scrawl on the wall"
+            it.visibleChanges += "${SimTime.formatDate(ctx.now)} — Fresh scrawl on the wall"
             if (it.visibleChanges.size > 6) it.visibleChanges.removeAt(0)
         }
         val event = ctx.emit(

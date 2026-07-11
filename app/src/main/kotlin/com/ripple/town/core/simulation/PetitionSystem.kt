@@ -240,7 +240,7 @@ object PetitionSystem {
                 val target = petition.targetBuildingId?.let { state.building(it) }
                 if (target != null) {
                     target.noise = (target.noise - NOISE_REDUCTION_ON_SUCCESS).coerceAtLeast(0.0)
-                    target.visibleChanges += "Noise abatement notice"
+                    target.visibleChanges += "${SimTime.formatDate(ctx.now)} — Noise abatement notice"
                     if (target.visibleChanges.size > 6) target.visibleChanges.removeAt(0)
                 }
                 "The town council has upheld the petition against ${target?.name ?: "a noisy premises"} — quieter hours are now in force."

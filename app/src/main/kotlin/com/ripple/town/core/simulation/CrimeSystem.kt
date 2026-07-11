@@ -5,6 +5,7 @@ import com.ripple.town.core.model.EventVisibility
 import com.ripple.town.core.model.LifeStage
 import com.ripple.town.core.model.MemoryType
 import com.ripple.town.core.model.Resident
+import com.ripple.town.core.model.SimTime
 import com.ripple.town.core.model.WorldEvent
 
 /**
@@ -545,7 +546,7 @@ object CrimeSystem {
             val building = state.building(targetBiz.buildingId)
             building?.let {
                 it.condition = (it.condition - ctx.rng.nextDouble(15.0, 30.0)).coerceAtLeast(5.0)
-                it.visibleChanges += "Scorch marks by the door"
+                it.visibleChanges += "${SimTime.formatDate(ctx.now)} — Scorch marks by the door"
                 if (it.visibleChanges.size > 6) it.visibleChanges.removeAt(0)
             }
             val rivalryEvent = mostRecentEventOfType(ctx, EventType.RIVALRY_FORMED, aggressor.id, null)

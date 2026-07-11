@@ -178,7 +178,7 @@ object SeasonalEventSystem {
 
         hit.condition = (hit.condition - ctx.rng.nextDouble(FLOOD_CONDITION_MIN, FLOOD_CONDITION_MAX))
             .coerceAtLeast(5.0)
-        hit.visibleChanges += "Flood damage"
+        hit.visibleChanges += "${SimTime.formatDate(ctx.now)} — Flood damage"
         if (hit.visibleChanges.size > 6) hit.visibleChanges.removeAt(0)
 
         val occupants = state.residentsIn(hit.id)

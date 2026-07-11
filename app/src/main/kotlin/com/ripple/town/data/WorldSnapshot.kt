@@ -212,7 +212,8 @@ data class BuildingUi(
     val businessEmployeeIds: List<Long> = emptyList(),
     val businessClosedAt: Long? = null,
     val districtName: String? = null,
-    val districtCharacter: String? = null
+    val districtCharacter: String? = null,
+    val constructedAt: Long? = null
 )
 
 /** Simulation status shown while catching up after reopening the app. */
@@ -423,7 +424,8 @@ object SnapshotBuilder {
             businessEmployeeIds = biz?.let { bz -> state.employeesOf(bz.id).map { it.residentId } } ?: emptyList(),
             businessClosedAt = biz?.closedAt,
             districtName = b.districtId?.let { state.district(it)?.name },
-            districtCharacter = b.districtId?.let { state.district(it)?.character?.label }
+            districtCharacter = b.districtId?.let { state.district(it)?.character?.label },
+            constructedAt = if (b.constructedAt > 0L) b.constructedAt else null
         )
     }
 }

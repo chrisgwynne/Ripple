@@ -97,7 +97,7 @@ object DevelopmentSystem {
                 note = "Opportunistic renovation of condemned site"
             )
             state.developmentProjects[proj.id] = proj
-            building.visibleChanges += "Renovation interest"
+            building.visibleChanges += "${SimTime.formatDate(ctx.now)} — Renovation interest"
         }
     }
 

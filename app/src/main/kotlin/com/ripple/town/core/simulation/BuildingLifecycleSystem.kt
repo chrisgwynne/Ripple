@@ -2,6 +2,7 @@ package com.ripple.town.core.simulation
 
 import com.ripple.town.core.model.Building
 import com.ripple.town.core.model.EventType
+import com.ripple.town.core.model.SimTime
 import com.ripple.town.core.model.isHome
 
 /**
@@ -49,8 +50,8 @@ object BuildingLifecycleSystem {
             payer.spend(cost)
             val restored = ctx.rng.nextDouble(25.0, 45.0)
             building.condition = (building.condition + restored).coerceAtMost(100.0)
-            building.visibleChanges.removeAll { it == "Storm damage" }
-            building.visibleChanges += "Freshly repaired"
+            building.visibleChanges.removeAll { it.endsWith("Storm damage") }
+            building.visibleChanges += "${SimTime.formatDate(ctx.now)} — Freshly repaired"
             if (building.visibleChanges.size > 6) building.visibleChanges.removeAt(0)
             ctx.emit(
                 EventType.BUILDING_REPAIRED,

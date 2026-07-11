@@ -177,7 +177,7 @@ object NeedsSystem {
             val candidates = state.buildings.values.filter { it.condition > 20 }.sortedBy { it.id }
             val hit = ctx.rng.pickOrNull(candidates) ?: return
             hit.condition = (hit.condition - ctx.rng.nextDouble(6.0, 18.0)).coerceAtLeast(5.0)
-            hit.visibleChanges += "Storm damage"
+            hit.visibleChanges += "${SimTime.formatDate(ctx.now)} — Storm damage"
             val damage = ctx.emit(
                 com.ripple.town.core.model.EventType.WEATHER_DAMAGE,
                 "A storm battered ${hit.name}, leaving visible damage.",

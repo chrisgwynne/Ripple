@@ -337,7 +337,7 @@ object GoalSystem {
         building.abandoned = false
         building.ownerId = r.id
         building.condition = 70.0
-        building.visibleChanges += "New sign painted, windows cleaned"
+        building.visibleChanges += "${SimTime.formatDate(ctx.now)} — New sign painted, windows cleaned"
         r.wealth -= STARTUP_CAPITAL
         val name = "${r.surname}'s ${type.label}"
         val biz = Business(

@@ -106,6 +106,13 @@ fun BuildingSheetContent(world: WorldUi, buildingId: Long, viewModel: TownViewMo
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+        if (b.constructedAt != null) {
+            Text(
+                "Built ${SimTime.formatDateLong(b.constructedAt)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
         Text(
             "No record of previous tenants is kept yet — this building's history before its current use isn't tracked.",
             style = MaterialTheme.typography.labelSmall,
@@ -360,10 +367,10 @@ private fun nearbyBusinesses(world: WorldUi, b: com.ripple.town.data.BuildingUi)
 private data class TimelineEntry(val timeLabel: String, val description: String, val eventId: Long?, val major: Boolean)
 
 /**
- * Combines building-level cosmetic history (`visibleChanges`, which carry no timestamp) with
- * real timestamped building events into one chronological list. `visibleChanges` have no time
- * data on the model, so they're honestly rendered as "earlier" entries without a fabricated
- * date, ordered before the (correctly dated) event entries.
+ * Combines building-level cosmetic history (`visibleChanges`) with real timestamped building
+ * events into one chronological list. visibleChanges entries embed a date prefix of the form
+ * "d Mon • Year N — description"; entries from saves before this format have no separator and
+ * are shown as "Earlier".
  */
 private fun buildTimeline(b: com.ripple.town.data.BuildingUi, events: List<EventUi>): List<TimelineEntry> {
     val relevantTypes = setOf(
@@ -377,7 +384,11 @@ private fun buildTimeline(b: com.ripple.town.data.BuildingUi, events: List<Event
         .sortedByDescending { it.time }
         .take(10)
         .map { TimelineEntry(it.timeLabel, it.description, it.id, it.importance >= 45.0) }
-    val changeEntries = b.visibleChanges.map { TimelineEntry("Earlier", it, null, false) }
+    val changeEntries = b.visibleChanges.map { raw ->
+        val sep = raw.indexOf(" — ")
+        if (sep > 0) TimelineEntry(raw.substring(0, sep), raw.substring(sep + 3), null, false)
+        else TimelineEntry("Earlier", raw, null, false)
+    }
     return changeEntries + eventEntries
 }
 
