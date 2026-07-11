@@ -60,7 +60,10 @@ data class Relationship(
         fun keyOf(x: Long, y: Long): Long {
             val lo = minOf(x, y)
             val hi = maxOf(x, y)
-            return lo * 1_000_000L + hi
+            // Bit-pack: lo in upper 32 bits, hi in lower 32 bits.
+            // Supports up to ~2.1B unique IDs without collision; safe far beyond any realistic
+            // population size. Previous scheme (lo * 1_000_000 + hi) collided when hi >= 1_000_000.
+            return (lo shl 32) or (hi and 0xFFFFFFFFL)
         }
 
         fun create(x: Long, y: Long, kind: RelationshipKind = RelationshipKind.STRANGER): Relationship {

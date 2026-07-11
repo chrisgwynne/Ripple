@@ -59,8 +59,8 @@ object TownNeedsPlanner {
         val openJobs = state.businesses.values
             .filter { it.open }
             .sumOf { biz -> (biz.employeeCapacity - state.employeesOf(biz.id).size).coerceAtLeast(0) }
-        val unemployedAdults = adults - state.employments.values.count { it.active &&
-            state.resident(it.residentId)?.inTown == true }
+        val unemployedAdults = (adults - state.employments.values.count { it.active &&
+            state.resident(it.residentId)?.inTown == true }).coerceAtLeast(0)
 
         val retailBizCount = state.businesses.values.count { it.open &&
             it.type !in setOf(BusinessType.CLINIC, BusinessType.SCHOOL, BusinessType.TOWN_HALL,
@@ -82,7 +82,7 @@ object TownNeedsPlanner {
             ServiceType.HEALTHCARE  to pressure(ServiceType.HEALTHCARE, pop,              clinicCapacity),
             ServiceType.POLICE      to pressure(ServiceType.POLICE,     pop,              policeCapacity),
             ServiceType.FIRE        to pressure(ServiceType.FIRE,       pop,              fireCapacity),
-            ServiceType.EMPLOYMENT  to pressure(ServiceType.EMPLOYMENT, unemployedAdults.coerceAtLeast(0), openJobs),
+            ServiceType.EMPLOYMENT  to pressure(ServiceType.EMPLOYMENT, unemployedAdults, openJobs),
             ServiceType.RETAIL      to pressure(ServiceType.RETAIL,     retailDemand,     retailBizCount),
             ServiceType.PARKS       to pressure(ServiceType.PARKS,      pop,              parkCapacity)
         )

@@ -184,7 +184,7 @@ object PressureBridgeSystem {
                     val bizBuilding = state.building(biz.buildingId) ?: return@filter false
                     bizBuilding.centre().manhattan(hitBuilding.centre()) <= CRIME_PROXIMITY_TILES
                 }
-                .minByOrNull { biz -> state.building(biz.buildingId)!!.centre().manhattan(hitBuilding.centre()) }
+                .minByOrNull { biz -> state.building(biz.buildingId)?.centre()?.manhattan(hitBuilding.centre()) ?: Int.MAX_VALUE }
         } ?: return
         if (!target.open) return
 

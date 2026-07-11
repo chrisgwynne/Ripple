@@ -31,19 +31,20 @@ object DelayedEffectSystem {
                 effect.cancelled = true
                 continue
             }
-            // Decay while dormant
-            if (effect.decayPerDay > 0) {
+            // Decay while dormant — compute from original strength without mutating, so
+            // re-evaluating the same effect on a later tick doesn't compound the decay.
+            val effectiveStrength = if (effect.decayPerDay > 0) {
                 val daysWaiting = (ctx.now - effect.earliestAt).toDouble() / SimTime.MINUTES_PER_DAY
-                effect.strength = (effect.strength - effect.decayPerDay * daysWaiting).coerceAtLeast(0.0)
-                if (effect.strength <= 0.01) { effect.cancelled = true; continue }
-            }
+                (effect.strength - effect.decayPerDay * daysWaiting).coerceAtLeast(0.0)
+            } else effect.strength
+            if (effectiveStrength <= 0.01) { effect.cancelled = true; continue }
             if (!conditionHolds(ctx, effect)) {
                 // Condition not met right now; effect stays dormant until window closes.
                 continue
             }
-            // Windowed chance: roughly effect.strength spread over the window.
+            // Windowed chance: roughly effectiveStrength spread over the window.
             val windowTicks = ((effect.latestAt - effect.earliestAt) / SimTime.MINUTES_PER_TICK).coerceAtLeast(1)
-            val perTickChance = (effect.strength / windowTicks * 8.0).coerceIn(0.0005, 0.6)
+            val perTickChance = (effectiveStrength / windowTicks * 8.0).coerceIn(0.0005, 0.6)
             if (!ctx.rng.nextBoolean(perTickChance)) continue
 
             effect.applied = true

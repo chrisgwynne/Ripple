@@ -490,7 +490,9 @@ object DecisionSystem {
                 risk = 0.0, cost = 0.0, effort = 0.02, moralResistance = 0.0
             )
         } else {
-            val spot = openPublicSpot(state, hour) ?: state.buildings.values.first { it.type == BuildingType.PARK }
+            val spot = openPublicSpot(state, hour)
+                ?: state.buildings.values.firstOrNull { it.type == BuildingType.PARK }
+                ?: return out
             out += ScoredAction(
                 ActionKind.WANDER, spot.id, null, Activity.IDLE, 45L,
                 "Passing the time",
