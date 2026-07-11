@@ -277,7 +277,7 @@ data class WorldEventEntity(
     val importance: Double,
     /** Real-time epoch millis when the player last bookmarked this event; null if never tagged.
      *  Added in schema v2 via [RippleDatabase.MIGRATION_1_2]. */
-    val taggedAt: Long? = null
+    @ColumnInfo(name = "tagged_at") val taggedAt: Long? = null
 )
 
 @Entity(
